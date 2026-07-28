@@ -14,6 +14,32 @@ const DataStore = (() => {
   const GOALS_START_ROW = 15;
   const RECURRING_RANGE = 'R:AC'; // 12 cols
   const RECURRING_DATA_ROW = 2;
+  const CONFIG_SHEET = 'Config';
+  const CONFIG_DATA_ROW = 2;
+
+  const CAT_COLOR_DEFAULTS = {
+    'Transport':'#60a0f0','Meals':'#c8f060','Entertainment':'#ff6b6b','Groceries':'#ffaa44',
+    'Household':'#a78bfa','Medical':'#34d399','Utilities':'#f472b6','Auto':'#fb923c',
+    'Gas':'#fbbf24','Travel':'#22d3ee','Insurance':'#e879f9','Books':'#6ee7b7',
+    'Gifts':'#fca5a5','Self Care':'#c4b5fd','Administration':'#93c5fd','Gadget':'#818cf8',
+    'Home Repair':'#f87171','Investment':'#38bdf8','Income':'#4ade80','Mortgage':'#fb923c',
+  };
+  const ACCOUNT_CCY_DEFAULTS = {'USDIDR Pluang Timo':'USD','USDIDR Pluang Febri':'USD','Cash USD':'USD'};
+  const STOCK_TYPE_DEFAULTS = {'Star Stable Income Fund':'Reksa Dana',
+    'USDIDR':'Forex','USDIDR CIMB':'Forex','USDIDR Pluang Febri':'Forex','USDIDR Pluang Timo':'Forex',
+    'CHFIDR':'Forex',
+    'QQQ':'US Stock','JNJ':'US Stock','VYM':'US Stock','AAPL':'US Stock'};
+
+  const CONFIG_DEFAULTS = [
+    ...['Administration','Auto','Books','Cashback','Entertainment','Freelance','Gadget','Gas','Gifts','Groceries','Health','Home Repair','Household','Income','Insurance','Investment','Meals','Medical','Mortgage','Self Care','Transport','Travel','Utilities']
+      .map((name, i) => ({ kind: 'category', name, color: CAT_COLOR_DEFAULTS[name] || '', ccy: '', assetType: '', archived: false, sortOrder: i })),
+    ...['Bank','eWallet','Flazz','CC BCA']
+      .map((name, i) => ({ kind: 'pm', name, color: '', ccy: '', assetType: '', archived: false, sortOrder: i })),
+    ...['Star Stable Income Fund','USDIDR CIMB','USDIDR Pluang Febri','USDIDR Pluang Timo','USDIDR','CHFIDR','QQQ','JNJ','VYM','AAPL']
+      .map((name, i) => ({ kind: 'stock', name, color: '', ccy: '', assetType: STOCK_TYPE_DEFAULTS[name] || '', archived: false, sortOrder: i })),
+    ...['IDR CIMB','USDIDR Pluang Febri','USDIDR Pluang Timo','BCA','Cash IDR','Cash USD']
+      .map((name, i) => ({ kind: 'account', name, color: '', ccy: ACCOUNT_CCY_DEFAULTS[name] || '', assetType: '', archived: false, sortOrder: i })),
+  ];
 
   let spreadsheetId = localStorage.getItem(LS_SS_ID) || null;
   let opexGid = localStorage.getItem(LS_OPEX_GID) ? Number(localStorage.getItem(LS_OPEX_GID)) : null;
@@ -27,6 +53,7 @@ const DataStore = (() => {
       sheets: [
         { properties: { title: 'Opex', sheetId: 0 } },
         { properties: { title: 'Invest', sheetId: 1 } },
+        { properties: { title: CONFIG_SHEET, sheetId: 2 } },
       ],
     });
     spreadsheetId = created.spreadsheetId;
@@ -46,6 +73,13 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, 'Invest!J1:K7', [
       ['AAPL',''], ['JNJ',''], ['VYM',''], ['QQQ',''], ['CHF IDR',''], ['USD IDR',''], ['Star Stable',''],
     ]);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:G1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder',
+    ]]);
+    const configRows = CONFIG_DEFAULTS.map(it => [
+      it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder,
+    ]);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
     await SheetsClient.batchUpdate(spreadsheetId, [{
       repeatCell: {
         range: { sheetId: opexGid, startColumnIndex: 1, endColumnIndex: 2 },
@@ -340,6 +374,72 @@ const DataStore = (() => {
     return { status: 'ok', count: rows.length };
   }
 
+  // ── CONFIG (Categories / PMs / Assets / Accounts — "Config" tab) ──
+  async function ensureConfigSheetExists() {
+    const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+    const exists = (meta.sheets || []).some(s => s.properties.title === CONFIG_SHEET);
+    if (exists) return false;
+    await SheetsClient.batchUpdate(spreadsheetId, [{ addSheet: { properties: { title: CONFIG_SHEET } } }]);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:G1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder',
+    ]]);
+    return true;
+  }
+
+  async function handleGetConfig() {
+    const justCreated = await ensureConfigSheetExists();
+    if (justCreated) {
+      const rows = CONFIG_DEFAULTS.map(it => [
+        it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder,
+      ]);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+      return { status: 'ok', items: CONFIG_DEFAULTS };
+    }
+    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G`);
+    const rows = res.values || [];
+    if (rows.length === 0) {
+      // Header exists but no data rows (e.g. a Config tab created before this feature had defaults) — seed now.
+      const seedRows = CONFIG_DEFAULTS.map(it => [
+        it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder,
+      ]);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
+      return { status: 'ok', items: CONFIG_DEFAULTS };
+    }
+    const items = rows
+      .filter(r => r[1])
+      .map((r, idx) => ({
+        kind: String(r[0] || '').trim(),
+        name: String(r[1] || '').trim(),
+        color: String(r[2] || '').trim(),
+        ccy: String(r[3] || '').trim(),
+        assetType: String(r[4] || '').trim(),
+        archived: String(r[5] || '').trim().toUpperCase() === 'TRUE',
+        sortOrder: Number(r[6]) || idx,
+      }))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    return { status: 'ok', items };
+  }
+
+  async function handleConfig(data) {
+    const { action, items } = data;
+    if (action !== 'saveAll') return { status: 'error', message: 'Unknown action' };
+    if (!Array.isArray(items)) return { status: 'error', message: 'items must be an array' };
+    await ensureConfigSheetExists();
+    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G`);
+    if (items.length === 0) return { status: 'ok', count: 0 };
+    const rows = items.map((it, idx) => [
+      String(it.kind || '').slice(0, 20),
+      String(it.name || '').slice(0, 100),
+      String(it.color || '').slice(0, 20),
+      String(it.ccy || '').slice(0, 10),
+      String(it.assetType || '').slice(0, 20),
+      it.archived ? 'TRUE' : 'FALSE',
+      Number.isFinite(it.sortOrder) ? it.sortOrder : idx,
+    ]);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+    return { status: 'ok', count: rows.length };
+  }
+
   // ── REQUEST ROUTER (mirrors the old doGet/doPost dispatch) ───
   async function handleRequest(urlStr, opts) {
     await requireReady();
@@ -353,6 +453,7 @@ const DataStore = (() => {
       if (type === 'invest') return handleGetInvest(url.searchParams.get('since') || '2020-01-01');
       if (type === 'goals') return handleGetGoals();
       if (type === 'recurring') return handleGetRecurring();
+      if (type === 'config') return handleGetConfig();
       return { status: 'error', message: 'Unknown type' };
     }
 
@@ -361,8 +462,11 @@ const DataStore = (() => {
     if (data.type === 'invest') return handleInvest(data);
     if (data.type === 'goals') return handleGoals(data);
     if (data.type === 'recurring') return handleRecurring(data);
+    if (data.type === 'config') return handleConfig(data);
     return { status: 'error', message: 'Unknown type' };
   }
 
-  return { bootstrap, handleRequest };
+  function getSpreadsheetId() { return spreadsheetId; }
+
+  return { bootstrap, handleRequest, getSpreadsheetId };
 })();

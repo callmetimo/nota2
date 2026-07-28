@@ -39,14 +39,28 @@ body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:
 .nav-search-btn svg{width:20px;height:20px}
 .nav-more-btn svg{width:22px;height:22px}
 .nav-more-btn.sub-active{color:var(--text)}
-.more-menu-backdrop{display:none;position:fixed;inset:0;z-index:195}
-.more-menu-backdrop.open{display:block}
-.more-menu{position:fixed;bottom:calc(var(--bottom-nav-h) + 8px);right:12px;background:rgba(28,28,30,0.96);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:0.5px solid var(--border2);border-radius:14px;min-width:180px;z-index:196;transform:scale(0.85) translateY(12px);transform-origin:bottom right;opacity:0;pointer-events:none;transition:transform 0.2s cubic-bezier(.34,1.56,.64,1),opacity 0.15s}
-.more-menu.open{transform:scale(1) translateY(0);opacity:1;pointer-events:auto}
+
+/* PROFILE HUB — reuses the row/divider look the old "more menu" popover used */
 .more-menu-item{width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:none;border:none;color:var(--text);font-size:15px;font-weight:500;cursor:pointer;-webkit-tap-highlight-color:transparent;text-align:left;font-family:inherit}
 .more-menu-item:active{background:var(--accent-dim);color:var(--accent)}
 .more-menu-item svg{width:20px;height:20px;flex-shrink:0;color:var(--text2)}
 .more-menu-divider{height:0.5px;background:var(--border);margin:0}
+.profile-back-btn{background:none;border:none;color:var(--text2);display:flex;align-items:center;gap:4px;font-size:14px;cursor:pointer;padding:6px 0;margin-bottom:4px}
+.profile-back-btn svg{width:18px;height:18px}
+.config-section-header{display:flex;align-items:center;justify-content:space-between;margin-top:22px;margin-bottom:8px}
+.config-section-title{font-size:13px;font-weight:700}
+.config-add-btn{background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:4px 0}
+.config-row{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius-sm);padding:11px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.config-row:active{border-color:var(--accent)}
+.config-row-name{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500}
+.config-color-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+.config-row-meta{font-size:11px;color:var(--text2)}
+.config-archived-toggle{font-size:11px;color:var(--text2);background:none;border:none;cursor:pointer;padding:2px 0;text-decoration:underline}
+.config-archived-badge{font-size:10px;color:var(--text2);background:var(--bg3);padding:2px 8px;border-radius:20px}
+.account-info-card{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px}
+.account-info-row{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:0.5px solid var(--border)}
+.account-info-row:last-child{border-bottom:none}
+.account-info-label{color:var(--text2)}
 
 /* BOTTOM NAV */
 .bottom-nav{position:fixed;bottom:0;left:0;right:0;max-width:430px;margin:0 auto;background:rgba(0,0,0,0.88);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-top:0.5px solid var(--border);display:flex;align-items:center;justify-content:space-around;height:var(--bottom-nav-h);padding-bottom:env(safe-area-inset-bottom,0px);z-index:200}
@@ -70,7 +84,7 @@ body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:
 .page{display:none;padding:0 20px}
 .page.active{display:block}
 /* Non-home pages need their own scroll since body is overflow:hidden */
-#page-insights.active,#page-networth.active,#page-goals.active,#page-recurring.active{
+#page-insights.active,#page-networth.active,#page-goals.active,#page-recurring.active,#page-profile.active,#page-settings.active,#page-account.active{
   display:block;
   height:calc(100dvh - var(--header-height,80px) - var(--bottom-nav-h,56px));
   overflow-y:auto;
@@ -736,7 +750,13 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 
 <!-- NET WORTH -->
 <div class="page" id="page-networth">
-  <div style="padding:24px 0 14px;display:flex;align-items:center;justify-content:space-between">
+  <div style="padding:24px 0 0">
+    <button class="profile-back-btn" onclick="switchTab('profile', document.getElementById('nav-more'))">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="15 18 9 12 15 6"/></svg>
+      Profile
+    </button>
+  </div>
+  <div style="padding:0 0 14px;display:flex;align-items:center;justify-content:space-between">
     <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Net Worth</div>
   </div>
   <div class="form-section">
@@ -754,10 +774,145 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 
 <!-- GOALS PAGE -->
 <div class="page" id="page-goals">
-  <div style="padding:24px 0 14px;display:flex;align-items:center;justify-content:space-between">
+  <div style="padding:24px 0 0">
+    <button class="profile-back-btn" onclick="switchTab('profile', document.getElementById('nav-more'))">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="15 18 9 12 15 6"/></svg>
+      Profile
+    </button>
+  </div>
+  <div style="padding:0 0 14px;display:flex;align-items:center;justify-content:space-between">
     <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Financial Goals</div>
   </div>
   <div id="goalsListContainer"><div class="chart-loading">Loading…</div></div>
+</div>
+
+<!-- PROFILE HUB -->
+<div class="page" id="page-profile">
+  <div style="padding:24px 0 14px;display:flex;align-items:center;justify-content:space-between">
+    <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Profile</div>
+  </div>
+  <div class="form-section">
+    <button class="more-menu-item" onclick="switchTabFromMore('networth')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+      <span>Net Worth</span>
+    </button>
+    <div class="more-menu-divider"></div>
+    <button class="more-menu-item" onclick="switchTabFromMore('goals')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+      <span>Goals</span>
+    </button>
+    <div class="more-menu-divider"></div>
+    <button class="more-menu-item" onclick="switchTabFromMore('recurring')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+      <span>Recurring</span>
+    </button>
+    <div class="more-menu-divider"></div>
+    <button class="more-menu-item" onclick="switchTabFromMore('settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>Settings</span>
+    </button>
+    <div class="more-menu-divider"></div>
+    <button class="more-menu-item" onclick="switchTabFromMore('account')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>Account</span>
+    </button>
+  </div>
+</div>
+
+<!-- SETTINGS SUBPAGE -->
+<div class="page" id="page-settings">
+  <div style="padding:24px 0 4px">
+    <button class="profile-back-btn" onclick="switchTab('profile', document.getElementById('nav-more'))">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="15 18 9 12 15 6"/></svg>
+      Profile
+    </button>
+    <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Settings</div>
+  </div>
+  <div id="settingsListsContainer"><div class="chart-loading">Loading…</div></div>
+</div>
+
+<!-- ACCOUNT SUBPAGE -->
+<div class="page" id="page-account">
+  <div style="padding:24px 0 4px">
+    <button class="profile-back-btn" onclick="switchTab('profile', document.getElementById('nav-more'))">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="15 18 9 12 15 6"/></svg>
+      Profile
+    </button>
+    <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Account</div>
+  </div>
+  <div class="account-info-card" id="accountUsageCard">
+    <div class="account-info-row"><span class="account-info-label">Status</span><span>Signed in</span></div>
+    <div class="account-info-row"><span class="account-info-label">Sheet size</span><span id="acctInfoSize">Loading…</span></div>
+    <div class="account-info-row"><span class="account-info-label">Last modified</span><span id="acctInfoModified">Loading…</span></div>
+    <div class="account-info-row"><span class="account-info-label">Transactions</span><span id="acctInfoOpexCount">Loading…</span></div>
+    <div class="account-info-row"><span class="account-info-label">Investments</span><span id="acctInfoInvestCount">Loading…</span></div>
+  </div>
+  <button class="submit-btn" style="background:var(--bg3);color:var(--text)" onclick="Auth.signOut()">Sign Out</button>
+  <button class="delete-btn" onclick="openDeleteAccountConfirm1()">Delete Account &amp; Data</button>
+</div>
+
+<!-- Delete Account Confirm Modal (step 1) -->
+<div class="modal-overlay" id="deleteAccountModal1">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Delete Account &amp; Data?</div>
+    <p style="color:var(--text2);font-size:13px;margin:2px 0 14px">This moves your "Nota Data" Google Sheet to your Drive Trash and signs you out. You can recover it from Trash for about 30 days.</p>
+    <div class="modal-actions">
+      <button class="btn-delete" onclick="closeDeleteAccountModal1()">Cancel</button>
+      <button class="btn-save" onclick="openDeleteAccountConfirm2()">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Account Confirm Modal (step 2 — typed confirmation) -->
+<div class="modal-overlay" id="deleteAccountModal2">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Type DELETE to confirm</div>
+    <div class="form-group">
+      <input type="text" class="form-input" id="deleteAccountConfirmInput" placeholder="DELETE" autocomplete="off" oninput="_onDeleteAccountConfirmInput()">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-delete" onclick="closeDeleteAccountModal2()">Cancel</button>
+      <button class="btn-save" id="deleteAccountFinalBtn" disabled style="opacity:0.4" onclick="deleteAccountAndData()">Delete Permanently</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIG ITEM OVERLAY (Category / PM / Asset / Account) -->
+<div class="input-overlay" id="configItemOverlay" onclick="closeConfigItemOverlay()">
+  <div class="input-sheet" onclick="event.stopPropagation()">
+    <div class="input-sheet-handle-wrap" id="configItemSheetHandle"><div class="input-sheet-handle"></div></div>
+    <div style="padding:0 20px 20px">
+      <div style="font-size:20px;font-weight:700;letter-spacing:-0.3px;margin-bottom:18px" id="configItemOverlayTitle">New Category</div>
+      <input type="hidden" id="configItemKind">
+      <input type="hidden" id="configItemOrigName">
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-input" id="configItemName" maxlength="100" autocomplete="off">
+      </div>
+      <div class="form-group" id="configItemColorGroup" style="display:none">
+        <label class="form-label">Color</label>
+        <input type="color" class="form-input" id="configItemColor" style="height:44px;padding:4px;cursor:pointer">
+      </div>
+      <div class="form-group" id="configItemAssetTypeGroup" style="display:none">
+        <label class="form-label">Asset Type</label>
+        <select class="form-input" id="configItemAssetType">
+          <option value="Reksa Dana">Reksa Dana</option>
+          <option value="Forex">Forex</option>
+          <option value="US Stock">US Stock</option>
+        </select>
+      </div>
+      <div class="form-group" id="configItemCcyGroup" style="display:none">
+        <label class="goal-source-row" style="padding:9px 0">
+          <input type="checkbox" id="configItemUsdCheckbox">
+          <span style="font-size:14px">USD-denominated</span>
+        </label>
+      </div>
+      <button class="submit-btn expense" onclick="saveConfigItem()">Save</button>
+      <button class="btn-delete" style="width:100%;margin-top:8px" id="configItemArchiveBtn" onclick="toggleArchiveCurrentConfigItem()">Archive</button>
+    </div>
+  </div>
 </div>
 
 <!-- BOTTOM NAV -->
@@ -774,29 +929,10 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
   <button class="nav-btn nav-search-btn" id="nav-search" onclick="switchTab('search',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
   </button>
-  <button class="nav-btn nav-more-btn" id="nav-more" onclick="toggleMoreMenu()">
-    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+  <button class="nav-btn nav-more-btn" id="nav-more" onclick="switchTab('profile', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
   </button>
 </nav>
-
-<!-- MORE MENU -->
-<div class="more-menu-backdrop" id="moreBackdrop" onclick="closeMoreMenu()"></div>
-<div class="more-menu" id="moreMenu">
-  <button class="more-menu-item" onclick="switchTabFromMore('networth')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-    <span>Net Worth</span>
-  </button>
-  <div class="more-menu-divider"></div>
-  <button class="more-menu-item" onclick="switchTabFromMore('goals')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-    <span>Goals</span>
-  </button>
-  <div class="more-menu-divider"></div>
-  <button class="more-menu-item" onclick="switchTabFromMore('recurring')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-    <span>Recurring</span>
-  </button>
-</div>
 
 <!-- Recurring Prompt Modal -->
 <div class="modal-overlay" id="recurringPrompt">
@@ -890,7 +1026,13 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 
 <!-- Recurring Page -->
 <div class="page" id="page-recurring">
-  <div style="padding:24px 0 14px;display:flex;align-items:center;justify-content:space-between">
+  <div style="padding:24px 0 0">
+    <button class="profile-back-btn" onclick="switchTab('profile', document.getElementById('nav-more'))">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="15 18 9 12 15 6"/></svg>
+      Profile
+    </button>
+  </div>
+  <div style="padding:0 0 14px;display:flex;align-items:center;justify-content:space-between">
     <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Recurring</div>
   </div>
   <div id="recurringListContainer"></div>
@@ -1072,6 +1214,213 @@ const STOCK_TYPE = {'Star Stable Income Fund':'Reksa Dana',
   'USDIDR':'Forex','USDIDR CIMB':'Forex','USDIDR Pluang Febri':'Forex','USDIDR Pluang Timo':'Forex',
   'CHFIDR':'Forex',
   'QQQ':'US Stock','JNJ':'US Stock','VYM':'US Stock','AAPL':'US Stock'};
+
+// ── CONFIG (Categories / PMs / Assets / Accounts, user-editable via Settings) ──
+let CONFIG_ITEMS = [];
+
+async function fetchConfig() {
+  try {
+    const res = await fetch(apiGet('type=config'), { method: 'GET' });
+    const j = await res.json();
+    if (j.status === 'ok' && Array.isArray(j.items)) {
+      CONFIG_ITEMS = j.items;
+      applyConfigToGlobals();
+    }
+  } catch (e) { /* offline or first-run race — keep hardcoded defaults as fallback */ }
+}
+
+function applyConfigToGlobals() {
+  if (!CONFIG_ITEMS.length) return;
+  const byKind = k => CONFIG_ITEMS.filter(i => i.kind === k && !i.archived)
+    .sort((a, b) => a.sortOrder - b.sortOrder).map(i => i.name);
+
+  allCategories.length = 0; allCategories.push(...byKind('category'));
+  allPMs.length = 0;        allPMs.push(...byKind('pm'));
+  allStocks.length = 0;     allStocks.push(...byKind('stock'));
+  allAccounts.length = 0;   allAccounts.push(...byKind('account'));
+
+  Object.keys(CAT_COLORS).forEach(k => { if (k !== 'Other') delete CAT_COLORS[k]; });
+  CONFIG_ITEMS.filter(i => i.kind === 'category' && i.color).forEach(i => { CAT_COLORS[i.name] = i.color; });
+
+  Object.keys(ACCOUNT_CCY).forEach(k => delete ACCOUNT_CCY[k]);
+  CONFIG_ITEMS.filter(i => i.kind === 'account' && i.ccy === 'USD').forEach(i => { ACCOUNT_CCY[i.name] = 'USD'; });
+
+  Object.keys(STOCK_TYPE).forEach(k => delete STOCK_TYPE[k]);
+  CONFIG_ITEMS.filter(i => i.kind === 'stock' && i.assetType).forEach(i => { STOCK_TYPE[i.name] = i.assetType; });
+}
+
+async function saveConfigToServer() {
+  await fetchWithTimeout(APPS_SCRIPT_URL, {
+    method: 'POST', headers: {'Content-Type': 'text/plain'},
+    body: apiBody({ type: 'config', action: 'saveAll', items: CONFIG_ITEMS })
+  });
+  applyConfigToGlobals();
+}
+
+// ── SETTINGS PAGE (Config CRUD) ───────────────────────────────
+const CONFIG_KIND_LABELS = { category: 'Categories', pm: 'Payment Methods', stock: 'Assets', account: 'Accounts' };
+let settingsShowArchived = { category: false, pm: false, stock: false, account: false };
+
+function renderSettingsLists() {
+  const container = document.getElementById('settingsListsContainer');
+  if (!container) return;
+  const kinds = ['category', 'pm', 'stock', 'account'];
+  container.innerHTML = kinds.map(kind => {
+    const items = CONFIG_ITEMS.filter(i => i.kind === kind).sort((a,b) => a.sortOrder - b.sortOrder);
+    const active = items.filter(i => !i.archived);
+    const archived = items.filter(i => i.archived);
+    const showArchived = settingsShowArchived[kind];
+    const rowHtml = it => `<div class="config-row" onclick="openConfigItemOverlay('${kind}', ${JSON.stringify(it.name)})">
+      <div class="config-row-name">
+        ${it.color ? `<span class="config-color-dot" style="background:${it.color}"></span>` : ''}
+        <span>${it.name}</span>
+        ${it.archived ? '<span class="config-archived-badge">Archived</span>' : ''}
+      </div>
+      <span class="config-row-meta">${kind==='stock' ? (it.assetType||'') : (kind==='account' && it.ccy==='USD' ? 'USD' : '')}</span>
+    </div>`;
+    return `
+      <div class="config-section-header">
+        <div class="config-section-title">${CONFIG_KIND_LABELS[kind]}</div>
+        <button class="config-add-btn" onclick="openConfigItemOverlay('${kind}', null)">+ Add</button>
+      </div>
+      ${active.map(rowHtml).join('') || '<div style="color:var(--text2);font-size:13px;padding:8px 0">No items yet.</div>'}
+      ${archived.length ? `<button class="config-archived-toggle" onclick="settingsShowArchived['${kind}']=!settingsShowArchived['${kind}'];renderSettingsLists()">${showArchived ? 'Hide' : 'Show'} ${archived.length} archived</button>` : ''}
+      ${showArchived ? archived.map(rowHtml).join('') : ''}
+    `;
+  }).join('');
+}
+
+function _configFieldsForKind(kind) {
+  document.getElementById('configItemColorGroup').style.display = kind === 'category' ? 'block' : 'none';
+  document.getElementById('configItemAssetTypeGroup').style.display = kind === 'stock' ? 'block' : 'none';
+  document.getElementById('configItemCcyGroup').style.display = kind === 'account' ? 'block' : 'none';
+}
+
+function openConfigItemOverlay(kind, name) {
+  const item = name ? CONFIG_ITEMS.find(i => i.kind === kind && i.name === name) : null;
+  document.getElementById('configItemKind').value = kind;
+  document.getElementById('configItemOrigName').value = name || '';
+  document.getElementById('configItemOverlayTitle').textContent = item ? `Edit ${CONFIG_KIND_LABELS[kind].replace(/s$/, '')}` : `New ${CONFIG_KIND_LABELS[kind].replace(/s$/, '')}`;
+  document.getElementById('configItemName').value = item ? item.name : '';
+  document.getElementById('configItemColor').value = (item && item.color) || '#c8f060';
+  document.getElementById('configItemAssetType').value = (item && item.assetType) || 'Reksa Dana';
+  document.getElementById('configItemUsdCheckbox').checked = !!(item && item.ccy === 'USD');
+  document.getElementById('configItemArchiveBtn').style.display = item ? 'block' : 'none';
+  document.getElementById('configItemArchiveBtn').textContent = item && item.archived ? 'Unarchive' : 'Archive';
+  _configFieldsForKind(kind);
+  document.getElementById('configItemOverlay').classList.add('open');
+}
+
+function closeConfigItemOverlay() {
+  document.getElementById('configItemOverlay').classList.remove('open');
+}
+
+async function saveConfigItem() {
+  const kind = document.getElementById('configItemKind').value;
+  const origName = document.getElementById('configItemOrigName').value;
+  const name = document.getElementById('configItemName').value.trim();
+  if (!name) return;
+
+  const dup = CONFIG_ITEMS.find(i => i.kind === kind && !i.archived && i.name.toLowerCase() === name.toLowerCase() && i.name !== origName);
+  if (dup) { showToast('An active item with that name already exists', 'error'); return; }
+
+  const existing = origName ? CONFIG_ITEMS.find(i => i.kind === kind && i.name === origName) : null;
+  const color = kind === 'category' ? document.getElementById('configItemColor').value : '';
+  const assetType = kind === 'stock' ? document.getElementById('configItemAssetType').value : '';
+  const ccy = kind === 'account' && document.getElementById('configItemUsdCheckbox').checked ? 'USD' : '';
+
+  if (existing) {
+    existing.name = name; existing.color = color; existing.assetType = assetType; existing.ccy = ccy;
+  } else {
+    const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === kind).map(i => i.sortOrder));
+    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, archived: false, sortOrder: maxOrder + 1 });
+  }
+  closeConfigItemOverlay();
+  renderSettingsLists();
+  showToast('Saving…', 'loading');
+  await saveConfigToServer();
+  renderSettingsLists();
+  showToast('Saved', 'success');
+}
+
+async function toggleArchiveCurrentConfigItem() {
+  const kind = document.getElementById('configItemKind').value;
+  const origName = document.getElementById('configItemOrigName').value;
+  const existing = CONFIG_ITEMS.find(i => i.kind === kind && i.name === origName);
+  if (!existing) return;
+  existing.archived = !existing.archived;
+  closeConfigItemOverlay();
+  renderSettingsLists();
+  showToast(existing.archived ? 'Archived' : 'Unarchived', 'loading');
+  await saveConfigToServer();
+  renderSettingsLists();
+  showToast('Saved', 'success');
+}
+
+// ── ACCOUNT PAGE ───────────────────────────────────────────────
+async function loadAccountUsageInfo() {
+  const ssId = DataStore.getSpreadsheetId();
+  if (!ssId) return;
+  document.getElementById('acctInfoSize').textContent = 'Loading…';
+  document.getElementById('acctInfoModified').textContent = 'Loading…';
+  document.getElementById('acctInfoOpexCount').textContent = 'Loading…';
+  document.getElementById('acctInfoInvestCount').textContent = 'Loading…';
+  try {
+    const meta = await SheetsClient.getFileMeta(ssId);
+    const sizeKb = meta.size ? Math.round(Number(meta.size) / 1024) : null;
+    document.getElementById('acctInfoSize').textContent = sizeKb != null ? `${sizeKb} KB` : '—';
+    document.getElementById('acctInfoModified').textContent = meta.modifiedTime ? new Date(meta.modifiedTime).toLocaleString() : '—';
+  } catch (e) {
+    document.getElementById('acctInfoSize').textContent = '—';
+    document.getElementById('acctInfoModified').textContent = '—';
+  }
+  try {
+    const [opexRes, investRes] = await Promise.all([
+      SheetsClient.getValues(ssId, 'Opex!K2:K'),
+      SheetsClient.getValues(ssId, 'Invest!A2:A'),
+    ]);
+    document.getElementById('acctInfoOpexCount').textContent = String((opexRes.values || []).length);
+    document.getElementById('acctInfoInvestCount').textContent = String((investRes.values || []).length);
+  } catch (e) {
+    document.getElementById('acctInfoOpexCount').textContent = '—';
+    document.getElementById('acctInfoInvestCount').textContent = '—';
+  }
+}
+
+function openDeleteAccountConfirm1() {
+  document.getElementById('deleteAccountModal1').classList.add('open');
+}
+function closeDeleteAccountModal1() {
+  document.getElementById('deleteAccountModal1').classList.remove('open');
+}
+function openDeleteAccountConfirm2() {
+  closeDeleteAccountModal1();
+  document.getElementById('deleteAccountConfirmInput').value = '';
+  document.getElementById('deleteAccountFinalBtn').disabled = true;
+  document.getElementById('deleteAccountFinalBtn').style.opacity = '0.4';
+  document.getElementById('deleteAccountModal2').classList.add('open');
+}
+function closeDeleteAccountModal2() {
+  document.getElementById('deleteAccountModal2').classList.remove('open');
+}
+function _onDeleteAccountConfirmInput() {
+  const ok = document.getElementById('deleteAccountConfirmInput').value.trim() === 'DELETE';
+  const btn = document.getElementById('deleteAccountFinalBtn');
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? '1' : '0.4';
+}
+async function deleteAccountAndData() {
+  const btn = document.getElementById('deleteAccountFinalBtn');
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+  try {
+    const ssId = DataStore.getSpreadsheetId();
+    if (ssId) await SheetsClient.trashFile(ssId);
+  } catch (e) {
+    console.error('[account] trash failed', e);
+  }
+  Auth.signOut();
+}
 
 // ── LOCAL DATA (historical) ───────────────────────────────────
 const HIST = {opex:[], invest:[], txCat:{}, txPm:{}, stockType:{}, cashBalance:0, jhtBase:null};
@@ -1718,10 +2067,11 @@ function pnlDual(pnl, pnlPct, rate, color){
 function switchTab(tab, el) {
   closeInputOverlay();
   closeGoalsOverlay();
+  closeConfigItemOverlay();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('nav-more').classList.remove('sub-active');
-  const navBtn = document.getElementById('nav-'+tab);
+  const navBtn = tab === 'profile' ? document.getElementById('nav-more') : document.getElementById('nav-'+tab);
   if(navBtn) navBtn.classList.add('active');
   document.getElementById('page-'+tab).classList.add('active');
 
@@ -1754,6 +2104,12 @@ function switchTab(tab, el) {
   if(tab==='recurring'){
     renderRecurringList();
     fetchRecurring().then(() => renderRecurringList());
+  }
+  if(tab==='settings'){
+    fetchConfig().then(renderSettingsLists);
+  }
+  if(tab==='account'){
+    loadAccountUsageInfo();
   }
   if(tab==='search'){
     initSearchPage();
@@ -1815,6 +2171,7 @@ function closeInputOverlay() {
 // Attach directly — script runs after DOM is parsed, no DOMContentLoaded needed
 attachSwipeClose('inputSheetHandle', closeInputOverlay);
 attachSwipeClose('goalsSheetHandle', closeGoalsOverlay);
+attachSwipeClose('configItemSheetHandle', closeConfigItemOverlay);
 
 function openInputFromHome() {
   openInputOverlay();
@@ -4532,6 +4889,11 @@ initDatePicker('inputDateRawI','inputDateDisplayI','inputDateTextI');
 window.addEventListener('DOMContentLoaded', async () => {
   const isHome = () => document.getElementById('page-home').classList.contains('active');
 
+  // Fire-and-forget: repopulates allCategories/allPMs/allStocks/allAccounts/CAT_COLORS/
+  // ACCOUNT_CCY/STOCK_TYPE from the user's Config sheet once it resolves. Any picker/lookup
+  // that runs before this resolves just sees the hardcoded defaults for a moment.
+  fetchConfig();
+
   // Reliable tap-to-edit on mobile: inline onclick is swallowed by iOS
   // -webkit-overflow-scrolling:touch scroll layers. Use touchstart/touchend
   // event delegation on the container to detect taps vs scrolls.
@@ -4969,22 +5331,10 @@ async function toggleGoalComplete() {
   }
 }
 
-// ── MORE MENU ─────────────────────────────────────────────────
-function toggleMoreMenu() {
-  const menu = document.getElementById('moreMenu');
-  if (menu.classList.contains('open')) { closeMoreMenu(); } else { openMoreMenu(); }
-}
-function openMoreMenu() {
-  document.getElementById('moreMenu').classList.add('open');
-  document.getElementById('moreBackdrop').classList.add('open');
-}
-function closeMoreMenu() {
-  document.getElementById('moreMenu').classList.remove('open');
-  document.getElementById('moreBackdrop').classList.remove('open');
-}
+// ── PROFILE HUB NAVIGATION ────────────────────────────────────
 function switchTabFromMore(tab) {
-  closeMoreMenu();
   switchTab(tab, null);
+  document.getElementById('nav-more').classList.remove('active');
   document.getElementById('nav-more').classList.add('sub-active');
 }
 

@@ -102,7 +102,21 @@ const Auth = (() => {
     // selection, so no auto-attempt here to avoid surprise popups.
   }
 
-  return { start, signIn, getAccessToken, ready };
+  function signOut() {
+    try {
+      if (accessToken && google.accounts?.oauth2?.revoke) {
+        google.accounts.oauth2.revoke(accessToken, () => {});
+      }
+    } catch (err) { console.warn('[auth] revoke failed', err); }
+    accessToken = null;
+    tokenExpiresAt = 0;
+    localStorage.removeItem('notaPublic_spreadsheetId');
+    localStorage.removeItem('notaPublic_opexSheetId');
+    localStorage.removeItem('notaPublic_investSheetId');
+    location.reload();
+  }
+
+  return { start, signIn, signOut, getAccessToken, ready };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

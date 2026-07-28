@@ -5,6 +5,7 @@
 
 const SheetsClient = (() => {
   const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
+  const DRIVE_BASE = 'https://www.googleapis.com/drive/v3/files';
 
   async function authedFetch(url, opts = {}) {
     const token = await Auth.getAccessToken();
@@ -60,5 +61,24 @@ const SheetsClient = (() => {
     });
   }
 
-  return { create, batchUpdate, getValues, updateValues, appendValues, clearValues };
+  function getSpreadsheetMeta(spreadsheetId) {
+    return authedFetch(`${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties`);
+  }
+
+  function trashFile(fileId) {
+    return authedFetch(`${DRIVE_BASE}/${fileId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashed: true }),
+    });
+  }
+
+  function getFileMeta(fileId) {
+    return authedFetch(`${DRIVE_BASE}/${fileId}?fields=size,modifiedTime`);
+  }
+
+  return {
+    create, batchUpdate, getValues, updateValues, appendValues, clearValues,
+    getSpreadsheetMeta, trashFile, getFileMeta,
+  };
 })();

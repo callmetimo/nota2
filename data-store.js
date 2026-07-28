@@ -10,10 +10,12 @@ const DataStore = (() => {
   const LS_INVEST_GID = 'notaPublic_investSheetId';
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const GOAL_COL_LETTER_START = 'J'; // J:P (7 cols)
-  const GOALS_START_ROW = 15;
-  const RECURRING_RANGE = 'R:AC'; // 12 cols
-  const RECURRING_DATA_ROW = 2;
+  const STOCK_PRICES_SHEET = 'Stock Prices';
+  const GOALS_SHEET = 'Goals';
+  const RECURRING_SHEET = 'Recurring';
+  const GOALS_START_ROW = 2;     // Goals sheet: header row 1, data from row 2
+  const RECURRING_DATA_ROW = 2;  // Recurring sheet: header row 1, data from row 2
+  const OLD_GOALS_START_ROW = 15; // pre-split location, used only during migration
   const CONFIG_SHEET = 'Config';
   const CONFIG_DATA_ROW = 2;
 
@@ -70,6 +72,7 @@ const DataStore = (() => {
       localStorage.setItem(LS_SS_ID, spreadsheetId);
       if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
       if (investSheet) localStorage.setItem(LS_INVEST_GID, String(investSheet.properties.sheetId));
+      await migrateToSplitSheets(meta);
       return;
     }
 
@@ -79,6 +82,9 @@ const DataStore = (() => {
         { properties: { title: 'Opex', sheetId: 0 } },
         { properties: { title: 'Invest', sheetId: 1 } },
         { properties: { title: CONFIG_SHEET, sheetId: 2 } },
+        { properties: { title: STOCK_PRICES_SHEET, sheetId: 3 } },
+        { properties: { title: GOALS_SHEET, sheetId: 4 } },
+        { properties: { title: RECURRING_SHEET, sheetId: 5 } },
       ],
     });
     spreadsheetId = created.spreadsheetId;
@@ -95,9 +101,16 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, 'Invest!A1:H1', [[
       'Date','Stock','Type','Action','Account','Lot','Price','TotalIdr',
     ]]);
-    await SheetsClient.updateValues(spreadsheetId, 'Invest!J1:K7', [
+    await SheetsClient.updateValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A1:B1`, [['Label', 'Price']]);
+    await SheetsClient.updateValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A2:B8`, [
       ['AAPL',''], ['JNJ',''], ['VYM',''], ['QQQ',''], ['CHF IDR',''], ['USD IDR',''], ['Star Stable',''],
     ]);
+    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:G1`, [[
+      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate',
+    ]]);
+    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
+      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
+    ]]);
     await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:G1`, [[
       'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder',
     ]]);
@@ -112,6 +125,78 @@ const DataStore = (() => {
         fields: 'userEnteredFormat.numberFormat',
       },
     }]);
+  }
+
+  // ── MIGRATION: split Invest's prices/goals/recurring blocks into their own sheets ──
+  // Idempotent and resumable: each block checks whether its destination sheet already
+  // has a header before copying, so a migration interrupted partway (tab closed, network
+  // drop) just re-attempts whichever blocks didn't finish, next time bootstrap() runs.
+  async function migrateToSplitSheets(meta) {
+    const titles = (meta.sheets || []).map(s => s.properties.title);
+    const missing = [STOCK_PRICES_SHEET, GOALS_SHEET, RECURRING_SHEET].filter(t => !titles.includes(t));
+    if (missing.length) {
+      await SheetsClient.batchUpdate(spreadsheetId, missing.map(title => ({ addSheet: { properties: { title } } })));
+    }
+    await migratePricesBlock();
+    await migrateGoalsBlock();
+    await migrateRecurringBlock();
+  }
+
+  async function sheetHasHeader(sheetName) {
+    const res = await SheetsClient.getValues(spreadsheetId, `${sheetName}!A1`);
+    return !!(res.values && res.values[0] && res.values[0][0]);
+  }
+
+  async function migratePricesBlock() {
+    if (await sheetHasHeader(STOCK_PRICES_SHEET)) return;
+    const old = await SheetsClient.getValues(spreadsheetId, 'Invest!J1:K7');
+    const rows = old.values || [];
+    await SheetsClient.updateValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A1:B1`, [['Label', 'Price']]);
+    if (rows.length) {
+      await SheetsClient.updateValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A2:B${1 + rows.length}`, rows);
+    }
+    await SheetsClient.clearValues(spreadsheetId, 'Invest!J1:K7');
+  }
+
+  async function migrateGoalsBlock() {
+    if (await sheetHasHeader(GOALS_SHEET)) return;
+    const old = await SheetsClient.getValues(spreadsheetId, `Invest!J${OLD_GOALS_START_ROW}:P`);
+    const dataRows = (old.values || []).filter(r => r && r[0]);
+    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:G1`, [[
+      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate',
+    ]]);
+    if (dataRows.length) {
+      await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A2:G${1 + dataRows.length}`, dataRows);
+    }
+    await SheetsClient.clearValues(spreadsheetId, `Invest!J${OLD_GOALS_START_ROW}:P`);
+  }
+
+  async function migrateRecurringBlock() {
+    if (await sheetHasHeader(RECURRING_SHEET)) return;
+    const old = await SheetsClient.getValues(spreadsheetId, 'Invest!R1:AC');
+    const oldRows = old.values || [];
+    const header = (oldRows[0] && oldRows[0][0]) ? oldRows[0] : [
+      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
+    ];
+    const dataRows = oldRows.slice(1).filter(r => r && r[0]);
+    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [header]);
+    if (dataRows.length) {
+      await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A2:L${1 + dataRows.length}`, dataRows);
+    }
+    await SheetsClient.clearValues(spreadsheetId, 'Invest!R1:AC');
+  }
+
+  // One-time action (triggered from Settings) that installs live GOOGLEFINANCE formulas
+  // into the Stock Prices sheet. Re-running is harmless — it just rewrites the same formulas.
+  async function installLivePriceFormulas() {
+    await SheetsClient.updateValues(spreadsheetId, `${STOCK_PRICES_SHEET}!B2:B7`, [
+      ['=GOOGLEFINANCE("NASDAQ:AAPL","price")'],
+      ['=GOOGLEFINANCE("NYSE:JNJ","price")'],
+      ['=GOOGLEFINANCE("NYSEARCA:VYM","price")'],
+      ['=GOOGLEFINANCE("NASDAQ:QQQ","price")'],
+      ['=GOOGLEFINANCE("CURRENCY:CHFIDR")'],
+      ['=GOOGLEFINANCE("CURRENCY:USDIDR")'],
+    ], 'USER_ENTERED');
   }
 
   async function requireReady() {
@@ -321,7 +406,7 @@ const DataStore = (() => {
 
   // ── PRICES ────────────────────────────────────────────────────
   async function handleGetPrices() {
-    const res = await SheetsClient.getValues(spreadsheetId, 'Invest!J1:K7');
+    const res = await SheetsClient.getValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A2:B8`);
     const range = res.values || [];
     const labelMap = {
       'AAPL': 'AAPL', 'JNJ': 'JNJ', 'VYM': 'VYM', 'QQQ': 'QQQ',
@@ -340,9 +425,9 @@ const DataStore = (() => {
     return { status: 'ok', prices, cashBalance, ts: new Date().toISOString() };
   }
 
-  // ── GOALS (Invest!J15:P) ──────────────────────────────────────
+  // ── GOALS (Goals!A2:G) ─────────────────────────────────────────
   async function handleGetGoals() {
-    const res = await SheetsClient.getValues(spreadsheetId, `Invest!J${GOALS_START_ROW}:P`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${GOALS_SHEET}!A${GOALS_START_ROW}:G`);
     const data = res.values || [];
     const goals = [];
     data.forEach((row, idx) => {
@@ -363,7 +448,7 @@ const DataStore = (() => {
   }
 
   async function findNextGoalRow() {
-    const res = await SheetsClient.getValues(spreadsheetId, `Invest!J${GOALS_START_ROW}:J`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${GOALS_SHEET}!A${GOALS_START_ROW}:A`);
     const col = res.values || [];
     let lastFilledOffset = -1;
     col.forEach((row, i) => { if (String(row[0] || '').trim()) lastFilledOffset = i; });
@@ -374,7 +459,7 @@ const DataStore = (() => {
     const { action, rowNum, name, startDate, endDate, targetAmount, sources, completed, completedDate } = data;
     if (action === 'delete') {
       if (!rowNum || rowNum < GOALS_START_ROW) return { status: 'error', message: 'Invalid rowNum' };
-      await SheetsClient.clearValues(spreadsheetId, `Invest!J${rowNum}:P${rowNum}`);
+      await SheetsClient.clearValues(spreadsheetId, `${GOALS_SHEET}!A${rowNum}:G${rowNum}`);
       return { status: 'ok' };
     }
     const sourcesStr = Array.isArray(sources) ? sources.join(', ') : (sources || '');
@@ -383,13 +468,13 @@ const DataStore = (() => {
       sourcesStr, completed ? 'TRUE' : 'FALSE', completedDate || '',
     ];
     const targetRow = rowNum || await findNextGoalRow();
-    await SheetsClient.updateValues(spreadsheetId, `Invest!J${targetRow}:P${targetRow}`, [rowData]);
+    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A${targetRow}:G${targetRow}`, [rowData]);
     return { status: 'ok', rowNum: targetRow };
   }
 
-  // ── RECURRING (Invest!R:AC) ───────────────────────────────────
+  // ── RECURRING (Recurring!A2:L) ─────────────────────────────────
   async function handleGetRecurring() {
-    const res = await SheetsClient.getValues(spreadsheetId, `Invest!R${RECURRING_DATA_ROW}:AC`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:L`);
     const data = res.values || [];
     const rules = [];
     data.forEach(row => {
@@ -413,14 +498,14 @@ const DataStore = (() => {
     if (action !== 'saveAll') return { status: 'error', message: 'Unknown action' };
     if (!Array.isArray(rules)) return { status: 'error', message: 'rules must be an array' };
 
-    const header = await SheetsClient.getValues(spreadsheetId, 'Invest!R1:AC1');
+    const header = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`);
     if (!(header.values && header.values[0] && header.values[0][0])) {
-      await SheetsClient.updateValues(spreadsheetId, 'Invest!R1:AC1', [[
+      await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
         'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
       ]]);
     }
 
-    await SheetsClient.clearValues(spreadsheetId, `Invest!R${RECURRING_DATA_ROW}:AC`);
+    await SheetsClient.clearValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:L`);
     if (rules.length === 0) return { status: 'ok', count: 0 };
 
     const rows = rules.map(r => [
@@ -429,7 +514,7 @@ const DataStore = (() => {
       String(r.notes || '').slice(0, 500), Number(r.dayOfMonth) || 1, r.active ? 'TRUE' : 'FALSE',
       String(r.lastFired || '').slice(0, 7), '', String(r.endMonth || '').slice(0, 7),
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `Invest!R${RECURRING_DATA_ROW}:AC${RECURRING_DATA_ROW + rows.length - 1}`, rows);
+    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:L${RECURRING_DATA_ROW + rows.length - 1}`, rows);
     return { status: 'ok', count: rows.length };
   }
 
@@ -528,5 +613,5 @@ const DataStore = (() => {
 
   function getSpreadsheetId() { return spreadsheetId; }
 
-  return { bootstrap, handleRequest, getSpreadsheetId };
+  return { bootstrap, handleRequest, getSpreadsheetId, installLivePriceFormulas };
 })();

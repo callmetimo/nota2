@@ -828,6 +828,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     </button>
     <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Settings</div>
   </div>
+  <button class="submit-btn" style="background:var(--bg3);color:var(--text);margin-bottom:16px" onclick="installLivePrices()">Enable live stock prices (GOOGLEFINANCE)</button>
   <div id="settingsListsContainer"><div class="chart-loading">Loading…</div></div>
 </div>
 
@@ -1264,6 +1265,15 @@ let settingsShowArchived = { category: false, pm: false, stock: false, account: 
 // HTML attribute — escape & and " so the browser decodes them back before the JS parses it.
 function jsAttr(v) {
   return JSON.stringify(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+async function installLivePrices() {
+  try {
+    await DataStore.installLivePriceFormulas();
+    showToast('Live stock prices enabled', 'success');
+  } catch (e) {
+    showToast('Could not enable live prices: ' + e.message, 'error');
+  }
 }
 
 function renderSettingsLists() {

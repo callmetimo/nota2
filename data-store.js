@@ -8,6 +8,7 @@ const DataStore = (() => {
   const LS_SS_ID = 'notaPublic_spreadsheetId';
   const LS_OPEX_GID = 'notaPublic_opexSheetId';
   const LS_INVEST_GID = 'notaPublic_investSheetId';
+  const LS_SPLIT_MIGRATED = 'notaPublic_splitMigratedV1';
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const STOCK_PRICES_SHEET = 'Stock Prices';
@@ -60,7 +61,17 @@ const DataStore = (() => {
   }
 
   async function bootstrap() {
-    if (spreadsheetId) return; // already set up on this browser
+    if (spreadsheetId) {
+      // Already set up on this browser in a prior session — still worth a one-time
+      // check for the sheet-split migration, since that shipped after many users
+      // already had spreadsheetId cached (which used to skip this whole function).
+      if (!localStorage.getItem(LS_SPLIT_MIGRATED)) {
+        const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+        await migrateToSplitSheets(meta);
+        localStorage.setItem(LS_SPLIT_MIGRATED, '1');
+      }
+      return;
+    }
 
     const existing = await findExistingSpreadsheet();
     if (existing) {
@@ -73,6 +84,7 @@ const DataStore = (() => {
       if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
       if (investSheet) localStorage.setItem(LS_INVEST_GID, String(investSheet.properties.sheetId));
       await migrateToSplitSheets(meta);
+      localStorage.setItem(LS_SPLIT_MIGRATED, '1');
       return;
     }
 
@@ -94,6 +106,7 @@ const DataStore = (() => {
     localStorage.setItem(LS_SS_ID, spreadsheetId);
     localStorage.setItem(LS_OPEX_GID, String(opexGid));
     localStorage.setItem(LS_INVEST_GID, String(investGid));
+    localStorage.setItem(LS_SPLIT_MIGRATED, '1');
 
     await SheetsClient.updateValues(spreadsheetId, 'Opex!A1:K1', [[
       'Date','Month','Category','Transaction','PM','Income','Expense','Notes','Deleted','Future','TxID',

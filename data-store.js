@@ -19,25 +19,22 @@ const DataStore = (() => {
 
   const CAT_COLOR_DEFAULTS = {
     'Transport':'#60a0f0','Meals':'#c8f060','Entertainment':'#ff6b6b','Groceries':'#ffaa44',
-    'Household':'#a78bfa','Medical':'#34d399','Utilities':'#f472b6','Auto':'#fb923c',
-    'Gas':'#fbbf24','Travel':'#22d3ee','Insurance':'#e879f9','Books':'#6ee7b7',
-    'Gifts':'#fca5a5','Self Care':'#c4b5fd','Administration':'#93c5fd','Gadget':'#818cf8',
-    'Home Repair':'#f87171','Investment':'#38bdf8','Income':'#4ade80','Mortgage':'#fb923c',
+    'Household':'#a78bfa','Medical':'#34d399','Utilities':'#f472b6',
+    'Gas':'#fbbf24','Travel':'#22d3ee','Insurance':'#e879f9',
+    'Gifts':'#fca5a5','Self Care':'#c4b5fd',
+    'Home Repair':'#f87171','Income':'#4ade80',
   };
-  const ACCOUNT_CCY_DEFAULTS = {'USDIDR Pluang Timo':'USD','USDIDR Pluang Febri':'USD','Cash USD':'USD'};
-  const STOCK_TYPE_DEFAULTS = {'Star Stable Income Fund':'Reksa Dana',
-    'USDIDR':'Forex','USDIDR CIMB':'Forex','USDIDR Pluang Febri':'Forex','USDIDR Pluang Timo':'Forex',
-    'CHFIDR':'Forex',
-    'QQQ':'US Stock','JNJ':'US Stock','VYM':'US Stock','AAPL':'US Stock'};
+  const ACCOUNT_CCY_DEFAULTS = {'USD CIMB':'USD'};
+  const STOCK_TYPE_DEFAULTS = {'USDIDR CIMB':'Forex'};
 
   const CONFIG_DEFAULTS = [
-    ...['Administration','Auto','Books','Cashback','Entertainment','Freelance','Gadget','Gas','Gifts','Groceries','Health','Home Repair','Household','Income','Insurance','Investment','Meals','Medical','Mortgage','Self Care','Transport','Travel','Utilities']
+    ...['Entertainment','Gas','Gifts','Groceries','Home Repair','Household','Income','Insurance','Meals','Medical','Self Care','Transport','Travel','Utilities']
       .map((name, i) => ({ kind: 'category', name, color: CAT_COLOR_DEFAULTS[name] || '', ccy: '', assetType: '', archived: false, sortOrder: i })),
-    ...['Bank','eWallet','Flazz','CC BCA']
+    ...['BCA','CIMB Niaga','eWallet','Flazz']
       .map((name, i) => ({ kind: 'pm', name, color: '', ccy: '', assetType: '', archived: false, sortOrder: i })),
-    ...['Star Stable Income Fund','USDIDR CIMB','USDIDR Pluang Febri','USDIDR Pluang Timo','USDIDR','CHFIDR','QQQ','JNJ','VYM','AAPL']
+    ...['USDIDR CIMB']
       .map((name, i) => ({ kind: 'stock', name, color: '', ccy: '', assetType: STOCK_TYPE_DEFAULTS[name] || '', archived: false, sortOrder: i })),
-    ...['IDR CIMB','USDIDR Pluang Febri','USDIDR Pluang Timo','BCA','Cash IDR','Cash USD']
+    ...['IDR CIMB','USD CIMB','IDR BCA','IDR Maybank']
       .map((name, i) => ({ kind: 'account', name, color: '', ccy: ACCOUNT_CCY_DEFAULTS[name] || '', assetType: '', archived: false, sortOrder: i })),
   ];
 

@@ -910,7 +910,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         </label>
       </div>
       <button class="submit-btn expense" onclick="saveConfigItem()">Save</button>
-      <button class="btn-delete" style="width:100%;margin-top:8px" id="configItemArchiveBtn" onclick="toggleArchiveCurrentConfigItem()">Archive</button>
+      <button class="btn-delete" style="width:100%;margin-top:8px" id="configItemArchiveBtn" onclick="toggleArchiveCurrentConfigItem()">Delete</button>
     </div>
   </div>
 </div>
@@ -1194,26 +1194,23 @@ function attachSwipeClose(handleId, closeFn, threshold = 60) {
 }
 document.getElementById('appVersionLabel').textContent = APP_VERSION;
 
-const allCategories = ['Administration','Auto','Books','Cashback','Entertainment','Freelance','Gadget','Gas','Gifts','Groceries','Health','Home Repair','Household','Income','Insurance','Investment','Meals','Medical','Mortgage','Self Care','Transport','Travel','Utilities'];
-const allPMs = ['Bank','eWallet','Flazz','CC BCA'];
-const allStocks = ['Star Stable Income Fund','USDIDR CIMB','USDIDR Pluang Febri','USDIDR Pluang Timo','USDIDR','CHFIDR','QQQ','JNJ','VYM','AAPL'];
-const allAccounts = ['IDR CIMB','USDIDR Pluang Febri','USDIDR Pluang Timo','BCA','Cash IDR','Cash USD'];
+const allCategories = ['Entertainment','Gas','Gifts','Groceries','Home Repair','Household','Income','Insurance','Meals','Medical','Self Care','Transport','Travel','Utilities'];
+const allPMs = ['BCA','CIMB Niaga','eWallet','Flazz'];
+const allStocks = ['USDIDR CIMB'];
+const allAccounts = ['IDR CIMB','USD CIMB','IDR BCA','IDR Maybank'];
 
 const CAT_COLORS = {
   'Transport':'#60a0f0','Meals':'#c8f060','Entertainment':'#ff6b6b','Groceries':'#ffaa44',
-  'Household':'#a78bfa','Medical':'#34d399','Utilities':'#f472b6','Auto':'#fb923c',
-  'Gas':'#fbbf24','Travel':'#22d3ee','Insurance':'#e879f9','Books':'#6ee7b7',
-  'Gifts':'#fca5a5','Self Care':'#c4b5fd','Administration':'#93c5fd','Gadget':'#818cf8',
-  'Home Repair':'#f87171','Investment':'#38bdf8','Income':'#4ade80','Mortgage':'#fb923c',
+  'Household':'#a78bfa','Medical':'#34d399','Utilities':'#f472b6',
+  'Gas':'#fbbf24','Travel':'#22d3ee','Insurance':'#e879f9',
+  'Gifts':'#fca5a5','Self Care':'#c4b5fd',
+  'Home Repair':'#f87171','Income':'#4ade80',
   'Other':'#6b7280'
 };
 
-const ACCOUNT_CCY = {'USDIDR Pluang Timo':'USD','USDIDR Pluang Febri':'USD','Cash USD':'USD'};
+const ACCOUNT_CCY = {'USD CIMB':'USD'};
 
-const STOCK_TYPE = {'Star Stable Income Fund':'Reksa Dana',
-  'USDIDR':'Forex','USDIDR CIMB':'Forex','USDIDR Pluang Febri':'Forex','USDIDR Pluang Timo':'Forex',
-  'CHFIDR':'Forex',
-  'QQQ':'US Stock','JNJ':'US Stock','VYM':'US Stock','AAPL':'US Stock'};
+const STOCK_TYPE = {'USDIDR CIMB':'Forex'};
 
 // ── CONFIG (Categories / PMs / Assets / Accounts, user-editable via Settings) ──
 let CONFIG_ITEMS = [];
@@ -1274,7 +1271,7 @@ function renderSettingsLists() {
       <div class="config-row-name">
         ${it.color ? `<span class="config-color-dot" style="background:${it.color}"></span>` : ''}
         <span>${it.name}</span>
-        ${it.archived ? '<span class="config-archived-badge">Archived</span>' : ''}
+        ${it.archived ? '<span class="config-archived-badge">Deleted</span>' : ''}
       </div>
       <span class="config-row-meta">${kind==='stock' ? (it.assetType||'') : (kind==='account' && it.ccy==='USD' ? 'USD' : '')}</span>
     </div>`;
@@ -1284,7 +1281,7 @@ function renderSettingsLists() {
         <button class="config-add-btn" onclick="openConfigItemOverlay('${kind}', null)">+ Add</button>
       </div>
       ${active.map(rowHtml).join('') || '<div style="color:var(--text2);font-size:13px;padding:8px 0">No items yet.</div>'}
-      ${archived.length ? `<button class="config-archived-toggle" onclick="settingsShowArchived['${kind}']=!settingsShowArchived['${kind}'];renderSettingsLists()">${showArchived ? 'Hide' : 'Show'} ${archived.length} archived</button>` : ''}
+      ${archived.length ? `<button class="config-archived-toggle" onclick="settingsShowArchived['${kind}']=!settingsShowArchived['${kind}'];renderSettingsLists()">${showArchived ? 'Hide' : 'Show'} ${archived.length} deleted</button>` : ''}
       ${showArchived ? archived.map(rowHtml).join('') : ''}
     `;
   }).join('');
@@ -1306,7 +1303,7 @@ function openConfigItemOverlay(kind, name) {
   document.getElementById('configItemAssetType').value = (item && item.assetType) || 'Reksa Dana';
   document.getElementById('configItemUsdCheckbox').checked = !!(item && item.ccy === 'USD');
   document.getElementById('configItemArchiveBtn').style.display = item ? 'block' : 'none';
-  document.getElementById('configItemArchiveBtn').textContent = item && item.archived ? 'Unarchive' : 'Archive';
+  document.getElementById('configItemArchiveBtn').textContent = item && item.archived ? 'Restore' : 'Delete';
   _configFieldsForKind(kind);
   document.getElementById('configItemOverlay').classList.add('open');
 }
@@ -1348,10 +1345,11 @@ async function toggleArchiveCurrentConfigItem() {
   const origName = document.getElementById('configItemOrigName').value;
   const existing = CONFIG_ITEMS.find(i => i.kind === kind && i.name === origName);
   if (!existing) return;
+  if (!existing.archived && !confirm(`Delete "${existing.name}"? Past transactions keep showing it, but it won't appear as a picker option anymore.`)) return;
   existing.archived = !existing.archived;
   closeConfigItemOverlay();
   renderSettingsLists();
-  showToast(existing.archived ? 'Archived' : 'Unarchived', 'loading');
+  showToast(existing.archived ? 'Deleted' : 'Restored', 'loading');
   await saveConfigToServer();
   renderSettingsLists();
   showToast('Saved', 'success');

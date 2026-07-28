@@ -77,8 +77,13 @@ const SheetsClient = (() => {
     return authedFetch(`${DRIVE_BASE}/${fileId}?fields=size,modifiedTime`);
   }
 
+  function findFiles(query) {
+    const params = new URLSearchParams({ q: query, fields: 'files(id,name,createdTime,trashed)', spaces: 'drive' });
+    return authedFetch(`${DRIVE_BASE}?${params.toString()}`);
+  }
+
   return {
     create, batchUpdate, getValues, updateValues, appendValues, clearValues,
-    getSpreadsheetMeta, trashFile, getFileMeta,
+    getSpreadsheetMeta, trashFile, getFileMeta, findFiles,
   };
 })();

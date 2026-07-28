@@ -42,8 +42,36 @@ const DataStore = (() => {
   let opexGid = localStorage.getItem(LS_OPEX_GID) ? Number(localStorage.getItem(LS_OPEX_GID)) : null;
 
   // ── BOOTSTRAP ────────────────────────────────────────────────
+  // Finds a "Nota Data" spreadsheet this app already created for the signed-in
+  // user, if one exists — drive.file scope lets the app see files it created
+  // in a *previous* session even after localStorage (which is all that used to
+  // be checked here) gets cleared, e.g. iOS Safari/PWA evicting site storage.
+  // Without this, every localStorage loss silently created a fresh duplicate.
+  async function findExistingSpreadsheet() {
+    const res = await SheetsClient.findFiles(
+      "name='Nota Data' and trashed=false and mimeType='application/vnd.google-apps.spreadsheet'"
+    );
+    const files = (res.files || []).filter(f => !f.trashed);
+    if (!files.length) return null;
+    files.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
+    return files[0]; // oldest = the original, in case duplicates already exist
+  }
+
   async function bootstrap() {
     if (spreadsheetId) return; // already set up on this browser
+
+    const existing = await findExistingSpreadsheet();
+    if (existing) {
+      spreadsheetId = existing.id;
+      const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+      const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
+      const investSheet = (meta.sheets || []).find(s => s.properties.title === 'Invest');
+      opexGid = opexSheet ? opexSheet.properties.sheetId : null;
+      localStorage.setItem(LS_SS_ID, spreadsheetId);
+      if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
+      if (investSheet) localStorage.setItem(LS_INVEST_GID, String(investSheet.properties.sheetId));
+      return;
+    }
 
     const created = await SheetsClient.create({
       properties: { title: 'Nota Data' },

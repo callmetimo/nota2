@@ -1008,7 +1008,7 @@ function sanitizeInput(str, maxLen = 100) {
 // (defaults to the current month)
 function curMonthCacheKey(y, m) {
   const now = new Date();
-  return `nota_curMonth_${y ?? now.getFullYear()}_${m ?? now.getMonth() + 1}`;
+  return `notapub_curMonth_${y ?? now.getFullYear()}_${m ?? now.getMonth() + 1}`;
 }
 const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 // Escape a value for a single-quoted JS string inside an inline onclick attribute.
@@ -1119,27 +1119,27 @@ let overlayEditOrigAmt   = 0;   // original amount for local & server-side looku
 let overlayEditOrigInc   = false; // original isIncome flag for local & server-side lookup
 let calCurrentTxns = [];        // txns for the currently selected calendar day
 let calCurrentDateStr = '';     // ISO date of the selected calendar day
-let queue = JSON.parse(localStorage.getItem('nota_queue_v2') || '[]');
-let RECURRING_RULES = JSON.parse(localStorage.getItem('nota_recurring_v1') || '[]');
+let queue = JSON.parse(localStorage.getItem('notapub_queue_v2') || '[]');
+let RECURRING_RULES = JSON.parse(localStorage.getItem('notapub_recurring_v1') || '[]');
 // Explicit tombstone of user-initiated deletes — {id, ts} pairs, written only by
 // deleteRecurringRule(). fetchRecurring() uses this (not "absent from local RECURRING_RULES")
 // to decide which server rules to drop, because local can be empty/incomplete for reasons
 // that are NOT a delete (e.g. iOS Safari's ITP evicting localStorage for an installed PWA
 // that hasn't been opened via Safari itself in ~7 days). Treating that as "user deleted
 // everything" wiped the whole sheet on the next push — see RECURRING_TOMBSTONE_STALE_MS below.
-let _recurringDeletedIds = JSON.parse(localStorage.getItem('nota_recurring_deleted_ids') || '[]');
+let _recurringDeletedIds = JSON.parse(localStorage.getItem('notapub_recurring_deleted_ids') || '[]');
 const RECURRING_TOMBSTONE_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 function _pruneRecurringTombstones() {
   const cutoff = Date.now() - RECURRING_TOMBSTONE_STALE_MS;
   _recurringDeletedIds = _recurringDeletedIds.filter(t => t.ts > cutoff);
-  localStorage.setItem('nota_recurring_deleted_ids', JSON.stringify(_recurringDeletedIds));
+  localStorage.setItem('notapub_recurring_deleted_ids', JSON.stringify(_recurringDeletedIds));
 }
 function _tombstoneRecurringId(id) {
   _recurringDeletedIds.push({ id, ts: Date.now() });
-  localStorage.setItem('nota_recurring_deleted_ids', JSON.stringify(_recurringDeletedIds));
+  localStorage.setItem('notapub_recurring_deleted_ids', JSON.stringify(_recurringDeletedIds));
 }
 _pruneRecurringTombstones();
-let _recurringDirty = localStorage.getItem('nota_recurring_dirty') === 'true';
+let _recurringDirty = localStorage.getItem('notapub_recurring_dirty') === 'true';
 // Guard against long-forgotten dirty/pending state from a device that was never
 // reopened since an old, abandoned edit (e.g. left offline, or an old test tab).
 // Without this, that device's stale local edit re-activates as "authoritative"
@@ -1147,25 +1147,25 @@ let _recurringDirty = localStorage.getItem('nota_recurring_dirty') === 'true';
 // Any pending state older than this is discarded rather than trusted.
 const RECURRING_PENDING_STALE_MS = 2 * 60 * 1000; // 2 minutes
 (function _expireStaleRecurringState() {
-  const pendingRaw = localStorage.getItem('nota_recurring_pending');
+  const pendingRaw = localStorage.getItem('notapub_recurring_pending');
   if (!pendingRaw) return;
-  const ts = Number(localStorage.getItem('nota_recurring_pending_ts') || 0);
+  const ts = Number(localStorage.getItem('notapub_recurring_pending_ts') || 0);
   // No timestamp (pending predates this fix) or timestamp too old — can't trust it, discard.
   if (!ts || (Date.now() - ts) > RECURRING_PENDING_STALE_MS) {
-    localStorage.removeItem('nota_recurring_pending');
-    localStorage.removeItem('nota_recurring_pending_ts');
-    localStorage.removeItem('nota_recurring_dirty');
+    localStorage.removeItem('notapub_recurring_pending');
+    localStorage.removeItem('notapub_recurring_pending_ts');
+    localStorage.removeItem('notapub_recurring_dirty');
     _recurringDirty = false;
   }
 })();
-let txHistory = JSON.parse(localStorage.getItem('nota_history_v2') || '[]');
-let investHistory = JSON.parse(localStorage.getItem('nota_invest_v2') || '[]');
+let txHistory = JSON.parse(localStorage.getItem('notapub_history_v2') || '[]');
+let investHistory = JSON.parse(localStorage.getItem('notapub_invest_v2') || '[]');
 let liveInvest = []; // invest rows fetched from Google Sheets (cross-device sync)
-let fxRates = JSON.parse(localStorage.getItem('nota_fx') || '{}');
-let fxLastFetch = parseInt(localStorage.getItem('nota_fx_ts') || '0');
-let stockPrices = JSON.parse(localStorage.getItem('nota_prices') || '{}');
+let fxRates = JSON.parse(localStorage.getItem('notapub_fx') || '{}');
+let fxLastFetch = parseInt(localStorage.getItem('notapub_fx_ts') || '0');
+let stockPrices = JSON.parse(localStorage.getItem('notapub_prices') || '{}');
 
-let sheetPricesLastFetch = parseInt(localStorage.getItem('nota_sp_ts') || '0');
+let sheetPricesLastFetch = parseInt(localStorage.getItem('notapub_sp_ts') || '0');
 let isSyncing = false;
 let _suppressVisRefresh = false; // prevents stale sheet fetch racing with in-flight delete/edit
 // Reflect pending-queue count on FAB badge as early as possible (before DOMContentLoaded)
@@ -1178,7 +1178,7 @@ function parsePrice(str) {
 
 async function fetchSheetPrices(force) {
   const now = Date.now();
-  const cached = localStorage.getItem('nota_prices');
+  const cached = localStorage.getItem('notapub_prices');
   const statusEl = document.getElementById('nwPricesLabel');
   // Use cache if < 30 min and not forced
   if (!force && cached && (now - sheetPricesLastFetch) < 1800000) {
@@ -1196,16 +1196,16 @@ async function fetchSheetPrices(force) {
     if (j.prices) {
       // j.prices: { AAPL: 298.21, JNJ: 230.80, VYM: 157.24, QQQ: 719.79, CHFIDR: 22425, USDIDR: 17599, StarStable: 2205 }
       Object.assign(stockPrices, j.prices);
-      localStorage.setItem('nota_prices', JSON.stringify(stockPrices));
+      localStorage.setItem('notapub_prices', JSON.stringify(stockPrices));
       sheetPricesLastFetch = now;
-      localStorage.setItem('nota_sp_ts', String(now));
+      localStorage.setItem('notapub_sp_ts', String(now));
       if (statusEl) statusEl.textContent = `Prices from Google Sheets · just now`;
     } else {
       throw new Error('no prices');
     }
     if (j.cashBalance !== undefined && !HIST.cashBalance) {
       HIST.cashBalance = j.cashBalance;
-      localStorage.setItem('nota_cashBalance', String(j.cashBalance));
+      localStorage.setItem('notapub_cashBalance', String(j.cashBalance));
     }
   } catch(e) {
     // Fallback to HIST.currentPrices if available
@@ -1350,12 +1350,12 @@ function _applyCurrentMonthRows(rows, y, m) {
 // pulled off the device after the next occurrence, instead of guessing a 5th root cause blind.
 const NOTA_DEBUG_LOG_MAX = 200;
 function dupDebugLog(tag, data) {
-  if (localStorage.getItem('nota_debug') !== '1') return;
+  if (localStorage.getItem('notapub_debug') !== '1') return;
   try {
-    const log = JSON.parse(localStorage.getItem('nota_debug_log') || '[]');
+    const log = JSON.parse(localStorage.getItem('notapub_debug_log') || '[]');
     log.push({ t: Date.now(), tag, data });
     while (log.length > NOTA_DEBUG_LOG_MAX) log.shift();
-    localStorage.setItem('nota_debug_log', JSON.stringify(log));
+    localStorage.setItem('notapub_debug_log', JSON.stringify(log));
   } catch(e) { /* storage full or unavailable — drop silently */ }
 }
 // Canonical content-signature key for detecting the same logical transaction across
@@ -1974,7 +1974,7 @@ function _applyLocalDelete(isoDate, txName, amount, rowIndex, id, isIncome) {
     kept++;
     return kept <= remainingOpexCount;
   });
-  localStorage.setItem('nota_history_v2', JSON.stringify(txHistory));
+  localStorage.setItem('notapub_history_v2', JSON.stringify(txHistory));
 
   // queue (nota_queue_v2) — same trim. Without this, a swept txHistory ghost's still-queued
   // retry entry survives, and retryPendingQueue() resurrects it as a brand-new real
@@ -1986,7 +1986,7 @@ function _applyLocalDelete(isoDate, txName, amount, rowIndex, id, isIncome) {
     qKept++;
     return qKept <= remainingOpexCount;
   });
-  localStorage.setItem('nota_queue_v2', JSON.stringify(queue));
+  localStorage.setItem('notapub_queue_v2', JSON.stringify(queue));
 
   const cKey = curMonthCacheKey(fy, fm);
   const cached = JSON.parse(localStorage.getItem(cKey) || '[]');
@@ -2040,7 +2040,7 @@ function _applyLocalEdit(isoDate, txName, amount, newDate, newTx, newAmount, new
     }
     return h;
   });
-  localStorage.setItem('nota_history_v2', JSON.stringify(txHistory));
+  localStorage.setItem('notapub_history_v2', JSON.stringify(txHistory));
   // nota_curMonth cache: remove from old month, add to new month
   const oldKey = curMonthCacheKey(fy, fm);
   const oldCached = JSON.parse(localStorage.getItem(oldKey) || '[]');
@@ -2294,9 +2294,9 @@ async function syncInvest(r) {
 
 // ── LOCAL STORAGE ─────────────────────────────────────────────
 function saveLocal(){
-  localStorage.setItem('nota_queue_v2',JSON.stringify(queue));
-  localStorage.setItem('nota_history_v2',JSON.stringify(txHistory));
-  localStorage.setItem('nota_invest_v2',JSON.stringify(investHistory));
+  localStorage.setItem('notapub_queue_v2',JSON.stringify(queue));
+  localStorage.setItem('notapub_history_v2',JSON.stringify(txHistory));
+  localStorage.setItem('notapub_invest_v2',JSON.stringify(investHistory));
   updateFabBadge();
 }
 function updateFabBadge(){
@@ -2324,7 +2324,7 @@ function pruneStaleHistory(){
     return !(histMonthCounts[mk]>=10); // drop only if well-represented in data.json
   });
   if(txHistory.length<before){
-    localStorage.setItem('nota_history_v2',JSON.stringify(txHistory));
+    localStorage.setItem('notapub_history_v2',JSON.stringify(txHistory));
   }
 }
 function updateStatus(){}
@@ -2667,8 +2667,8 @@ async function fetchFxRates(){
     fxRates.USD = usdJ.rates?.IDR;
     fxRates.CHF = chfJ.rates?.IDR;
     fxLastFetch = now;
-    localStorage.setItem('nota_fx', JSON.stringify(fxRates));
-    localStorage.setItem('nota_fx_ts', String(now));
+    localStorage.setItem('notapub_fx', JSON.stringify(fxRates));
+    localStorage.setItem('notapub_fx_ts', String(now));
   } catch(e){
     fxRates.USD = fxRates.USD || 16500;
     fxRates.CHF = fxRates.CHF || 19000;
@@ -3340,13 +3340,13 @@ async function loadHistData() {
     const prevY = prevDate.getFullYear(), prevM = prevDate.getMonth() + 1;
     const prevCached = JSON.parse(localStorage.getItem(curMonthCacheKey(prevY, prevM)) || 'null');
     if (prevCached && prevCached.length > 0) _applyCurrentMonthRows(prevCached, prevY, prevM);
-    localStorage.setItem('nota_txCat', JSON.stringify(d.txCat||{}));
-    localStorage.setItem('nota_txPm',  JSON.stringify(d.txPm||{}));
+    localStorage.setItem('notapub_txCat', JSON.stringify(d.txCat||{}));
+    localStorage.setItem('notapub_txPm',  JSON.stringify(d.txPm||{}));
     if (d.currentPrices) {
       const cp = d.currentPrices;
       const keys = ['StarStable','AAPL','JNJ','VYM','QQQ','CHFIDR','USDIDR'];
       keys.forEach(k => { if (!stockPrices[k]) stockPrices[k] = String(cp[k] || ''); });
-      localStorage.setItem('nota_prices', JSON.stringify(stockPrices));
+      localStorage.setItem('notapub_prices', JSON.stringify(stockPrices));
     }
     histLoaded = true;
     pruneStaleHistory();
@@ -3360,8 +3360,8 @@ async function loadHistData() {
     }
   } catch(e) {
     console.warn('data.json load failed:', e.message);
-    const cachedCat = localStorage.getItem('nota_txCat');
-    const cachedPm  = localStorage.getItem('nota_txPm');
+    const cachedCat = localStorage.getItem('notapub_txCat');
+    const cachedPm  = localStorage.getItem('notapub_txPm');
     if (cachedCat) HIST.txCat = JSON.parse(cachedCat);
     if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
     histLoaded = true;
@@ -3372,8 +3372,8 @@ async function loadHistData() {
 }
 
 (function() {
-  const cachedCat = localStorage.getItem('nota_txCat');
-  const cachedPm  = localStorage.getItem('nota_txPm');
+  const cachedCat = localStorage.getItem('notapub_txCat');
+  const cachedPm  = localStorage.getItem('notapub_txPm');
   if (cachedCat) HIST.txCat = JSON.parse(cachedCat);
   if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
 })();
@@ -4575,12 +4575,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     const cacheKey = curMonthCacheKey(y, m);
     try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(e) { return null; }
   })();
-  const cachedHistLoaded = !!(localStorage.getItem('nota_txCat'));
+  const cachedHistLoaded = !!(localStorage.getItem('notapub_txCat'));
 
   if (cachedHistLoaded && cachedCurMonth) {
     // Render from cache — near-instant
-    const cachedCat = localStorage.getItem('nota_txCat');
-    const cachedPm  = localStorage.getItem('nota_txPm');
+    const cachedCat = localStorage.getItem('notapub_txCat');
+    const cachedPm  = localStorage.getItem('notapub_txPm');
     if (cachedCat) HIST.txCat = JSON.parse(cachedCat);
     if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
     histLoaded = true;
@@ -4659,7 +4659,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       // unsynced transactions that have not reached the server yet — deleting them
       // causes permanent data loss with no recovery path.
       [curMonthCacheKey(),
-       'nota_invest_v2', 'nota_fx', 'nota_prices']
+       'notapub_invest_v2', 'notapub_fx', 'notapub_prices']
         .forEach(k => localStorage.removeItem(k));
       location.reload();
     }
@@ -5038,9 +5038,9 @@ function loadRecurring() {
 }
 function saveRecurring(rules) {
   RECURRING_RULES = rules;
-  localStorage.setItem('nota_recurring_v1', JSON.stringify(rules));
+  localStorage.setItem('notapub_recurring_v1', JSON.stringify(rules));
   _recurringDirty = true;
-  localStorage.setItem('nota_recurring_dirty', 'true');
+  localStorage.setItem('notapub_recurring_dirty', 'true');
   _pushRecurringToServer(rules);
 }
 
@@ -5057,7 +5057,7 @@ async function fetchRecurring() {
         const serverIds = new Set(j.rules.map(r => r.id));
 
         // Build set of dirty rule IDs from localStorage (persisted across reloads)
-        const pendingRules = JSON.parse(localStorage.getItem('nota_recurring_pending') || '[]');
+        const pendingRules = JSON.parse(localStorage.getItem('notapub_recurring_pending') || '[]');
         const dirtyIds = new Set(pendingRules.map(r => r.id));
 
         // Build set of rule IDs that exist in pending (to detect deleted rules)
@@ -5097,7 +5097,7 @@ async function fetchRecurring() {
         const finalRules = merged.filter(r => !tombstoned.has(r.id));
 
         RECURRING_RULES = finalRules;
-        localStorage.setItem('nota_recurring_v1', JSON.stringify(finalRules));
+        localStorage.setItem('notapub_recurring_v1', JSON.stringify(finalRules));
         // Don't clear _recurringDirty here — only _doRecurringPush success should clear it.
         // Clearing it here would lose the signal that a local save is still in flight.
         // Push unsynced local rules to server immediately
@@ -5107,7 +5107,7 @@ async function fetchRecurring() {
       } else if (RECURRING_RULES.length > 0 && !_recurringDirty) {
         // Server is empty but we have local rules → migrate them immediately
         _recurringDirty = true;
-        localStorage.setItem('nota_recurring_dirty', 'true');
+        localStorage.setItem('notapub_recurring_dirty', 'true');
         _pushRecurringToServer(RECURRING_RULES);
       }
     }
@@ -5122,8 +5122,8 @@ function _pushRecurringToServer(rules) {
 
 async function _doRecurringPush(rules) {
   // Save pending state immediately, before server call (fallback if app closes before response)
-  localStorage.setItem('nota_recurring_pending', JSON.stringify(rules));
-  localStorage.setItem('nota_recurring_pending_ts', String(Date.now()));
+  localStorage.setItem('notapub_recurring_pending', JSON.stringify(rules));
+  localStorage.setItem('notapub_recurring_pending_ts', String(Date.now()));
   // clientTs lets the server reject this write if a newer one already landed —
   // fetchWithTimeout's Promise.race does NOT cancel the underlying fetch, so an
   // abandoned (client-timed-out) request can still complete server-side minutes
@@ -5141,14 +5141,14 @@ async function _doRecurringPush(rules) {
     const j = await res.json().catch(() => ({}));
     if (j.status === 'ok') {
       _recurringDirty = false;
-      localStorage.removeItem('nota_recurring_dirty');
+      localStorage.removeItem('notapub_recurring_dirty');
       // CRITICAL: Keep nota_recurring_pending for 3+ seconds after success to prevent
       // a race condition where fetchRecurring() is called before server fully updates,
       // overwrites local edits with stale data, then second push sends incomplete data.
       // This timeout ensures merge logic can use dirtyIds to protect local-ahead edits.
       setTimeout(() => {
-        localStorage.removeItem('nota_recurring_pending');
-        localStorage.removeItem('nota_recurring_pending_ts');
+        localStorage.removeItem('notapub_recurring_pending');
+        localStorage.removeItem('notapub_recurring_pending_ts');
       }, 3000);
     }
   } catch(e) {
@@ -5157,8 +5157,8 @@ async function _doRecurringPush(rules) {
 }
 
 function retryPendingRecurring() {
-  const pending = localStorage.getItem('nota_recurring_pending');
-  if (!pending && !localStorage.getItem('nota_recurring_dirty')) return;
+  const pending = localStorage.getItem('notapub_recurring_pending');
+  if (!pending && !localStorage.getItem('notapub_recurring_dirty')) return;
 
   // Always push current RECURRING_RULES (not the stale snapshot in pending).
   // Stale pending data can hold an old lastFired that would overwrite the
@@ -5168,8 +5168,8 @@ function retryPendingRecurring() {
   } else {
     // Edge case: dirty flag set but no rules to push — clear the flag
     _recurringDirty = false;
-    localStorage.removeItem('nota_recurring_dirty');
-    localStorage.removeItem('nota_recurring_pending');
+    localStorage.removeItem('notapub_recurring_dirty');
+    localStorage.removeItem('notapub_recurring_pending');
   }
 }
 function curMonthKey() {
@@ -5287,7 +5287,7 @@ function checkRecurringOnLoad() {
   // (iOS PWA does a full page reload on every open, so this must survive that; Safari uses
   // BFCache so this function only runs once per session there.)
   const mk = curMonthKey();
-  const promptedKey = 'nota_rprompt_ids_' + mk;
+  const promptedKey = 'notapub_rprompt_ids_' + mk;
   let promptedIds = [];
   try { promptedIds = JSON.parse(localStorage.getItem(promptedKey) || '[]'); } catch(e) {}
   const promptedSet = new Set(promptedIds.map(String));
@@ -5306,7 +5306,7 @@ function checkRecurringOnLoad() {
   localStorage.setItem(promptedKey, JSON.stringify([...promptedSet]));
   // Clean up stale prompt-tracking keys from previous months (old blanket-flag format too)
   Object.keys(localStorage)
-    .filter(k => k.startsWith('nota_rprompt_') && k !== promptedKey)
+    .filter(k => k.startsWith('notapub_rprompt_') && k !== promptedKey)
     .forEach(k => localStorage.removeItem(k));
 
   _renderRecurringPrompt();

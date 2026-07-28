@@ -1,6 +1,6 @@
-const SHELL_CACHE = 'nota-shell-v2';
-const DATA_CACHE  = 'nota-data-v1';
-const CDN_CACHE   = 'nota-cdn-v1';
+const SHELL_CACHE = 'notapub-shell-v2';
+const DATA_CACHE  = 'notapub-data-v1';
+const CDN_CACHE   = 'notapub-cdn-v1';
 
 // Core app files cached on install
 const SHELL_FILES = ['./index.html', './icon.png'];

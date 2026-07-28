@@ -67,7 +67,10 @@ const Auth = (() => {
   async function signIn() {
     overlay.setStatus('Opening Google sign-in…');
     try {
-      await requestToken('consent');
+      // '' lets Google decide: silently reuses an already-granted session for a
+      // returning user, or shows the consent screen if this is genuinely new —
+      // avoids re-showing consent every time once the user has granted access once.
+      await requestToken('');
       overlay.setStatus('Setting up your Nota spreadsheet…');
       await DataStore.bootstrap();
       overlay.hide();
@@ -85,7 +88,7 @@ const Auth = (() => {
   async function getAccessToken() {
     if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
     try {
-      await requestToken(''); // silent refresh (no prompt) if still permitted
+      await requestToken('none'); // silent, no-UI refresh if still permitted
       return accessToken;
     } catch (err) {
       overlay.ensure();
@@ -95,11 +98,18 @@ const Auth = (() => {
     }
   }
 
-  function start() {
-    overlay.ensure();
-    // If GIS supports silent restore (e.g. same session), users still click
-    // "Sign in" once per browser session — GIS itself handles account
-    // selection, so no auto-attempt here to avoid surprise popups.
+  async function start() {
+    // Try a silent, no-UI reauth first — if the browser still has an active
+    // Google session and this app was already granted access, this resolves
+    // with a fresh token and no popup at all, so a returning user lands
+    // straight in the app instead of tapping "Sign in" every time.
+    try {
+      await requestToken('none');
+      await DataStore.bootstrap();
+      readyResolve();
+    } catch (err) {
+      overlay.ensure();
+    }
   }
 
   function signOut() {

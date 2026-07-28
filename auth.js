@@ -9,6 +9,9 @@ const Auth = (() => {
   let readyResolve, readyReject;
   const ready = new Promise((res, rej) => { readyResolve = res; readyReject = rej; });
 
+  // Two content modes share one full-screen card: a bare "splash" (logo + loading
+  // text, no button) shown while we check for an existing session, and the full
+  // interactive sign-in prompt shown only once we know that check failed.
   const overlay = {
     el: null,
     ensure() {
@@ -19,21 +22,31 @@ const Auth = (() => {
         <div class="nota-auth-card">
           <img src="icon.png" alt="" class="nota-auth-logo">
           <h1>Nota</h1>
-          <p>Sign in with Google to create your own private Nota spreadsheet.
-             Your data stays in a Google Sheet in your own Drive — this app
-             never sees your other files.</p>
-          <button id="notaSignInBtn" type="button">Sign in with Google</button>
-          <p class="nota-auth-status" id="notaAuthStatus"></p>
-          <p class="nota-auth-links"><a href="privacy.html" target="_blank">Privacy</a> · <a href="terms.html" target="_blank">Terms</a></p>
+          <div id="notaAuthBody"></div>
         </div>`;
       document.body.appendChild(el);
-      el.querySelector('#notaSignInBtn').addEventListener('click', () => signIn());
       this.el = el;
       return el;
     },
+    showSplash() {
+      this.ensure();
+      this.el.querySelector('#notaAuthBody').innerHTML = `<p class="nota-auth-status" id="notaAuthStatus">Loading…</p>`;
+    },
+    showSignIn() {
+      this.ensure();
+      this.el.querySelector('#notaAuthBody').innerHTML = `
+        <p>Sign in with Google to create your own private Nota spreadsheet.
+           Your data stays in a Google Sheet in your own Drive — this app
+           never sees your other files.</p>
+        <button id="notaSignInBtn" type="button">Sign in with Google</button>
+        <p class="nota-auth-status" id="notaAuthStatus"></p>
+        <p class="nota-auth-links"><a href="privacy.html" target="_blank">Privacy</a> · <a href="terms.html" target="_blank">Terms</a></p>`;
+      this.el.querySelector('#notaSignInBtn').addEventListener('click', () => signIn());
+    },
     setStatus(msg) {
       this.ensure();
-      this.el.querySelector('#notaAuthStatus').textContent = msg || '';
+      const s = this.el.querySelector('#notaAuthStatus');
+      if (s) s.textContent = msg || '';
     },
     hide() {
       if (this.el) this.el.remove();
@@ -51,10 +64,23 @@ const Auth = (() => {
     return tokenClient;
   }
 
-  function requestToken(promptMode) {
+  // If the browser blocks the (possibly invisible) popup GIS opens even for
+  // prompt:'none'/no-gesture calls, it can log an error and never invoke the
+  // token client's callback at all — leaving the caller's promise hanging
+  // forever. A bounded timeout is the only way to guarantee this resolves.
+  function requestToken(promptMode, timeoutMs = 6000) {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error('timeout'));
+      }, timeoutMs);
       const client = initTokenClient();
       client.callback = (resp) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         if (resp.error) { reject(new Error(resp.error)); return; }
         accessToken = resp.access_token;
         tokenExpiresAt = Date.now() + (Number(resp.expires_in || 3300) * 1000);
@@ -65,6 +91,7 @@ const Auth = (() => {
   }
 
   async function signIn() {
+    overlay.showSignIn();
     overlay.setStatus('Opening Google sign-in…');
     try {
       // '' lets Google decide: silently reuses an already-granted session for a
@@ -73,7 +100,6 @@ const Auth = (() => {
       await requestToken('');
       overlay.setStatus('Setting up your Nota spreadsheet…');
       await DataStore.bootstrap();
-      overlay.hide();
       readyResolve();
     } catch (err) {
       console.error('[auth] sign-in failed', err);
@@ -91,7 +117,7 @@ const Auth = (() => {
       await requestToken('none'); // silent, no-UI refresh if still permitted
       return accessToken;
     } catch (err) {
-      overlay.ensure();
+      overlay.showSignIn();
       overlay.setStatus('Your session expired — please sign in again.');
       await signIn(); // re-prompts; DataStore.bootstrap() is a no-op if already set up
       return accessToken;
@@ -99,17 +125,26 @@ const Auth = (() => {
   }
 
   async function start() {
-    // Try a silent, no-UI reauth first — if the browser still has an active
-    // Google session and this app was already granted access, this resolves
-    // with a fresh token and no popup at all, so a returning user lands
-    // straight in the app instead of tapping "Sign in" every time.
+    // Show the bare splash immediately — no "please sign in" messaging flash —
+    // then try a silent, no-UI reauth. If the browser still has an active Google
+    // session and this app was already granted access, this resolves with a
+    // fresh token and no popup at all, so a returning user never sees the
+    // interactive sign-in prompt at all, just the splash before the app itself.
+    overlay.showSplash();
     try {
-      await requestToken('none');
+      await requestToken('none', 4000); // shorter timeout so a blocked/failed silent attempt doesn't stall the splash
       await DataStore.bootstrap();
       readyResolve();
     } catch (err) {
-      overlay.ensure();
+      overlay.showSignIn();
     }
+  }
+
+  // Called by index.html once the Home page has had its first paint attempt —
+  // hides the splash/sign-in overlay as soon as `ready` resolves (immediately,
+  // if it already has). Safe to call more than once or before `ready` resolves.
+  function markAppReady() {
+    ready.then(() => overlay.hide());
   }
 
   function signOut() {
@@ -126,7 +161,7 @@ const Auth = (() => {
     location.reload();
   }
 
-  return { start, signIn, signOut, getAccessToken, ready };
+  return { start, signIn, signOut, getAccessToken, ready, markAppReady };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

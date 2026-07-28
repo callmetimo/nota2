@@ -1086,6 +1086,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 #notaAuthOverlay{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;
   background:var(--bg,#0f1115);padding:24px}
 .nota-auth-card{max-width:380px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px}
+#notaAuthBody{display:flex;flex-direction:column;align-items:center;gap:14px;width:100%}
 .nota-auth-logo{width:64px;height:64px;border-radius:16px}
 .nota-auth-card h1{font-size:22px;margin:0}
 .nota-auth-card p{font-size:14px;opacity:0.75;line-height:1.5;margin:0}
@@ -1258,6 +1259,13 @@ async function saveConfigToServer() {
 const CONFIG_KIND_LABELS = { category: 'Categories', pm: 'Payment Methods', stock: 'Assets', account: 'Accounts' };
 let settingsShowArchived = { category: false, pm: false, stock: false, account: false };
 
+// Embeds a JS string literal inside a double-quoted HTML attribute (e.g. onclick="fn(...)").
+// JSON.stringify alone produces its own double quotes, which would prematurely close the
+// HTML attribute — escape & and " so the browser decodes them back before the JS parses it.
+function jsAttr(v) {
+  return JSON.stringify(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
 function renderSettingsLists() {
   const container = document.getElementById('settingsListsContainer');
   if (!container) return;
@@ -1267,7 +1275,7 @@ function renderSettingsLists() {
     const active = items.filter(i => !i.archived);
     const archived = items.filter(i => i.archived);
     const showArchived = settingsShowArchived[kind];
-    const rowHtml = it => `<div class="config-row" onclick="openConfigItemOverlay('${kind}', ${JSON.stringify(it.name)})">
+    const rowHtml = it => `<div class="config-row" onclick="openConfigItemOverlay('${kind}', ${jsAttr(it.name)})">
       <div class="config-row-name">
         ${it.color ? `<span class="config-color-dot" style="background:${it.color}"></span>` : ''}
         <span>${it.name}</span>
@@ -4886,6 +4894,10 @@ initDatePicker('inputDateRawI','inputDateDisplayI','inputDateTextI');
 // ── INIT v3.5: Render from cache instantly, fetch in background ──
 window.addEventListener('DOMContentLoaded', async () => {
   const isHome = () => document.getElementById('page-home').classList.contains('active');
+
+  // Arms the splash/sign-in overlay to hide itself as soon as Auth.ready resolves —
+  // safe to call this early since it just chains onto that promise internally.
+  Auth.markAppReady();
 
   // Fire-and-forget: repopulates allCategories/allPMs/allStocks/allAccounts/CAT_COLORS/
   // ACCOUNT_CCY/STOCK_TYPE from the user's Config sheet once it resolves. Any picker/lookup

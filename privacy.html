@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Nota</title>
+<style>
+  body{font-family:system-ui,-apple-system,sans-serif;max-width:640px;margin:40px auto;padding:0 20px;line-height:1.6;color:#222}
+  h1{font-size:24px} h2{font-size:18px;margin-top:32px}
+  a{color:#1a73e8}
+</style>
+</head>
+<body>
+<h1>Privacy Policy</h1>
+<p>Last updated: 2026-07-28</p>
+
+<p>Nota is a static web app with no backend server and no database of its own.
+It stores your financial data only in a Google Sheet that it creates in your own
+Google Drive, using your Google account's own storage.</p>
+
+<h2>What we access</h2>
+<p>When you sign in with Google, Nota requests the
+<code>drive.file</code> permission scope. This scope only grants access to
+files that Nota itself creates — it cannot see, read, or modify any of
+your other Google Drive files or Sheets.</p>
+
+<h2>What we store</h2>
+<p>Nota has no server, so it cannot and does not store your data anywhere
+outside your own Google account. Your browser keeps a small amount of local
+data (via <code>localStorage</code>) — the ID of the Sheet it created for you —
+purely so it can find your data again on your next visit.</p>
+
+<h2>What we don't do</h2>
+<ul>
+  <li>We do not have access to your other Drive files, emails, or contacts.</li>
+  <li>We do not run any analytics or tracking scripts.</li>
+  <li>We do not sell, share, or transmit your data to any third party.</li>
+</ul>
+
+<h2>Revoking access</h2>
+<p>You can revoke Nota's access at any time from your
+<a href="https://myaccount.google.com/permissions" target="_blank">Google Account permissions page</a>.
+The Sheet Nota created remains in your Drive — you can keep, export, or delete it yourself.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy can be raised via the project's GitHub Issues page.</p>
+</body>
+</html>

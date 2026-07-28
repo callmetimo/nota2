@@ -1650,7 +1650,9 @@ async function fetchCurrentMonth(force, overrideY, overrideM) {
 // Populates liveInvest so Holdings/Overview are correct on all devices,
 // not just the device that originally entered the transaction.
 async function fetchLiveInvest() {
-  const since = HIST.cashBalanceAsOf || '2026-06-01';
+  // No data.json means HIST.cashBalanceAsOf is never set here, so this always
+  // fetches full invest history rather than falling back to a recent cutoff.
+  const since = HIST.cashBalanceAsOf || '2000-01-01';
   try {
     const res = await fetch(apiGet(`type=invest&since=${since}`), { method: 'GET' });
     const j = await res.json();
@@ -3686,43 +3688,31 @@ function initSearchPage() {
   clearSearch();
 }
 
+// Nota Public has no data.json bulk-history snapshot (unlike the original Nota app
+// this was forked from) — full Opex history is fetched directly from the user's
+// own Sheet via ?type=allOpex instead.
 async function loadHistData() {
   try {
-    const res = await fetch('data.json?v=' + APP_BUILD);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const d = await res.json();
-    Object.assign(HIST, d);
-    // Re-apply cached live month rows so data.json doesn't clobber them
-    // (race condition: fetchCurrentMonthFresh may have completed first)
+    const res = await fetch(apiGet('type=allOpex'), { method: 'GET' });
+    const j = await res.json();
+    if (j.status !== 'ok' || !Array.isArray(j.rows)) throw new Error('bad allOpex response');
+    HIST.opex = j.rows;
+    // Re-apply cached live month rows so the allOpex fetch doesn't clobber a more
+    // recent optimistic/local edit (race condition: fetchCurrentMonthFresh may have
+    // completed first).
     const now = new Date();
     const cachedRows = JSON.parse(localStorage.getItem(curMonthCacheKey()) || 'null');
     if (cachedRows && cachedRows.length > 0) _applyCurrentMonthRows(cachedRows, now.getFullYear(), now.getMonth()+1);
-    // Re-apply previous month's cache — covers the month-rollover case where data.json
-    // hasn't been updated yet (e.g. July 1: June cache still valid but no longer "current").
-    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const prevY = prevDate.getFullYear(), prevM = prevDate.getMonth() + 1;
-    const prevCached = JSON.parse(localStorage.getItem(curMonthCacheKey(prevY, prevM)) || 'null');
-    if (prevCached && prevCached.length > 0) _applyCurrentMonthRows(prevCached, prevY, prevM);
-    localStorage.setItem('notapub_txCat', JSON.stringify(d.txCat||{}));
-    localStorage.setItem('notapub_txPm',  JSON.stringify(d.txPm||{}));
-    if (d.currentPrices) {
-      const cp = d.currentPrices;
-      const keys = ['StarStable','AAPL','JNJ','VYM','QQQ','CHFIDR','USDIDR'];
-      keys.forEach(k => { if (!stockPrices[k]) stockPrices[k] = String(cp[k] || ''); });
-      localStorage.setItem('notapub_prices', JSON.stringify(stockPrices));
-    }
+    const cachedCat = localStorage.getItem('notapub_txCat');
+    const cachedPm  = localStorage.getItem('notapub_txPm');
+    if (cachedCat) HIST.txCat = JSON.parse(cachedCat);
+    if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
     histLoaded = true;
     pruneStaleHistory();
     histLoadCallbacks.forEach(cb => cb());
     histLoadCallbacks = [];
-    // If previous month cache was absent or empty, fetch it from the sheet in the background
-    // so month-rollover doesn't leave the previous month with only seed rows from data.json.
-    if (!prevCached || !prevCached.length) {
-      const prevRowCount = (HIST.opex || []).filter(r => r.y === prevY && r.m === prevM - 1).length;
-      if (prevRowCount < 10) fetchCurrentMonth(true, prevY, prevM);
-    }
   } catch(e) {
-    console.warn('data.json load failed:', e.message);
+    console.warn('allOpex load failed:', e.message);
     const cachedCat = localStorage.getItem('notapub_txCat');
     const cachedPm  = localStorage.getItem('notapub_txPm');
     if (cachedCat) HIST.txCat = JSON.parse(cachedCat);

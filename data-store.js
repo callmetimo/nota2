@@ -241,6 +241,40 @@ const DataStore = (() => {
     return { status: 'ok', rows, y, m };
   }
 
+  // Returns every non-deleted Opex row across all months, shaped to match HIST.opex
+  // ({y, m (0-indexed), d, mk, cat, tx, pm, inc?, exp?, notes?, future?, id?, rowIndex}).
+  // Nota Public has no data.json bulk-history snapshot (unlike the original Nota app),
+  // so the frontend calls this once at startup to populate full history directly from
+  // the Sheet instead of relying on a static file that doesn't exist here.
+  async function handleGetAllOpex() {
+    const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:K');
+    const data = res.values || [];
+    const rows = [];
+    data.forEach((row, idx) => {
+      if (isDeletedFlag(row[8])) return;
+      const day = parseDayFromCell(row[0]);
+      if (!day) return;
+      const mk = normalizeMonthKey(row[1]); // "M/1/YYYY"
+      const mm = mk.match(/^(\d{1,2})\/1\/(\d{4})$/);
+      if (!mm) return;
+      const mIdx = Number(mm[1]) - 1;
+      const y = Number(mm[2]);
+      const r = {
+        y, m: mIdx, d: day, mk: `${MONTHS[mIdx]} ${y}`,
+        cat: String(row[2] || '').trim(), tx: String(row[3] || '').trim(), pm: String(row[4] || '').trim(),
+        rowIndex: idx + 2,
+      };
+      const inc = Number(row[5]) || 0, exp = Number(row[6]) || 0, notes = String(row[7] || '').trim();
+      if (inc) r.inc = inc;
+      if (exp) r.exp = exp;
+      if (notes) r.notes = notes;
+      if (Number(row[9]) === 1) r.future = true;
+      if (row[10]) r.id = String(row[10]).trim();
+      rows.push(r);
+    });
+    return { status: 'ok', rows };
+  }
+
   async function getCashBalance() {
     const res = await SheetsClient.getValues(spreadsheetId, 'Opex!F2:I');
     const rows = res.values || [];
@@ -475,6 +509,7 @@ const DataStore = (() => {
       const type = url.searchParams.get('type');
       if (type === 'prices') return handleGetPrices();
       if (type === 'month') return handleGetMonth(url.searchParams.get('y'), url.searchParams.get('m'));
+      if (type === 'allOpex') return handleGetAllOpex();
       if (type === 'invest') return handleGetInvest(url.searchParams.get('since') || '2020-01-01');
       if (type === 'goals') return handleGetGoals();
       if (type === 'recurring') return handleGetRecurring();

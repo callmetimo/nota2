@@ -1,13 +1,14 @@
 # Nota (public multi-tenant version)
 
-This folder is a public, multi-tenant fork of the original [Nota](../README.md)
-app (in the parent folder) — both are branded "Nota" to the end user, but this
-is a separate codebase/deployment. The original is bound to one shared Google
-Sheet with a hardcoded API token; this version lets each visitor sign in with
-their own Google account instead: the app creates a private Google Sheet in
-*their* Drive and reads/writes it directly via the Google Sheets API. There is
-no backend server and no Apps Script deployment — everything runs client-side
-in the browser using the signed-in user's own short-lived OAuth token.
+This is a public, multi-tenant fork of the original Nota app (retired, its
+last state archived in [Archive/README.md](Archive/README.md)) — both are
+branded "Nota" to the end user, but this is a separate codebase/deployment.
+The original was bound to one shared Google Sheet with a hardcoded API token;
+this version lets each visitor sign in with their own Google account instead:
+the app creates a private Google Sheet in *their* Drive and reads/writes it
+directly via the Google Sheets API. There is no backend server and no Apps
+Script deployment — everything runs client-side in the browser using the
+signed-in user's own short-lived OAuth token.
 
 ## How it works
 

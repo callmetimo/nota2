@@ -24,6 +24,15 @@ in the browser using the signed-in user's own short-lived OAuth token.
   `DataStore.handleRequest()` instead. Everything else — rendering,
   calculations, calendar, insights — is untouched.
 
+## Smart autofill for transaction inputs
+
+When entering an Expense/Income transaction, the **Category** and **Payment Method** fields auto-suggest based on what you used for that same transaction name in the last 30 days. Similarly, when entering an Invest transaction, the **Account** field auto-suggests based on the Asset (stock) name.
+
+- **Server-side** (`data-store.js`): Computes `txCat`, `txPm` (Opex), and `txAccount` (Invest) maps from each user's own Sheet data, scoped to transactions from the last 30 days, ordered most-recent-first.
+- **Client-side** (`index.html`): Stores these maps in localStorage so suggestions work on repeat visits, and powers the autocomplete dropdowns via `getSmartCats()`, `getSmartPms()`, and `getSmartAccounts()`.
+
+This feature is per-user — each person signing in gets suggestions based only on their own Sheet data, not shared globally.
+
 ## Setup (before deploying)
 
 1. **Google Cloud project**

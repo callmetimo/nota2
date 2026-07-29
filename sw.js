@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'notapub-shell-v2';
+const SHELL_CACHE = 'notapub-shell-v3';
 const DATA_CACHE  = 'notapub-data-v1';
 const CDN_CACHE   = 'notapub-cdn-v1';
 
@@ -60,7 +60,11 @@ self.addEventListener('fetch', e => {
 
 async function networkFirst(cacheName, request) {
   try {
-    const res = await fetch(request);
+    // no-store: without this, a plain fetch() can still be satisfied from the
+    // browser's HTTP cache on a stale response, silently defeating "network-first"
+    // (and defeating a user's hard refresh on an installed PWA, which has no
+    // address-bar reload to force a real revalidation).
+    const res = await fetch(request, { cache: 'no-store' });
     if (res.ok) {
       const cache = await caches.open(cacheName);
       cache.put(request, res.clone());

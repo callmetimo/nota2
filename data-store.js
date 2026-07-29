@@ -339,6 +339,18 @@ const DataStore = (() => {
     return { status: 'ok', rows, y, m };
   }
 
+  // Builds a {key: [values...]} map from entries already ordered most-recent-first,
+  // deduping repeated values per key while preserving that recency order.
+  function buildRecentMap(entries) {
+    const map = {};
+    for (const { key, value } of entries) {
+      if (!key || !value) continue;
+      if (!map[key]) map[key] = [];
+      if (!map[key].includes(value)) map[key].push(value);
+    }
+    return map;
+  }
+
   // Returns every non-deleted Opex row across all months, shaped to match HIST.opex
   // ({y, m (0-indexed), d, mk, cat, tx, pm, inc?, exp?, notes?, future?, id?, rowIndex}).
   // Nota Public has no data.json bulk-history snapshot (unlike the original Nota app),
@@ -370,7 +382,19 @@ const DataStore = (() => {
       if (row[10]) r.id = String(row[10]).trim();
       rows.push(r);
     });
-    return { status: 'ok', rows };
+
+    // Smart-autofill maps for the input form: what Category/PM was used for a given
+    // Transaction name in the last 30 days, most-recent-first (see getSmartCats/
+    // getSmartPms/autoFillIfExactMatch in index.html).
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    const recent = rows
+      .filter(r => new Date(r.y, r.m, r.d) >= cutoff)
+      .sort((a, b) => new Date(b.y, b.m, b.d) - new Date(a.y, a.m, a.d));
+    const txCat = buildRecentMap(recent.map(r => ({ key: r.tx, value: r.cat })));
+    const txPm = buildRecentMap(recent.map(r => ({ key: r.tx, value: r.pm })));
+
+    return { status: 'ok', rows, txCat, txPm };
   }
 
   async function getCashBalance() {
@@ -414,7 +438,18 @@ const DataStore = (() => {
         lot: Number(row[5]) || 0, price: Number(row[6]) || 0, totalIdr: Number(row[7]) || 0,
       });
     });
-    return { status: 'ok', rows };
+
+    // Smart-autofill map for the Invest form's Account field: what Account was used
+    // for a given Asset (stock) in the last 30 days, most-recent-first — independent
+    // of `since`, which is only used to bound how much history the caller wants back.
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    const recent = rows
+      .filter(r => new Date(r.date) >= cutoff)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    const txAccount = buildRecentMap(recent.map(r => ({ key: r.stock, value: r.account })));
+
+    return { status: 'ok', rows, txAccount };
   }
 
   // ── PRICES ────────────────────────────────────────────────────

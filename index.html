@@ -608,13 +608,13 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">Asset</label>
           <input type="text" class="form-input" id="inputStock" placeholder="e.g. QQQ, Star Stable..." autocomplete="off" maxlength="50"
-            oninput="showAC('inputStock', allStocks)" onfocus="showAC('inputStock', allStocks)">
+            oninput="onStockInput()" onfocus="showAC('inputStock', allStocks)">
           <div class="autocomplete-list" id="ac-inputStock" style="display:none"></div>
         </div>
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">Account</label>
           <input type="text" class="form-input" id="inputAccount" placeholder="Pay from…" autocomplete="off" maxlength="30"
-            oninput="showAC('inputAccount', allAccounts)" onfocus="showAC('inputAccount', allAccounts)" onblur="onAccountSelect()">
+            oninput="showAC('inputAccount', getSmartAccounts())" onfocus="showAC('inputAccount', getSmartAccounts())" onblur="onAccountSelect()">
           <div class="autocomplete-list" id="ac-inputAccount" style="display:none"></div>
         </div>
       </div>
@@ -1439,7 +1439,7 @@ async function deleteAccountAndData() {
 }
 
 // ── LOCAL DATA (historical) ───────────────────────────────────
-const HIST = {opex:[], invest:[], txCat:{}, txPm:{}, stockType:{}, cashBalance:0, jhtBase:null};
+const HIST = {opex:[], invest:[], txCat:{}, txPm:{}, txAccount:{}, stockType:{}, cashBalance:0, jhtBase:null};
 
 // ── JHT (Jaminan Hari Tua) ────────────────────────────────────
 function calcJHT() {
@@ -1679,6 +1679,10 @@ async function fetchLiveInvest() {
           source:'live'
         };
       });
+    }
+    if (j.txAccount) {
+      HIST.txAccount = j.txAccount;
+      localStorage.setItem('notapub_txAccount', JSON.stringify(j.txAccount));
     }
   } catch(e) {
     console.warn('fetchLiveInvest failed:', e.message);
@@ -1924,6 +1928,24 @@ function getSmartPms() {
               (txLow && Object.keys(txPm).find(k => txLow.includes(k.toLowerCase()) || k.toLowerCase().includes(txLow)));
   return key ? txPm[key] : allPMs;
 }
+function getSmartAccounts() {
+  const stockLow = (document.getElementById('inputStock').value || '').toLowerCase().trim();
+  const txAccount = HIST.txAccount || {};
+  const key = Object.keys(txAccount).find(k => k.toLowerCase() === stockLow) ||
+              (stockLow && Object.keys(txAccount).find(k => stockLow.includes(k.toLowerCase()) || k.toLowerCase().includes(stockLow)));
+  return key ? txAccount[key] : allAccounts;
+}
+function autoFillAccountIfExactMatch(stockName) {
+  const stockLow = (stockName || '').toLowerCase().trim();
+  const txAccount = HIST.txAccount || {};
+  const key = Object.keys(txAccount).find(k => k.toLowerCase() === stockLow);
+  if (key && txAccount[key].length > 0)
+    document.getElementById('inputAccount').value = txAccount[key][0];
+}
+function updateSmartAccountSuggestion(stockName) {
+  const acctDD = document.getElementById('ac-inputAccount');
+  if (acctDD && acctDD.style.display !== 'none') showAC('inputAccount', getSmartAccounts());
+}
 function getAllTxList() {
   const recent = getRecentMonths(3);
   const fromOpex = (HIST.opex || [])
@@ -1978,6 +2000,14 @@ function onStockSelect(stock) {
   const isUSD = type === 'US Stock';
   document.getElementById('investPricePrefix').textContent = isUSD ? '$' : 'Rp';
   updateAvgPrices();
+  updateSmartAccountSuggestion(stock);
+  autoFillAccountIfExactMatch(stock);
+}
+function onStockInput() {
+  const val = document.getElementById('inputStock').value;
+  showAC('inputStock', allStocks);
+  updateSmartAccountSuggestion(val);
+  autoFillAccountIfExactMatch(val);
 }
 function calcTotal() {
   const lot = parseAmt('inputLot');
@@ -3713,10 +3743,8 @@ async function loadHistData() {
     const now = new Date();
     const cachedRows = JSON.parse(localStorage.getItem(curMonthCacheKey()) || 'null');
     if (cachedRows && cachedRows.length > 0) _applyCurrentMonthRows(cachedRows, now.getFullYear(), now.getMonth()+1);
-    const cachedCat = localStorage.getItem('notapub_txCat');
-    const cachedPm  = localStorage.getItem('notapub_txPm');
-    if (cachedCat) HIST.txCat = JSON.parse(cachedCat);
-    if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
+    if (j.txCat) { HIST.txCat = j.txCat; localStorage.setItem('notapub_txCat', JSON.stringify(j.txCat)); }
+    if (j.txPm)  { HIST.txPm  = j.txPm;  localStorage.setItem('notapub_txPm', JSON.stringify(j.txPm)); }
     histLoaded = true;
     pruneStaleHistory();
     histLoadCallbacks.forEach(cb => cb());
@@ -3737,8 +3765,10 @@ async function loadHistData() {
 (function() {
   const cachedCat = localStorage.getItem('notapub_txCat');
   const cachedPm  = localStorage.getItem('notapub_txPm');
+  const cachedAccount = localStorage.getItem('notapub_txAccount');
   if (cachedCat) HIST.txCat = JSON.parse(cachedCat);
   if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
+  if (cachedAccount) HIST.txAccount = JSON.parse(cachedAccount);
 })();
 
 // ── HOME CALENDAR ─────────────────────────────────────────────

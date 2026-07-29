@@ -655,7 +655,8 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           <input type="text" class="form-input amount-input" id="inputTotal" placeholder="Auto-calculated" inputmode="decimal">
         </div>
       </div>
-      <button class="submit-btn invest" onclick="submitInvest()">Save Investment</button>
+      <button class="submit-btn invest" id="submitInvestBtn" onclick="submitInvest()">Save Investment</button>
+      <button class="delete-btn" id="deleteInvestBtn" onclick="deleteSheetInvestTransaction()" style="display:none">Delete Investment</button>
     </div>
   </div>
 </div><!-- /page-input -->
@@ -1475,8 +1476,9 @@ function onHistLoaded(cb) {
 let inputMode = 'expense';
 let investAction = 'Buy';
 let overlayEditRowIndex = null; // sheet row number when known (null = unknown)
-let overlayEditId       = null; // Opex sheet TxID (col K) when known (null = unknown/legacy row)
+let overlayEditId       = null; // Opex TxID (col K) or Invest TxID (col I) when known (null = unknown/legacy row)
 let overlayEditMode     = false; // true while edit overlay is open (even without rowIndex)
+let overlayEditType     = 'opex'; // 'opex' | 'invest' — which form/payload the open overlay edits
 let overlayEditOrigDate  = '';  // original ISO date string for local & server-side lookup
 let overlayEditOrigMonth = '';  // original "Mmm YYYY" month key for server-side lookup
 let overlayEditOrigTx    = '';  // original transaction name for local & server-side lookup
@@ -1676,6 +1678,7 @@ async function fetchLiveInvest() {
           action:r.action, lot:r.lot, price:r.price, totalIdr:r.totalIdr,
           account:r.account||'',
           date:r.date,
+          id:r.id||null, rowIndex:r.rowIndex||null, opexTxId:r.opexTxId||null,
           source:'live'
         };
       });
@@ -2209,10 +2212,15 @@ function closeInputOverlay() {
   overlayEditRowIndex = null;
   overlayEditId = null;
   overlayEditMode = false;
+  overlayEditType = 'opex';
   const submitBtn = document.getElementById('submitOpexBtn');
   if (submitBtn) submitBtn.textContent = 'Save Transaction';
   const delBtn = document.getElementById('deleteOpexBtn');
   if (delBtn) delBtn.style.display = 'none';
+  const submitInvestBtn = document.getElementById('submitInvestBtn');
+  if (submitInvestBtn) submitInvestBtn.textContent = 'Save Investment';
+  const delInvestBtn = document.getElementById('deleteInvestBtn');
+  if (delInvestBtn) delInvestBtn.style.display = 'none';
 }
 
 // ── Handle bar swipe-down to close ───────────────────────────
@@ -2622,9 +2630,103 @@ async function deleteSheetTransaction() {
   }
 }
 
+// ── EDIT / DELETE INVEST TRANSACTION ───────────────────────────
+function openEditInvestOverlayById(id) {
+  const row = (liveInvest || []).find(r => r.id === id);
+  if (row) openEditInvestOverlay(row);
+}
+
+function openEditInvestOverlay(row) {
+  if (!row) return;
+  overlayEditRowIndex = row.rowIndex || null;
+  overlayEditId       = row.id || null;
+  overlayEditMode = true;
+  overlayEditType = 'invest';
+
+  const modeBtn = document.querySelector('.pill-toggle-btn[data-mode="invest"]');
+  if (modeBtn) setInputMode('invest', modeBtn);
+
+  const actionBtn = document.querySelector(`.action-btn[data-action="${row.action === 'Sell' ? 'Sell' : 'Buy'}"]`);
+  if (actionBtn) setInvestAction(row.action === 'Sell' ? 'Sell' : 'Buy', actionBtn);
+
+  const dateIso = row.date ? String(row.date).slice(0, 10) : todayISO();
+  document.getElementById('inputDateRawI').value = dateIso;
+  document.getElementById('inputDateTextI').textContent = isoDisp(dateIso);
+  document.getElementById('inputStock').value   = row.stock   || '';
+  document.getElementById('inputAccount').value = row.account || '';
+  document.getElementById('inputLot').value     = row.lot     || '';
+  document.getElementById('inputPrice').value   = row.price   || '';
+  document.getElementById('inputTotal').value   = row.totalIdr || '';
+
+  document.getElementById('submitInvestBtn').textContent = 'Update Investment';
+  document.getElementById('deleteInvestBtn').style.display = 'block';
+
+  document.getElementById('inputOverlay').classList.add('open');
+}
+
+async function updateInvestTransaction() {
+  const rowIndex = overlayEditRowIndex;
+  const id = overlayEditId;
+  const date=document.getElementById('inputDateRawI').value;
+  const stock=sanitizeInput(document.getElementById('inputStock').value,50);
+  const account=sanitizeInput(document.getElementById('inputAccount').value,30);
+  const lot=parseAmt('inputLot');
+  const price=parseAmt('inputPrice');
+  const total=parseAmt('inputTotal');
+  if(!date||!stock||!account||!lot||!price){showToast('All fields required','error');return}
+  closeInputOverlay();
+  showToast('Updating…', 'loading', 0);
+  const payload = {
+    type:'invest', op:'edit', id, rowIndex,
+    date:isoSheetDate(date), month:isoMonthKey(date), stock,
+    stockType:STOCK_TYPE[stock]||'', action:investAction,
+    account, lot, price, totalIdr:total,
+  };
+  try {
+    const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: {'Content-Type': 'text/plain'}, body: apiBody(payload) });
+    const j = await res.json().catch(() => ({}));
+    if (j.status === 'ok') {
+      await fetchLiveInvest();
+      localStorage.removeItem(curMonthCacheKey());
+      await fetchCurrentMonth(true);
+      if (document.getElementById('page-search').classList.contains('active')) renderAllTransactions();
+      showToast('Updated ✓', 'success');
+    } else {
+      showToast('Update failed', 'error');
+    }
+  } catch(e) {
+    showToast(navigator.onLine ? 'Update failed' : 'Offline — try again later', 'error');
+  }
+}
+
+async function deleteSheetInvestTransaction() {
+  if (!confirm('Delete this investment transaction?')) return;
+  const rowIndex = overlayEditRowIndex;
+  const id = overlayEditId;
+  closeInputOverlay();
+  showToast('Deleting…', 'loading', 0);
+  const payload = { type:'invest', op:'delete', id, rowIndex };
+  try {
+    const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: {'Content-Type': 'text/plain'}, body: apiBody(payload) });
+    const j = await res.json().catch(() => ({}));
+    if (j.status === 'ok') {
+      await fetchLiveInvest();
+      localStorage.removeItem(curMonthCacheKey());
+      await fetchCurrentMonth(true);
+      if (document.getElementById('page-search').classList.contains('active')) renderAllTransactions();
+      showToast('Deleted ✓', 'success');
+    } else {
+      showToast('Delete failed', 'error');
+    }
+  } catch(e) {
+    showToast(navigator.onLine ? 'Delete failed' : 'Offline — try again later', 'error');
+  }
+}
+
 // ── SUBMIT INVEST ─────────────────────────────────────────────
 function submitInvest() {
   if (isSyncing) return;
+  if (overlayEditMode && overlayEditType === 'invest') { updateInvestTransaction(); return; }
   const date=document.getElementById('inputDateRawI').value;
   const stock=sanitizeInput(document.getElementById('inputStock').value,50);
   const account=sanitizeInput(document.getElementById('inputAccount').value,30);
@@ -3595,7 +3697,10 @@ function renderTxItemHTML(item, query) {
   const syncBadge = isPending && !row.synced ? '<span class="badge badge-pending">pending</span>' : '';
   const notesHtml = !isInvest && notes ? `<div class="search-item-note">${highlightMatches(notes, query)}</div>` : '';
 
-  return `<div class="tx-item">
+  const editable = isInvest && item.source === 'live-invest' && row.id;
+  const clickAttr = editable ? ` onclick="openEditInvestOverlayById('${esc(row.id)}')" style="cursor:pointer"` : '';
+
+  return `<div class="tx-item"${clickAttr}>
     <div class="tx-icon ${cls}">${icon}</div>
     <div class="tx-info" style="flex:1">
       <div class="tx-payee">${highlightMatches(tx, query)}${syncBadge}</div>
@@ -3646,14 +3751,15 @@ function renderAllTransactions() {
   for (let i = 0; i < histOpex.length; i++) {
     results.push({source:'hist-opex', idx:i, row:histOpex[i], type:'opex'});
   }
-  const histInvest = HIST.invest || [];
-  for (let i = 0; i < histInvest.length; i++) {
-    results.push({source:'hist-invest', idx:i, row:histInvest[i], type:'invest'});
+  for (let i = 0; i < liveInvest.length; i++) {
+    results.push({source:'live-invest', idx:i, row:liveInvest[i], type:'invest'});
   }
   for (let i = 0; i < txHistory.length; i++) {
     results.push({source:'local-opex', idx:i, row:txHistory[i], type:'opex'});
   }
+  // Unsynced local invest rows only — once synced they're already in liveInvest (see syncInvest).
   for (let i = 0; i < investHistory.length; i++) {
+    if (investHistory[i].synced) continue;
     results.push({source:'local-invest', idx:i, row:investHistory[i], type:'invest'});
   }
 

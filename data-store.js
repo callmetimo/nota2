@@ -43,6 +43,7 @@ const DataStore = (() => {
 
   let spreadsheetId = localStorage.getItem(LS_SS_ID) || null;
   let opexGid = localStorage.getItem(LS_OPEX_GID) ? Number(localStorage.getItem(LS_OPEX_GID)) : null;
+  let investGid = localStorage.getItem(LS_INVEST_GID) ? Number(localStorage.getItem(LS_INVEST_GID)) : null;
 
   // ── BOOTSTRAP ────────────────────────────────────────────────
   // Finds a "Nota Data" spreadsheet this app already created for the signed-in
@@ -80,9 +81,10 @@ const DataStore = (() => {
       const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
       const investSheet = (meta.sheets || []).find(s => s.properties.title === 'Invest');
       opexGid = opexSheet ? opexSheet.properties.sheetId : null;
+      investGid = investSheet ? investSheet.properties.sheetId : null;
       localStorage.setItem(LS_SS_ID, spreadsheetId);
       if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
-      if (investSheet) localStorage.setItem(LS_INVEST_GID, String(investSheet.properties.sheetId));
+      if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
       await migrateToSplitSheets(meta);
       localStorage.setItem(LS_SPLIT_MIGRATED, '1');
       return;
@@ -101,7 +103,7 @@ const DataStore = (() => {
     });
     spreadsheetId = created.spreadsheetId;
     opexGid = created.sheets.find(s => s.properties.title === 'Opex').properties.sheetId;
-    const investGid = created.sheets.find(s => s.properties.title === 'Invest').properties.sheetId;
+    investGid = created.sheets.find(s => s.properties.title === 'Invest').properties.sheetId;
 
     localStorage.setItem(LS_SS_ID, spreadsheetId);
     localStorage.setItem(LS_OPEX_GID, String(opexGid));
@@ -111,8 +113,8 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, 'Opex!A1:K1', [[
       'Date','Month','Category','Transaction','PM','Income','Expense','Notes','Deleted','Future','TxID',
     ]]);
-    await SheetsClient.updateValues(spreadsheetId, 'Invest!A1:H1', [[
-      'Date','Stock','Type','Action','Account','Lot','Price','TotalIdr',
+    await SheetsClient.updateValues(spreadsheetId, 'Invest!A1:J1', [[
+      'Date','Stock','Type','Action','Account','Lot','Price','TotalIdr','TxID','LinkedOpexTxID',
     ]]);
     await SheetsClient.updateValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A1:B1`, [['Label', 'Price']]);
     await SheetsClient.updateValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A2:B8`, [
@@ -409,34 +411,113 @@ const DataStore = (() => {
   }
 
   // ── INVEST ────────────────────────────────────────────────────
+  async function findInvestRowById(id) {
+    if (!id) return null;
+    const res = await SheetsClient.getValues(spreadsheetId, 'Invest!I2:I');
+    const ids = res.values || [];
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0] || '').trim() === String(id).trim()) return i + 2;
+    }
+    return null;
+  }
+
+  async function deleteOpexRowById(opexId) {
+    const rowIndex = await findOpexRowById(opexId);
+    if (!rowIndex) return;
+    await SheetsClient.batchUpdate(spreadsheetId, [{
+      deleteDimension: {
+        range: { sheetId: opexGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex },
+      },
+    }]);
+  }
+
   async function handleInvest(data) {
-    const { date, month, stock, stockType, action, account, lot, price, totalIdr, pm } = data;
-    await SheetsClient.appendValues(spreadsheetId, 'Invest!A:H', [[
-      formatDateStr(date), stock, stockType, action, account || '', lot, price, totalIdr,
-    ]]);
+    // `op` selects edit/delete; `action` always means Buy/Sell (never overloaded
+    // with 'edit'/'delete' the way Opex's `action` field is, since Invest already
+    // uses `action` for its own Buy/Sell domain value).
+    const { op, action, date, month, stock, stockType, account, lot, price, totalIdr, pm } = data;
+
+    if (op === 'edit') {
+      const rowIndex = await findInvestRowById(data.id);
+      if (!rowIndex) return { status: 'error', message: 'Row not found' };
+      const linkRes = await SheetsClient.getValues(spreadsheetId, `Invest!J${rowIndex}`);
+      const existingOpexId = String((linkRes.values && linkRes.values[0] && linkRes.values[0][0]) || '').trim();
+
+      await SheetsClient.updateValues(spreadsheetId, `Invest!A${rowIndex}:H${rowIndex}`, [[
+        formatDateStr(date), stock, stockType, action, account || '', lot, price, totalIdr,
+      ]]);
+
+      let newOpexId = existingOpexId;
+      const newActionIsBuy = action === 'Buy';
+      if (existingOpexId && newActionIsBuy) {
+        const opexRow = await findOpexRowById(existingOpexId);
+        if (opexRow) {
+          const monthKey = month || deriveMonthKey(date);
+          const payMethod = account || pm || 'BCA';
+          await SheetsClient.updateValues(spreadsheetId, `Opex!A${opexRow}:J${opexRow}`, [[
+            formatDateStr(date), monthKey, 'Investment', stock, payMethod, '', Number(totalIdr), '', '', 0,
+          ]]);
+        }
+      } else if (existingOpexId && !newActionIsBuy) {
+        await deleteOpexRowById(existingOpexId);
+        newOpexId = '';
+      } else if (!existingOpexId && newActionIsBuy) {
+        const monthKey = month || deriveMonthKey(date);
+        const payMethod = account || pm || 'BCA';
+        newOpexId = await writeToOpex(date, monthKey, 'Investment', stock, payMethod, 'expense', totalIdr, '');
+      }
+      if (newOpexId !== existingOpexId) {
+        await SheetsClient.updateValues(spreadsheetId, `Invest!J${rowIndex}`, [[newOpexId]]);
+      }
+      return { status: 'ok' };
+    }
+
+    if (op === 'delete') {
+      const rowIndex = await findInvestRowById(data.id);
+      if (!rowIndex) return { status: 'error', message: 'Row not found' };
+      const linkRes = await SheetsClient.getValues(spreadsheetId, `Invest!J${rowIndex}`);
+      const existingOpexId = String((linkRes.values && linkRes.values[0] && linkRes.values[0][0]) || '').trim();
+      if (existingOpexId) await deleteOpexRowById(existingOpexId);
+      await SheetsClient.batchUpdate(spreadsheetId, [{
+        deleteDimension: {
+          range: { sheetId: investGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex },
+        },
+      }]);
+      return { status: 'ok' };
+    }
+
+    const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+    let opexId = '';
     if (action === 'Buy') {
       const monthKey = month || deriveMonthKey(date);
       const payMethod = account || pm || 'BCA';
-      await writeToOpex(date, monthKey, 'Investment', stock, payMethod, 'expense', totalIdr, '');
+      opexId = await writeToOpex(date, monthKey, 'Investment', stock, payMethod, 'expense', totalIdr, '');
     }
-    return { status: 'ok', wrote: true };
+    await SheetsClient.appendValues(spreadsheetId, 'Invest!A:J', [[
+      formatDateStr(date), stock, stockType, action, account || '', lot, price, totalIdr, id, opexId,
+    ]]);
+    return { status: 'ok', wrote: true, id };
   }
 
   async function handleGetInvest(since) {
-    const res = await SheetsClient.getValues(spreadsheetId, 'Invest!A2:H');
+    const res = await SheetsClient.getValues(spreadsheetId, 'Invest!A2:J');
     const data = res.values || [];
     const rows = [];
-    data.forEach(row => {
+    data.forEach((row, idx) => {
       const stock = String(row[1] || '').trim();
       const action = String(row[3] || '').trim();
       if (!stock || (action !== 'Buy' && action !== 'Sell')) return;
       const dateStr = cellToDateStr(row[0]);
       if (!dateStr || dateStr < since) return;
-      rows.push({
+      const r = {
         date: dateStr, stock, action,
         account: String(row[4] || '').trim(),
         lot: Number(row[5]) || 0, price: Number(row[6]) || 0, totalIdr: Number(row[7]) || 0,
-      });
+        rowIndex: idx + 2,
+      };
+      if (row[8]) r.id = String(row[8]).trim();
+      if (row[9]) r.opexTxId = String(row[9]).trim();
+      rows.push(r);
     });
 
     // Smart-autofill map for the Invest form's Account field: what Account was used

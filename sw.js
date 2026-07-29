@@ -1,13 +1,20 @@
-const SHELL_CACHE = 'notapub-shell-v3';
+const SHELL_CACHE = 'notapub-shell-v4';
 const DATA_CACHE  = 'notapub-data-v1';
 const CDN_CACHE   = 'notapub-cdn-v1';
 
 // Core app files cached on install
 const SHELL_FILES = ['./index.html', './icon.png'];
 
-// These are live API calls — never intercept them
+// These are live API calls — never intercept them. Critically, this must include every
+// host DataStore/SheetsClient talk to (sheets.googleapis.com, www.googleapis.com) —
+// caches.put() throws on a non-GET request (e.g. POST writes), which was silently
+// turning real, successful Sheets API calls into a fake "Offline" 503 response.
 const BYPASS_HOSTS = [
   'script.google.com',
+  'sheets.googleapis.com',
+  'www.googleapis.com',
+  'accounts.google.com',
+  'oauth2.googleapis.com',
   'frankfurter.app',
   'fonts.googleapis.com',
   'fonts.gstatic.com'

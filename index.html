@@ -1288,7 +1288,7 @@ function renderSettingsLists() {
     const rowHtml = it => `<div class="config-row" onclick="openConfigItemOverlay('${kind}', ${jsAttr(it.name)})">
       <div class="config-row-name">
         ${it.color ? `<span class="config-color-dot" style="background:${it.color}"></span>` : ''}
-        <span>${it.name}</span>
+        <span>${esc(it.name)}</span>
         ${it.archived ? '<span class="config-archived-badge">Deleted</span>' : ''}
       </div>
       <span class="config-row-meta">${kind==='stock' ? (it.assetType||'') : (kind==='account' && it.ccy==='USD' ? 'USD' : '')}</span>

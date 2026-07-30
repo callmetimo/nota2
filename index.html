@@ -1376,21 +1376,42 @@ async function fetchAccountBalances() {
 }
 
 function computeAccountCurrentBalance(baseAmount, baseDate, linkedPM) {
-  if (!linkedPM || !HIST.opex) return baseAmount;
+  if (!linkedPM) return baseAmount;
   let delta = 0;
+  // Opex: expense/income transactions with this PM
   (HIST.opex || []).forEach(r => {
     if ((r.pm || '') !== linkedPM) return;
-    // HIST.opex rows have y/m/d (m is 0-based); deleted rows are already excluded server-side
     const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
     if (rowDate <= baseDate) return;
     delta += (r.inc || 0) - (r.exp || 0);
+  });
+  // Invest: buying forex/USD assets funded from this IDR account depletes its balance
+  (HIST.invest || []).forEach(r => {
+    if ((r.account || '') !== linkedPM) return;
+    if (ACCOUNT_CCY[r.stock] !== 'USD') return;
+    if (r.action !== 'Buy') return;
+    const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
+    if (rowDate <= baseDate) return;
+    delta -= (r.totalIdr || 0);
   });
   return baseAmount + delta;
 }
 
 function buildAccountBalances() {
   accountBalances = {};
+  // USD/Forex accounts: balance derived from Invest sheet via computeInvestNetLots
+  const investNetLots = (HIST.invest && HIST.invest.length) ? computeInvestNetLots(HIST.invest) : null;
+  const manualUSD = parsePrice(stockPrices['USDIDR']);
+  const usdRate = manualUSD > 0 ? manualUSD : (fxRates.USD || 16500);
+
   CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).forEach(acct => {
+    if (ACCOUNT_CCY[acct.name] === 'USD') {
+      if (!investNetLots) return;
+      const netUSD = (investNetLots.buyLots[acct.name] || 0) - (investNetLots.sellLots[acct.name] || 0);
+      if (netUSD > 0) accountBalances[acct.name] = { amount: netUSD * usdRate };
+      return;
+    }
+    // IDR accounts: use Balances sheet snapshot + Opex/Invest deltas
     const raw = rawAccountBalances[acct.name];
     if (!raw) return;
     const current = computeAccountCurrentBalance(raw.amount, raw.date, acct.linkedPM || '');

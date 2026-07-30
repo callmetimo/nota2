@@ -72,6 +72,29 @@ Then open `http://localhost:8000`.
   column layout the original's Apps Script backend used (see `data-store.js`
   for the exact schema), so the porting between the two stays 1:1 where it matters.
 
+## Dual-purpose stock/account entries (e.g. USDIDR Pluang Febri)
+
+Some assets in the Invest sheet function as both a stock that holds a balance AND
+an account that funds other purchases. Example: `USDIDR Pluang Febri` is a Forex
+account where you buy USD, then spend that USD to buy US stocks (QQQ, JNJ) *from*
+that same account, which depletes the USD balance.
+
+**How it works:**
+- In the Invest sheet, each "Buy USD" transaction increases the balance (e.g. 240.36 USD).
+- Each "Buy US Stock" with `Account = USDIDR Pluang Febri` spends USD from that account.
+- The app tracks this by checking if an account is tagged `ccy = 'USD'` in the Config sheet.
+- If so, `renderNetWorth()` and `getGoalCurrentValue()` both call `computeInvestNetLots()`
+  to compute: `netLot[USDIDR Pluang Febri] = total USD bought − total USD spent on stocks`.
+
+**The math:** if you buy 3,365 USD total and spend 2,932 USD on stocks, the balance
+is 3,365 − 2,932 = 433 USD. If the USD account is *not* tagged `ccy = 'USD'`, the
+spending is invisible and the balance looks like 3,365 (wrong). So for any account
+you use this way, add `ccy = USD` in the Config sheet so the depletion logic kicks in.
+
+Both `renderNetWorth()` and `getGoalCurrentValue()` share the aggregation logic
+via `computeInvestNetLots()` (defined in `index.html` ~line 3220) to prevent them
+from drifting out of sync.
+
 ## Inherited frontend knowledge (from the original Nota)
 
 `index.html` is a fork of the original Nota's UI/calculation code — rendering,

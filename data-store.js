@@ -271,6 +271,30 @@ const DataStore = (() => {
 
   function cellToDateStr(val) { return String(val || '').trim(); }
 
+  // Invest!A has a mix of formats across its history: legacy rows entered as
+  // "DD/MM/YYYY" and rows written by this app via formatDateStr() as "DD Mon YY".
+  // Comparing either of those directly against an ISO "YYYY-MM-DD" `since` cutoff
+  // with plain string `<` is meaningless (e.g. "07/05/2025" < "2000-01-01" is TRUE
+  // because '0' < '2' lexically) and was silently dropping most rows from
+  // handleGetInvest — normalize to ISO first so the comparison is actually valid.
+  function parseAnyDateToISO(val) {
+    const s = String(val || '').trim();
+    if (!s) return '';
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\w*\s+(\d{2,4})$/);
+    if (m) {
+      const idx = MONTHS.findIndex(mo => mo.toLowerCase() === m[2].slice(0, 3).toLowerCase());
+      if (idx >= 0) {
+        const yr = m[3].length === 2 ? '20' + m[3] : m[3];
+        return `${yr}-${String(idx + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+      }
+    }
+    return '';
+  }
+
   // ── OPEX ──────────────────────────────────────────────────────
   async function findOpexRowById(id) {
     if (!id) return null;
@@ -508,9 +532,13 @@ const DataStore = (() => {
       const action = String(row[3] || '').trim();
       if (!stock || (action !== 'Buy' && action !== 'Sell')) return;
       const dateStr = cellToDateStr(row[0]);
-      if (!dateStr || dateStr < since) return;
+      if (!dateStr) return;
+      const isoDate = parseAnyDateToISO(dateStr);
+      // Only exclude when the date parsed cleanly AND is before the cutoff — an
+      // unparseable date must never silently drop a real transaction.
+      if (isoDate && isoDate < since) return;
       const r = {
-        date: dateStr, stock, action,
+        date: isoDate || dateStr, stock, action,
         account: String(row[4] || '').trim(),
         lot: Number(row[5]) || 0, price: Number(row[6]) || 0, totalIdr: Number(row[7]) || 0,
         rowIndex: idx + 2,

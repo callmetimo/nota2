@@ -356,6 +356,43 @@ const DataStore = (() => {
     return { status: 'ok', wrote: true, id };
   }
 
+  async function findOpexRowsByTxId(txId) {
+    if (!txId) return [];
+    const res = await SheetsClient.getValues(spreadsheetId, 'Opex!K2:K');
+    const ids = res.values || [];
+    const rows = [];
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0] || '').trim() === String(txId).trim()) rows.push(i + 2);
+    }
+    return rows;
+  }
+
+  async function handleTransfer(data) {
+    if (data.action === 'delete') {
+      const rowIndices = await findOpexRowsByTxId(data.id);
+      if (!rowIndices.length) return { status: 'error', message: 'Transfer rows not found' };
+      const sorted = [...rowIndices].sort((a, b) => b - a);
+      for (const rowIndex of sorted) {
+        await SheetsClient.batchUpdate(spreadsheetId, [{
+          deleteDimension: {
+            range: { sheetId: opexGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex },
+          },
+        }]);
+      }
+      return { status: 'ok' };
+    }
+    const { date, month, fromPm, toPm, amount, notes } = data;
+    const groupId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+    const txId = 'xfr_' + groupId;
+    await SheetsClient.appendValues(spreadsheetId, 'Opex!A:K', [[
+      formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0, txId,
+    ]]);
+    await SheetsClient.appendValues(spreadsheetId, 'Opex!A:K', [[
+      formatDateStr(date), month, 'Transfer', 'Transfer', toPm, amount, '', notes || '', '', 0, txId,
+    ]]);
+    return { status: 'ok', wrote: true, id: txId };
+  }
+
   async function handleGetMonth(y, m) {
     const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:K');
     const data = res.values || [];
@@ -813,6 +850,7 @@ const DataStore = (() => {
     if (data.type === 'recurring') return handleRecurring(data);
     if (data.type === 'config') return handleConfig(data);
     if (data.type === 'balances') return handleSaveBalance(data);
+    if (data.type === 'transfer') return handleTransfer(data);
     return { status: 'error', message: 'Unknown type' };
   }
 

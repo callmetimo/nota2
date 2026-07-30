@@ -139,6 +139,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .submit-btn.expense{background:var(--accent);color:#0f0f0f}
 .submit-btn.income{background:var(--green);color:#0f0f0f}
 .submit-btn.invest{background:var(--blue);color:#0f0f0f}
+.submit-btn.transfer{background:#a78bfa;color:#0f0f0f}
 .submit-btn:active{transform:scale(0.98);opacity:0.9}
 .delete-btn{width:100%;border:0.5px solid rgba(255,107,107,0.3);border-radius:var(--radius);padding:14px;font-size:15px;font-weight:700;cursor:pointer;margin-top:8px;background:var(--red-dim);color:var(--red);transition:opacity 0.2s,transform 0.1s}
 .delete-btn:active{transform:scale(0.98);opacity:0.9}
@@ -149,6 +150,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .pill-toggle-btn.active.expense{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
 .pill-toggle-btn.active.income{border-color:var(--green);color:var(--green);background:var(--green-dim)}
 .pill-toggle-btn.active.invest{border-color:var(--blue);color:var(--blue);background:var(--blue-dim)}
+.pill-toggle-btn.active.transfer{border-color:#a78bfa;color:#a78bfa;background:rgba(167,139,250,0.12)}
 
 /* Smart suggestions */
 .smart-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:-6px;margin-bottom:12px}
@@ -420,6 +422,8 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .cal-tx-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:rgba(255,255,255,0.18)}
 .cal-tx-dot.income{background:rgba(74,222,128,0.6)}
 .cal-tx-dot.invest{background:rgba(96,160,240,0.6)}
+.cal-tx-dot.transfer{background:rgba(167,139,250,0.6)}
+.cal-tx-amt.transfer{color:#a78bfa}
 .cal-tx-dot.unsynced{background:#ff9500}
 .cal-tx-info{flex:1;min-width:0}
 .cal-tx-tx{font-size:16px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -532,6 +536,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <div class="pill-toggle-btn active expense" data-mode="expense" onclick="setInputMode('expense',this)">Expense</div>
       <div class="pill-toggle-btn income" data-mode="income" onclick="setInputMode('income',this)">Income</div>
       <div class="pill-toggle-btn invest" data-mode="invest" onclick="setInputMode('invest',this)">Invest</div>
+      <div class="pill-toggle-btn transfer" data-mode="transfer" onclick="setInputMode('transfer',this)">Transfer</div>
     </div>
 
     <!-- Expense / Income form -->
@@ -673,6 +678,44 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       </div>
       <button class="submit-btn invest" id="submitInvestBtn" onclick="submitInvest()">Save Investment</button>
       <button class="delete-btn" id="deleteInvestBtn" onclick="deleteSheetInvestTransaction()" style="display:none">Delete Investment</button>
+    </div>
+
+    <!-- Transfer form -->
+    <div id="form-transfer" style="display:none">
+      <div class="form-group" style="position:relative">
+        <label class="form-label">Date</label>
+        <input type="date" id="xfrDateRaw" class="date-input-hidden">
+        <div class="date-display" id="xfrDateDisplay" tabindex="0">
+          <span id="xfrDateText"></span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group autocomplete-wrapper">
+          <label class="form-label">From</label>
+          <input type="text" class="form-input" id="xfrFrom" placeholder="Source account…" autocomplete="off" maxlength="50"
+            oninput="showAC('xfrFrom', getSmartPms())" onfocus="showAC('xfrFrom', getSmartPms())">
+          <div class="autocomplete-list" id="ac-xfrFrom" style="display:none"></div>
+        </div>
+        <div class="form-group autocomplete-wrapper">
+          <label class="form-label">To</label>
+          <input type="text" class="form-input" id="xfrTo" placeholder="Destination account…" autocomplete="off" maxlength="50"
+            oninput="showAC('xfrTo', getSmartPms())" onfocus="showAC('xfrTo', getSmartPms())">
+          <div class="autocomplete-list" id="ac-xfrTo" style="display:none"></div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Amount</label>
+        <div class="amount-wrapper">
+          <span class="amount-prefix">Rp</span>
+          <input type="text" class="form-input amount-input" id="xfrAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <input type="text" class="form-input" id="xfrNotes" placeholder="Add a note…" autocomplete="off" maxlength="200">
+      </div>
+      <button class="submit-btn transfer" onclick="submitTransfer()">Save Transfer</button>
     </div>
   </div>
 </div><!-- /page-input -->
@@ -1970,7 +2013,7 @@ function getAllOpexRows() {
 }
 
 function getRows(view) {
-  const hist = getAllOpexRows().filter(r => r.exp && r.cat !== 'Investment');
+  const hist = getAllOpexRows().filter(r => r.exp && r.cat !== 'Investment' && r.cat !== 'Transfer');
   if (view === 'all') return hist;
   if (view === 'flazz') return hist.filter(r => r.pm === 'Flazz');
   if (view === 'ewallet') return hist.filter(r => r.pm === 'eWallet');
@@ -2019,8 +2062,14 @@ function initDatePicker(rawId, dispId, txtId) {
 function setInputMode(mode, el) {
   inputMode = mode;
   toggleActive('.pill-toggle-btn', el);
-  document.getElementById('form-opex').style.display = mode !== 'invest' ? 'block' : 'none';
+  document.getElementById('form-opex').style.display = (mode !== 'invest' && mode !== 'transfer') ? 'block' : 'none';
   document.getElementById('form-invest').style.display = mode === 'invest' ? 'block' : 'none';
+  document.getElementById('form-transfer').style.display = mode === 'transfer' ? 'block' : 'none';
+  if (mode === 'transfer') {
+    const t = todayISO();
+    const rawEl = document.getElementById('xfrDateRaw');
+    if (rawEl && !rawEl.value) { rawEl.value = t; document.getElementById('xfrDateText').textContent = isoDisp(t); }
+  }
   const btn = document.getElementById('submitOpexBtn');
   btn.className = `submit-btn ${mode}`;
   btn.textContent = mode === 'income' ? 'Save Income' : 'Save Transaction';
@@ -2498,6 +2547,79 @@ function resetOpexForm() {
   document.getElementById('inputPm').value='';
   document.getElementById('inputNotes').value='';
   resetRecurringToggle();
+}
+
+// ── TRANSFER ──────────────────────────────────────────────────
+function submitTransfer() {
+  if (isSyncing) return;
+  isSyncing = true;
+  const date = document.getElementById('xfrDateRaw').value;
+  const fromPm = sanitizeInput(document.getElementById('xfrFrom').value, 50).trim();
+  const toPm = sanitizeInput(document.getElementById('xfrTo').value, 50).trim();
+  const amount = parseGroupedAmt('xfrAmount');
+  const notes = sanitizeInput(document.getElementById('xfrNotes').value, 200);
+  if (!date || !fromPm || !toPm || !amount) { isSyncing = false; showToast('All fields required', 'error'); return; }
+  if (fromPm === toPm) { isSyncing = false; showToast('From and To must be different', 'error'); return; }
+  const r = { id: Date.now(), date, fromPm, toPm, amount, notes, type: 'transfer', synced: false };
+  switchTab('home', null);
+  showToast('Saving transfer…', 'loading', 0);
+  syncTransfer(r).then(ok => {
+    isSyncing = false;
+    if (ok) {
+      showToast('Transfer saved ✓', 'success');
+      Promise.all([
+        fetchCurrentMonth(true),
+        fetchAllOpex(),
+      ]).then(() => { calInited = false; if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); } });
+    } else {
+      showToast(navigator.onLine ? 'Save failed' : 'Offline — sync pending', '');
+    }
+  });
+  resetTransferForm();
+}
+
+function resetTransferForm() {
+  const t = todayISO();
+  document.getElementById('xfrDateRaw').value = t;
+  document.getElementById('xfrDateText').textContent = isoDisp(t);
+  document.getElementById('xfrFrom').value = '';
+  document.getElementById('xfrTo').value = '';
+  document.getElementById('xfrAmount').value = '';
+  document.getElementById('xfrNotes').value = '';
+}
+
+async function syncTransfer(r) {
+  try {
+    const payload = {
+      type: 'transfer',
+      date: isoSheetDate(r.date), month: isoMonthKey(r.date),
+      fromPm: r.fromPm, toPm: r.toPm,
+      amount: r.amount, notes: r.notes || '',
+      clientId: String(r.id),
+    };
+    const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: apiBody(payload) });
+    const j = await res.json().catch(() => ({}));
+    return j.status === 'ok' && !j.version;
+  } catch (e) { console.error('[syncTransfer]', e.message); return false; }
+}
+
+async function deleteTransfer(txId) {
+  if (!txId) return;
+  showToast('Deleting transfer…', 'loading', 0);
+  try {
+    const payload = { type: 'transfer', action: 'delete', id: txId };
+    const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: apiBody(payload) });
+    const j = await res.json().catch(() => ({}));
+    if (j.status === 'ok') {
+      showToast('Transfer deleted ✓', 'success');
+      Promise.all([fetchCurrentMonth(true), fetchAllOpex()]).then(() => {
+        calInited = false;
+        if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); }
+      });
+    } else {
+      showToast('Delete failed', 'error');
+    }
+  } catch (e) { showToast('Delete failed', 'error'); }
 }
 
 // Uncheck "Set as Recurring" and hide/clear its fields — used after a rule has
@@ -4166,8 +4288,37 @@ function calGetMonthData(year, month) {
     txByDay[key].push(r);
   });
 
+  // Merge paired Transfer rows (same xfr_ TxID) into single display entries
+  Object.keys(txByDay).forEach(day => {
+    const arr = txByDay[day];
+    const xfrGroups = {};
+    arr.forEach(r => {
+      if ((r.cat || r.category) === 'Transfer' && r.id && String(r.id).startsWith('xfr_')) {
+        if (!xfrGroups[r.id]) xfrGroups[r.id] = [];
+        xfrGroups[r.id].push(r);
+      }
+    });
+    Object.entries(xfrGroups).forEach(([txId, rows]) => {
+      if (rows.length < 2) return;
+      const expRow = rows.find(r => (r.exp || 0) > 0);
+      const incRow = rows.find(r => (r.inc || 0) > 0);
+      if (!expRow || !incRow) return;
+      const merged = {
+        ...expRow,
+        tx: `${expRow.pm} → ${incRow.pm}`,
+        pm: `${expRow.pm} → ${incRow.pm}`,
+        cat: 'Transfer', category: 'Transfer',
+        amt: expRow.exp || 0,
+        type: 'transfer',
+        transferFromPm: expRow.pm,
+        transferToPm: incRow.pm,
+      };
+      txByDay[day] = arr.filter(r => !rows.includes(r)).concat([merged]);
+    });
+  });
+
   let total = opex
-    .filter(r => r.y === year && r.m === month - 1 && r.cat !== 'Income' && r.cat !== 'Investment')
+    .filter(r => r.y === year && r.m === month - 1 && r.cat !== 'Income' && r.cat !== 'Investment' && r.cat !== 'Transfer')
     .reduce((s, r) => s + (r.exp || 0), 0);
 
   const localIncome = (txHistory || [])
@@ -4323,7 +4474,7 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
       const cellY    = isCur ? year : (cell.next ? nextYear : prevYear);
       const cellM    = isCur ? month : (cell.next ? nextMonth : prevMonth);
       const txs      = getTxByDayFor(cellY, cellM)[cell.day] || [];
-      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income').reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer').reduce((s, r) => s + (r.amount || r.exp || 0), 0);
       const hasData  = txs.length > 0;
       const allProjected = hasData && txs.every(r => r.projected);
       const hasFuture = hasData && txs.some(r => r.future && isFuture);
@@ -4343,7 +4494,7 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
             cat: r.category || r.cat || '',
             pm: r.pm || '',
             amt: r.amount || r.exp || r.inc || 0,
-            type: (r.category || r.cat) === 'Income' ? 'income' : ((r.category || r.cat) === 'Investment' ? 'invest' : ''),
+            type: (r.category || r.cat) === 'Income' ? 'income' : ((r.category || r.cat) === 'Investment' ? 'invest' : ((r.category || r.cat) === 'Transfer' ? 'transfer' : '')),
             rowIndex: r.rowIndex || null,
             sheetId: r.rowIndex ? (r.id || null) : null,
             notes: r.notes || '',
@@ -4405,7 +4556,7 @@ function calGetRemainingWeeksHTML(year, month, today) {
       const isCur = (dy === year && dm === month);
       const isFuture = d > today;
       const txs = getTxByDayFor(dy, dm)[dd] || [];
-      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income').reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer').reduce((s, r) => s + (r.amount || r.exp || 0), 0);
       const hasData = txs.length > 0;
 
       let cls = 'cal-day' + (isCur ? (isFuture && hasData ? ' future' : (hasData ? ' has-data' : '')) : ' other-month');
@@ -4417,7 +4568,7 @@ function calGetRemainingWeeksHTML(year, month, today) {
             cat: r.category || r.cat || '',
             pm: r.pm || '',
             amt: r.amount || r.exp || r.inc || 0,
-            type: (r.category || r.cat) === 'Income' ? 'income' : ((r.category || r.cat) === 'Investment' ? 'invest' : ''),
+            type: (r.category || r.cat) === 'Income' ? 'income' : ((r.category || r.cat) === 'Investment' ? 'invest' : ((r.category || r.cat) === 'Transfer' ? 'transfer' : '')),
             rowIndex: r.rowIndex || null,
             sheetId: r.rowIndex ? (r.id || null) : null,
             notes: r.notes || '',
@@ -4983,7 +5134,7 @@ function calRenderYearPills(pastYears, curYear, container) {
 
   // Build current year (2026) pill — always first, special behavior
   const curYearTotal = opex
-    .filter(r => r.y === curYear && r.cat !== 'Income' && r.cat !== 'Investment')
+    .filter(r => r.y === curYear && r.cat !== 'Income' && r.cat !== 'Investment' && r.cat !== 'Transfer')
     .reduce((s, r) => s + (r.exp || 0), 0);
   const curYearFmt = curYearTotal ? fRpS(curYearTotal) : 'Rp 0';
   const curExpCls = cal2026Collapsed ? '' : ' expanded';
@@ -5005,7 +5156,7 @@ function calRenderYearPills(pastYears, curYear, container) {
   const pastPillsHTML = pastYears.map(y => {
     const isExpanded = !!calExpandedYears[y];
     const yearTotal = opex
-      .filter(r => r.y === y && r.cat !== 'Income' && r.cat !== 'Investment')
+      .filter(r => r.y === y && r.cat !== 'Income' && r.cat !== 'Investment' && r.cat !== 'Transfer')
       .reduce((s, r) => s + (r.exp || 0), 0);
     const yearTotalFmt = yearTotal ? fRpS(yearTotal) : 'Rp 0';
     const expCls = isExpanded ? ' expanded' : '';
@@ -5128,18 +5279,20 @@ function calSelectDay(cell, dateStr, totalStr) {
     document.getElementById('calTxTotal').textContent = totalLabel;
     document.getElementById('calTxList').innerHTML = txns.map((tx, idx) => {
       const isTrulyFuture = tx.future && dateStr > todayISO();
-      const canEdit = isEditableDay && !tx.projected;
+      const isTransfer = tx.cat === 'Transfer' || tx.type === 'transfer';
+      const canEdit = isEditableDay && !tx.projected && !isTransfer;
+      const canDelete = isEditableDay && isTransfer && tx.sheetId;
       // A projected recurring entry is due-and-syncable once its date has arrived (not still upcoming)
       const canSyncProjected = tx.projected && tx.ruleId && dateStr <= todayISO();
-      const tapAttrs = canEdit ? `data-idx="${idx}"` : (canSyncProjected ? `data-ruleid="${tx.ruleId}"` : '');
-      return `<div class="cal-tx-item${canEdit ? ' editable' : ''}${canSyncProjected ? ' projected-tappable' : ''}" ${tapAttrs}>
+      const tapAttrs = canEdit ? `data-idx="${idx}"` : (canSyncProjected ? `data-ruleid="${tx.ruleId}"` : (canDelete ? `data-xfrid="${esc(tx.sheetId)}"` : ''));
+      return `<div class="cal-tx-item${canEdit ? ' editable' : ''}${canSyncProjected ? ' projected-tappable' : ''}${canDelete ? ' transfer-deletable' : ''}" ${tapAttrs}>
         <div class="cal-tx-dot ${tx.type||''}${tx.synced===false?' unsynced':''}"></div>
         <div class="cal-tx-info">
           <div class="cal-tx-tx">${esc(tx.tx)}${tx.projected ? '<span class="proj-badge">Projected</span>' : ''}${isTrulyFuture ? '<span class="future-badge">Future</span>' : ''}</div>
-          <div class="cal-tx-meta">${esc(tx.cat)} - ${esc(tx.pm)}${canSyncProjected ? ' · Tap for options' : ''}</div>
+          <div class="cal-tx-meta">${isTransfer ? 'Transfer' : esc(tx.cat) + ' - ' + esc(tx.pm)}${canSyncProjected ? ' · Tap for options' : ''}${canDelete ? ' · Tap to delete' : ''}</div>
         </div>
         <div class="cal-tx-amt ${tx.type||''}">${fRp(tx.amt)}</div>
-        ${canEdit || canSyncProjected ? '<div class="cal-tx-edit-chevron">›</div>' : ''}
+        ${canEdit || canSyncProjected || canDelete ? '<div class="cal-tx-edit-chevron">›</div>' : ''}
       </div>`;
     }).join('');
     calSetPanelH(txns.length);
@@ -5236,6 +5389,7 @@ updateHeaderHeight();
 window.addEventListener('resize',updateHeaderHeight);
 initDatePicker('inputDateRaw','inputDateDisplay','inputDateText');
 initDatePicker('inputDateRawI','inputDateDisplayI','inputDateTextI');
+initDatePicker('xfrDateRaw','xfrDateDisplay','xfrDateText');
 
 // ── INIT v3.5: Render from cache instantly, fetch in background ──
 window.addEventListener('DOMContentLoaded', async () => {
@@ -5267,6 +5421,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (dt > 400 || dx > 8 || dy > 8) return; // scroll or long-press
       const projItem = e.target.closest('.cal-tx-item[data-ruleid]');
       if (projItem) { _touchFired = Date.now(); openProjectedActionModal(projItem.dataset.ruleid); return; }
+      const xfrItem = e.target.closest('.cal-tx-item[data-xfrid]');
+      if (xfrItem) { _touchFired = Date.now(); if (confirm('Delete this transfer?')) deleteTransfer(xfrItem.dataset.xfrid); return; }
       const item = e.target.closest('.cal-tx-item[data-idx]');
       if (!item) return;
       _touchFired = Date.now();
@@ -5277,6 +5433,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (Date.now() - _touchFired < 600) return;
       const projItem = e.target.closest('.cal-tx-item[data-ruleid]');
       if (projItem) { openProjectedActionModal(projItem.dataset.ruleid); return; }
+      const xfrItem = e.target.closest('.cal-tx-item[data-xfrid]');
+      if (xfrItem) { if (confirm('Delete this transfer?')) deleteTransfer(xfrItem.dataset.xfrid); return; }
       const item = e.target.closest('.cal-tx-item[data-idx]');
       if (!item) return;
       openEditOverlay(parseInt(item.dataset.idx));

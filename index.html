@@ -204,6 +204,22 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .search-item-note .highlight{color:var(--accent);font-weight:500}
 .highlight{color:var(--accent);font-weight:500}
 
+/* ACCOUNT BALANCE CARDS */
+.acct-bal-section{padding:0 20px 4px}
+.acct-bal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.acct-bal-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px}
+.acct-bal-link{font-size:13px;color:var(--blue);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.acct-bal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.acct-bal-card{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color 0.2s}
+.acct-bal-card:active{border-color:var(--accent)}
+.acct-bal-name{font-size:11px;color:var(--text2);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acct-bal-amount{font-size:17px;font-weight:700;color:var(--text);letter-spacing:-0.5px;font-variant-numeric:tabular-nums}
+.acct-bal-total{display:flex;justify-content:space-between;align-items:center;padding:6px 0 10px;border-top:0.5px solid var(--border);margin-top:2px}
+.acct-bal-total-label{font-size:12px;color:var(--text2)}
+.acct-bal-total-val{font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+.acct-bal-empty{padding:14px 0 10px;font-size:13px;color:var(--text2)}
+.acct-bal-empty span{color:var(--accent);cursor:pointer}
+
 /* CHART SHARED */
 .chart-page-section{margin-top:16px}
 .insights-sticky{position:sticky;top:0;z-index:90;background:var(--bg);padding:10px 20px 8px;margin:0 -20px;border-bottom:0.5px solid var(--border)}
@@ -682,8 +698,9 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 <!-- INSIGHTS -->
 <div class="page" id="page-insights">
   <div style="padding:24px 0 14px;display:flex;align-items:center;justify-content:space-between">
-    <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Expense Insights</div>
+    <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Insights</div>
   </div>
+  <div id="accountBalanceCards"></div>
   <div class="chart-page-section">
     <div class="insights-sticky">
       <div class="toggle-row" id="insightsModeToggle">
@@ -911,8 +928,35 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           <span style="font-size:14px">USD-denominated</span>
         </label>
       </div>
+      <div class="form-group" id="configItemLinkedPMGroup" style="display:none">
+        <label class="form-label">Linked Payment Method</label>
+        <select class="form-input" id="configItemLinkedPM"></select>
+      </div>
+      <div id="configItemSetBalanceGroup" style="display:none;margin-bottom:12px">
+        <button class="submit-btn" style="background:var(--bg3);color:var(--text);border:0.5px solid var(--border2)" onclick="openSetBalanceFromConfigOverlay()">Set Balance</button>
+      </div>
       <button class="submit-btn expense" onclick="saveConfigItem()">Save</button>
       <button class="btn-delete" style="width:100%;margin-top:8px" id="configItemArchiveBtn" onclick="toggleArchiveCurrentConfigItem()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- SET BALANCE OVERLAY -->
+<div class="input-overlay" id="setBalanceOverlay" onclick="closeSetBalanceOverlay()">
+  <div class="input-sheet" onclick="event.stopPropagation()">
+    <div class="input-sheet-handle-wrap"><div class="input-sheet-handle"></div></div>
+    <div style="padding:0 20px 20px">
+      <div style="font-size:20px;font-weight:700;letter-spacing:-0.3px;margin-bottom:18px" id="setBalanceTitle">Set Balance</div>
+      <input type="hidden" id="setBalanceAccount">
+      <div class="form-group">
+        <label class="form-label">Amount (IDR)</label>
+        <input type="number" class="form-input" id="setBalanceAmount" placeholder="0" min="0" inputmode="numeric">
+      </div>
+      <div class="form-group">
+        <label class="form-label">As of date</label>
+        <input type="date" class="form-input" id="setBalanceDate">
+      </div>
+      <button class="submit-btn expense" onclick="saveAccountBalance()">Save Balance</button>
     </div>
   </div>
 </div>
@@ -1217,6 +1261,8 @@ const STOCK_TYPE = {'USDIDR CIMB':'Forex'};
 
 // ── CONFIG (Categories / PMs / Assets / Accounts, user-editable via Settings) ──
 let CONFIG_ITEMS = [];
+let rawAccountBalances = {}; // {accountName: {date, amount, txId}} latest snapshot per account from Balances sheet
+let accountBalances    = {}; // {accountName: {amount}} after applying transaction deltas
 
 async function fetchConfig() {
   try {
@@ -1277,6 +1323,110 @@ async function installLivePrices() {
   }
 }
 
+// ── ACCOUNT BALANCES ──────────────────────────────────────────
+async function fetchAccountBalances() {
+  try {
+    const res = await fetch(apiGet('type=balances'), { method: 'GET' });
+    const j = await res.json();
+    if (j.status === 'ok') rawAccountBalances = j.balances || {};
+  } catch(e) { /* offline — keep whatever we have */ }
+}
+
+function computeAccountCurrentBalance(baseAmount, baseDate, linkedPM) {
+  if (!linkedPM || !HIST.opex) return baseAmount;
+  let delta = 0;
+  (HIST.opex || []).forEach(r => {
+    if ((r.pm || '') !== linkedPM) return;
+    // HIST.opex rows have y/m/d (m is 0-based); deleted rows are already excluded server-side
+    const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
+    if (rowDate <= baseDate) return;
+    delta += (r.inc || 0) - (r.exp || 0);
+  });
+  return baseAmount + delta;
+}
+
+function buildAccountBalances() {
+  accountBalances = {};
+  CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).forEach(acct => {
+    const raw = rawAccountBalances[acct.name];
+    if (!raw) return;
+    const current = computeAccountCurrentBalance(raw.amount, raw.date, acct.linkedPM || '');
+    accountBalances[acct.name] = { amount: current };
+  });
+}
+
+function renderAccountBalanceCards() {
+  const el = document.getElementById('accountBalanceCards');
+  if (!el) return;
+  const withBal = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && accountBalances[i.name] != null);
+  if (!withBal.length) {
+    el.innerHTML = `<div class="acct-bal-section"><div class="acct-bal-empty">No balances set — open <span onclick="switchTabFromMore('settings')">Settings → Accounts</span> to add one.</div></div>`;
+    return;
+  }
+  const totalCash = withBal.reduce((s, a) => s + (accountBalances[a.name]?.amount || 0), 0);
+  const cards = withBal.map(a => {
+    const bal = accountBalances[a.name]?.amount || 0;
+    return `<div class="acct-bal-card" onclick="goToHoldings()">
+      <div class="acct-bal-name">${esc(a.name)}</div>
+      <div class="acct-bal-amount">${fRp(Math.round(bal))}</div>
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div class="acct-bal-section">
+    <div class="acct-bal-header">
+      <div class="acct-bal-label">Accounts</div>
+      <div class="acct-bal-link" onclick="goToHoldings()">Net Worth →</div>
+    </div>
+    <div class="acct-bal-grid">${cards}</div>
+    <div class="acct-bal-total">
+      <div class="acct-bal-total-label">Total cash</div>
+      <div class="acct-bal-total-val">${fRp(Math.round(totalCash))}</div>
+    </div>
+  </div>`;
+}
+
+function goToHoldings() {
+  nwMode = 'holdings';
+  switchTabFromMore('networth');
+}
+
+function openSetBalanceFromConfigOverlay() {
+  const accountName = document.getElementById('configItemOrigName').value || document.getElementById('configItemName').value.trim();
+  if (!accountName) return;
+  document.getElementById('setBalanceAccount').value = accountName;
+  document.getElementById('setBalanceTitle').textContent = `Set Balance: ${accountName}`;
+  const raw = rawAccountBalances[accountName];
+  document.getElementById('setBalanceAmount').value = raw ? String(raw.amount) : '';
+  document.getElementById('setBalanceDate').value = new Date().toISOString().slice(0, 10);
+  closeConfigItemOverlay();
+  document.getElementById('setBalanceOverlay').classList.add('open');
+}
+
+function closeSetBalanceOverlay() {
+  document.getElementById('setBalanceOverlay').classList.remove('open');
+}
+
+async function saveAccountBalance() {
+  const account = document.getElementById('setBalanceAccount').value;
+  const date    = document.getElementById('setBalanceDate').value;
+  const amount  = Number(document.getElementById('setBalanceAmount').value) || 0;
+  if (!account || !date) { showToast('Account and date required', 'error'); return; }
+  const txId = 'bal_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  showToast('Saving…', 'loading');
+  try {
+    await fetchWithTimeout(APPS_SCRIPT_URL, {
+      method: 'POST', headers: {'Content-Type': 'text/plain'},
+      body: apiBody({ type: 'balances', action: 'saveBalance', account, date, amount, txId })
+    });
+    rawAccountBalances[account] = { date, amount, txId };
+    if (histLoaded) buildAccountBalances();
+    renderAccountBalanceCards();
+    closeSetBalanceOverlay();
+    showToast('Balance saved', 'success');
+  } catch(e) {
+    showToast('Could not save: ' + e.message, 'error');
+  }
+}
+
 function renderSettingsLists() {
   const container = document.getElementById('settingsListsContainer');
   if (!container) return;
@@ -1310,6 +1460,8 @@ function _configFieldsForKind(kind) {
   document.getElementById('configItemColorGroup').style.display = kind === 'category' ? 'block' : 'none';
   document.getElementById('configItemAssetTypeGroup').style.display = kind === 'stock' ? 'block' : 'none';
   document.getElementById('configItemCcyGroup').style.display = kind === 'account' ? 'block' : 'none';
+  document.getElementById('configItemLinkedPMGroup').style.display = kind === 'account' ? 'block' : 'none';
+  document.getElementById('configItemSetBalanceGroup').style.display = kind === 'account' ? 'block' : 'none';
 }
 
 function openConfigItemOverlay(kind, name) {
@@ -1321,6 +1473,9 @@ function openConfigItemOverlay(kind, name) {
   document.getElementById('configItemColor').value = (item && item.color) || '#c8f060';
   document.getElementById('configItemAssetType').value = (item && item.assetType) || 'Reksa Dana';
   document.getElementById('configItemUsdCheckbox').checked = !!(item && item.ccy === 'USD');
+  const linkedPMSel = document.getElementById('configItemLinkedPM');
+  linkedPMSel.innerHTML = `<option value="">(None)</option>` +
+    allPMs.map(pm => `<option value="${esc(pm)}"${(item && item.linkedPM === pm) ? ' selected' : ''}>${esc(pm)}</option>`).join('');
   document.getElementById('configItemArchiveBtn').style.display = item ? 'block' : 'none';
   document.getElementById('configItemArchiveBtn').textContent = item && item.archived ? 'Restore' : 'Delete';
   _configFieldsForKind(kind);
@@ -1344,12 +1499,13 @@ async function saveConfigItem() {
   const color = kind === 'category' ? document.getElementById('configItemColor').value : '';
   const assetType = kind === 'stock' ? document.getElementById('configItemAssetType').value : '';
   const ccy = kind === 'account' && document.getElementById('configItemUsdCheckbox').checked ? 'USD' : '';
+  const linkedPM = kind === 'account' ? (document.getElementById('configItemLinkedPM').value || '') : '';
 
   if (existing) {
-    existing.name = name; existing.color = color; existing.assetType = assetType; existing.ccy = ccy;
+    existing.name = name; existing.color = color; existing.assetType = assetType; existing.ccy = ccy; existing.linkedPM = linkedPM;
   } else {
     const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === kind).map(i => i.sortOrder));
-    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, archived: false, sortOrder: maxOrder + 1 });
+    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, archived: false, sortOrder: maxOrder + 1 });
   }
   closeConfigItemOverlay();
   renderSettingsLists();
@@ -2119,6 +2275,7 @@ function switchTab(tab, el) {
   closeInputOverlay();
   closeGoalsOverlay();
   closeConfigItemOverlay();
+  closeSetBalanceOverlay();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('nav-more').classList.remove('sub-active');
@@ -2137,8 +2294,12 @@ function switchTab(tab, el) {
     ['yearlySummary','yearlyBarCard','yearlyMonthCard','yearlyDonutCard','catRankingCard','catTrendCard'].forEach(id=>{document.getElementById(id).style.display='none'});
     if(!histLoaded) {
       document.getElementById('monthlySummary').innerHTML='<div class="chart-loading">Loading data…</div>';
-      onHistLoaded(()=>renderChartTab(insightsMode));
+      onHistLoaded(()=>{
+        fetchAccountBalances().then(()=>{ buildAccountBalances(); renderAccountBalanceCards(); });
+        renderChartTab(insightsMode);
+      });
     } else {
+      fetchAccountBalances().then(()=>{ buildAccountBalances(); renderAccountBalanceCards(); });
       renderChartTab(insightsMode);
     }
   }
@@ -3153,7 +3314,7 @@ function setNWMode(mode,el){
   else renderNetWorth();
 }
 function initNetWorth() {
-  const render = () => Promise.all([fetchSheetPrices(false), fetchLiveInvest()]).then(() => renderNetWorth());
+  const render = () => Promise.all([fetchSheetPrices(false), fetchLiveInvest(), fetchAccountBalances()]).then(() => renderNetWorth());
   if (!histLoaded) onHistLoaded(render);
   else render();
 }
@@ -3283,16 +3444,17 @@ async function renderNetWorth(){
   }).filter(Boolean);
 
   const cashBal = computeCashBalance();
-  const lastBalance = cashBal;
+  buildAccountBalances();
 
   if(nwMode==='holdings'){
-    renderHoldings(holdings, usdRate, chfRate);
+    renderHoldings(holdings, usdRate, chfRate, accountBalances);
   } else {
-    renderOverview(holdings, usdRate, chfRate, lastBalance);
+    renderOverview(holdings, usdRate, chfRate, cashBal, accountBalances);
   }
 }
 
-function renderHoldings(holdings, usdRate, chfRate){
+function renderHoldings(holdings, usdRate, chfRate, acctBals){
+  acctBals = acctBals || {};
   const groups = {
     'Reksa Dana': holdings.filter(h=>h.type==='Reksa Dana'),
     'Forex':      holdings.filter(h=>h.type==='Forex'),
@@ -3302,6 +3464,36 @@ function renderHoldings(holdings, usdRate, chfRate){
   const bgMap    = {'Reksa Dana':'var(--green-dim)','Forex':'var(--blue-dim)','US Stock':'var(--accent-dim)'};
 
   let html = '';
+
+  // Cash section
+  const cashAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && acctBals[i.name] != null);
+  if (cashAccounts.length) {
+    const totalCash = cashAccounts.reduce((s, a) => s + (acctBals[a.name]?.amount || 0), 0);
+    html += `<div class="chart-card-title" style="margin-top:6px;margin-bottom:8px">Cash</div>`;
+    cashAccounts.forEach(acct => {
+      const bal = acctBals[acct.name]?.amount || 0;
+      html += `<div class="holding-item">
+        <div class="holding-header">
+          <div class="holding-name">${esc(acct.name)}</div>
+          <span class="holding-badge" style="background:var(--bg3);color:var(--text2)">${acct.ccy === 'USD' ? 'USD' : 'IDR'}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px">
+          <div>
+            <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Balance</div>
+            ${dualValSm(bal, usdRate)}
+          </div>
+        </div>
+      </div>`;
+    });
+    if (cashAccounts.length > 1) {
+      html += `<div class="holding-item" style="border-color:var(--border2);background:var(--bg3)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:12px;font-weight:600;color:var(--text2)">Total Cash</div>
+          <div style="text-align:right">${dualValSm(totalCash, usdRate)}</div>
+        </div>
+      </div>`;
+    }
+  }
   Object.entries(groups).forEach(([type, items])=>{
     if(!items.length) return;
     if(type==='Forex'||type==='US Stock') items.sort((a,b)=>b.currentValue-a.currentValue);
@@ -3371,7 +3563,13 @@ function renderHoldings(holdings, usdRate, chfRate){
   document.getElementById('nwContent').innerHTML = html || '<div class="empty-state">No holdings found</div>';
 }
 
-function renderOverview(holdings, usdRate, chfRate, cashBalance){
+function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
+  acctBals = acctBals || {};
+  const acctBalsKeys = Object.keys(acctBals);
+  const displayCash = acctBalsKeys.length > 0
+    ? acctBalsKeys.reduce((s, k) => s + (acctBals[k]?.amount || 0), 0)
+    : cashBalance;
+  cashBalance = displayCash;
   const totalInvestCost  = holdings.reduce((s,h)=>s+h.costBasis, 0);
   const totalInvestValue = holdings.reduce((s,h)=>s+h.currentValue, 0);
   const hasValue = totalInvestValue > 0;

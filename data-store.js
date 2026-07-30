@@ -19,6 +19,7 @@ const DataStore = (() => {
   const OLD_GOALS_START_ROW = 15; // pre-split location, used only during migration
   const CONFIG_SHEET = 'Config';
   const CONFIG_DATA_ROW = 2;
+  const BALANCES_SHEET = 'Balances';
 
   const CAT_COLOR_DEFAULTS = {
     'Transport':'#60a0f0','Meals':'#c8f060','Entertainment':'#ff6b6b','Groceries':'#ffaa44',
@@ -99,6 +100,7 @@ const DataStore = (() => {
         { properties: { title: STOCK_PRICES_SHEET, sheetId: 3 } },
         { properties: { title: GOALS_SHEET, sheetId: 4 } },
         { properties: { title: RECURRING_SHEET, sheetId: 5 } },
+        { properties: { title: BALANCES_SHEET, sheetId: 6 } },
       ],
     });
     spreadsheetId = created.spreadsheetId;
@@ -126,13 +128,16 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
       'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
     ]]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:G1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder',
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:H1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM',
     ]]);
     const configRows = CONFIG_DEFAULTS.map(it => [
-      it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder,
+      it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
+    await SheetsClient.updateValues(spreadsheetId, `${BALANCES_SHEET}!A1:D1`, [[
+      'Account', 'Date', 'Amount', 'TxID',
+    ]]);
     await SheetsClient.batchUpdate(spreadsheetId, [{
       repeatCell: {
         range: { sheetId: opexGid, startColumnIndex: 1, endColumnIndex: 2 },
@@ -148,13 +153,14 @@ const DataStore = (() => {
   // drop) just re-attempts whichever blocks didn't finish, next time bootstrap() runs.
   async function migrateToSplitSheets(meta) {
     const titles = (meta.sheets || []).map(s => s.properties.title);
-    const missing = [STOCK_PRICES_SHEET, GOALS_SHEET, RECURRING_SHEET].filter(t => !titles.includes(t));
+    const missing = [STOCK_PRICES_SHEET, GOALS_SHEET, RECURRING_SHEET, BALANCES_SHEET].filter(t => !titles.includes(t));
     if (missing.length) {
       await SheetsClient.batchUpdate(spreadsheetId, missing.map(title => ({ addSheet: { properties: { title } } })));
     }
     await migratePricesBlock();
     await migrateGoalsBlock();
     await migrateRecurringBlock();
+    await migrateBalancesHeader();
   }
 
   async function sheetHasHeader(sheetName) {
@@ -199,6 +205,13 @@ const DataStore = (() => {
       await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A2:L${1 + dataRows.length}`, dataRows);
     }
     await SheetsClient.clearValues(spreadsheetId, 'Invest!R1:AC');
+  }
+
+  async function migrateBalancesHeader() {
+    if (await sheetHasHeader(BALANCES_SHEET)) return;
+    await SheetsClient.updateValues(spreadsheetId, `${BALANCES_SHEET}!A1:D1`, [[
+      'Account', 'Date', 'Amount', 'TxID',
+    ]]);
   }
 
   // One-time action (triggered from Settings) that installs live GOOGLEFINANCE formulas
@@ -681,8 +694,8 @@ const DataStore = (() => {
     const exists = (meta.sheets || []).some(s => s.properties.title === CONFIG_SHEET);
     if (exists) return false;
     await SheetsClient.batchUpdate(spreadsheetId, [{ addSheet: { properties: { title: CONFIG_SHEET } } }]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:G1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder',
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:H1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM',
     ]]);
     return true;
   }
@@ -691,19 +704,19 @@ const DataStore = (() => {
     const justCreated = await ensureConfigSheetExists();
     if (justCreated) {
       const rows = CONFIG_DEFAULTS.map(it => [
-        it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder,
+        it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
       ]);
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H${CONFIG_DATA_ROW + rows.length - 1}`, rows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
-    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H`);
     const rows = res.values || [];
     if (rows.length === 0) {
       // Header exists but no data rows (e.g. a Config tab created before this feature had defaults) — seed now.
       const seedRows = CONFIG_DEFAULTS.map(it => [
-        it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder,
+        it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
       ]);
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
     const items = rows
@@ -716,6 +729,7 @@ const DataStore = (() => {
         assetType: String(r[4] || '').trim(),
         archived: String(r[5] || '').trim().toUpperCase() === 'TRUE',
         sortOrder: Number(r[6]) || idx,
+        linkedPM: String(r[7] || '').trim(),
       }))
       .sort((a, b) => a.sortOrder - b.sortOrder);
     return { status: 'ok', items };
@@ -726,7 +740,7 @@ const DataStore = (() => {
     if (action !== 'saveAll') return { status: 'error', message: 'Unknown action' };
     if (!Array.isArray(items)) return { status: 'error', message: 'items must be an array' };
     await ensureConfigSheetExists();
-    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G`);
+    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H`);
     if (items.length === 0) return { status: 'ok', count: 0 };
     const rows = items.map((it, idx) => [
       String(it.kind || '').slice(0, 20),
@@ -736,9 +750,41 @@ const DataStore = (() => {
       String(it.assetType || '').slice(0, 20),
       it.archived ? 'TRUE' : 'FALSE',
       Number.isFinite(it.sortOrder) ? it.sortOrder : idx,
+      String(it.linkedPM || '').slice(0, 50),
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:G${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H${CONFIG_DATA_ROW + rows.length - 1}`, rows);
     return { status: 'ok', count: rows.length };
+  }
+
+  // ── BALANCES (Balances!A2:D) ────────────────────────────────────
+  async function handleGetBalances() {
+    const res = await SheetsClient.getValues(spreadsheetId, `${BALANCES_SHEET}!A2:D`);
+    const rows = res.values || [];
+    const latestByAccount = {};
+    rows.forEach(row => {
+      const account = String(row[0] || '').trim();
+      const date    = String(row[1] || '').trim();
+      const amount  = Number(row[2]) || 0;
+      const txId    = String(row[3] || '').trim();
+      if (!account || !date) return;
+      const existing = latestByAccount[account];
+      if (!existing || date > existing.date) {
+        latestByAccount[account] = { date, amount, txId };
+      }
+    });
+    return { status: 'ok', balances: latestByAccount };
+  }
+
+  async function handleSaveBalance(data) {
+    const { account, date, amount, txId } = data;
+    if (!account || !date) return { status: 'error', message: 'account and date required' };
+    await SheetsClient.appendValues(spreadsheetId, `${BALANCES_SHEET}!A:D`, [[
+      String(account).slice(0, 100),
+      String(date).slice(0, 10),
+      Number(amount) || 0,
+      String(txId || '').slice(0, 50),
+    ]]);
+    return { status: 'ok' };
   }
 
   // ── REQUEST ROUTER (mirrors the old doGet/doPost dispatch) ───
@@ -756,6 +802,7 @@ const DataStore = (() => {
       if (type === 'goals') return handleGetGoals();
       if (type === 'recurring') return handleGetRecurring();
       if (type === 'config') return handleGetConfig();
+      if (type === 'balances') return handleGetBalances();
       return { status: 'error', message: 'Unknown type' };
     }
 
@@ -765,6 +812,7 @@ const DataStore = (() => {
     if (data.type === 'goals') return handleGoals(data);
     if (data.type === 'recurring') return handleRecurring(data);
     if (data.type === 'config') return handleConfig(data);
+    if (data.type === 'balances') return handleSaveBalance(data);
     return { status: 'error', message: 'Unknown type' };
   }
 

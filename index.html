@@ -3211,20 +3211,13 @@ function computeCashBalance() {
   return base + delta;
 }
 
-async function renderNetWorth(){
-  await fetchFxRates();
-  const manualUSD = parsePrice(stockPrices['USDIDR']);
-  const manualCHF = parsePrice(stockPrices['CHFIDR']);
-  const usdRate = manualUSD > 0 ? manualUSD : (fxRates.USD || 16500);
-  const chfRate = manualCHF > 0 ? manualCHF : (fxRates.CHF || 19000);
-
-  const navStar = parsePrice(stockPrices['StarStable']);
-  const priceQQQ  = parsePrice(stockPrices['QQQ']);
-  const priceJNJ  = parsePrice(stockPrices['JNJ']);
-  const priceVYM  = parsePrice(stockPrices['VYM']);
-  const priceAAPL = parsePrice(stockPrices['AAPL']);
-
-  const allInvest = getAllInvestRows();
+// Shared buy/sell aggregation for every Invest row, keyed by stock. A stock that is
+// also registered as a USD-currency Account (e.g. "USDIDR Pluang Febri" funding QQQ
+// buys) gets its balance depleted by whatever was spent buying OTHER assets through
+// it — otherwise that money would look like it's still sitting in the FX pool when
+// it's actually been converted into stock. Used by both renderNetWorth() and
+// getGoalCurrentValue() so neither drifts out of sync with the other.
+function computeInvestNetLots(allInvest) {
   const buyLots={}, sellLots={}, buyTotalIdr={}, buyPriceWeighted={};
   allInvest.forEach(r=>{
     const s=r.stock;
@@ -3247,6 +3240,25 @@ async function renderNetWorth(){
       sellLots[r.account] += usdSpent;
     }
   });
+
+  return { buyLots, sellLots, buyTotalIdr, buyPriceWeighted };
+}
+
+async function renderNetWorth(){
+  await fetchFxRates();
+  const manualUSD = parsePrice(stockPrices['USDIDR']);
+  const manualCHF = parsePrice(stockPrices['CHFIDR']);
+  const usdRate = manualUSD > 0 ? manualUSD : (fxRates.USD || 16500);
+  const chfRate = manualCHF > 0 ? manualCHF : (fxRates.CHF || 19000);
+
+  const navStar = parsePrice(stockPrices['StarStable']);
+  const priceQQQ  = parsePrice(stockPrices['QQQ']);
+  const priceJNJ  = parsePrice(stockPrices['JNJ']);
+  const priceVYM  = parsePrice(stockPrices['VYM']);
+  const priceAAPL = parsePrice(stockPrices['AAPL']);
+
+  const allInvest = getAllInvestRows();
+  const { buyLots, sellLots, buyTotalIdr, buyPriceWeighted } = computeInvestNetLots(allInvest);
 
   const holdings = Object.keys(buyLots).map(stock=>{
     const netLot = buyLots[stock] - (sellLots[stock]||0);
@@ -5291,13 +5303,7 @@ function getGoalAssetList() {
 
 function getGoalCurrentValue(goal) {
   const allInvest = getAllInvestRows();
-  const buyLots = {}, sellLots = {};
-  allInvest.forEach(r => {
-    const s = r.stock;
-    if (!(s in buyLots)) { buyLots[s] = 0; sellLots[s] = 0; }
-    if (r.action === 'Buy') buyLots[s] += r.lot;
-    else sellLots[s] += r.lot;
-  });
+  const { buyLots, sellLots } = computeInvestNetLots(allInvest);
   const usdRate = parsePrice(stockPrices['USDIDR']) || fxRates.USD || 16500;
   const chfRate = parsePrice(stockPrices['CHFIDR']) || fxRates.CHF || 19000;
   let total = 0;

@@ -128,13 +128,15 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
       'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
     ]]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:H1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM',
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:J1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate',
     ]]);
     const configRows = CONFIG_DEFAULTS.map(it => [
       it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
+      (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
+      String(it.balanceDate || '').slice(0, 10),
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
     await SheetsClient.updateValues(spreadsheetId, `${BALANCES_SHEET}!A1:D1`, [[
       'Account', 'Date', 'Amount', 'TxID',
     ]]);
@@ -729,12 +731,13 @@ const DataStore = (() => {
   async function ensureConfigSheetExists() {
     const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
     const exists = (meta.sheets || []).some(s => s.properties.title === CONFIG_SHEET);
-    if (exists) return false;
-    await SheetsClient.batchUpdate(spreadsheetId, [{ addSheet: { properties: { title: CONFIG_SHEET } } }]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:H1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM',
+    if (!exists) {
+      await SheetsClient.batchUpdate(spreadsheetId, [{ addSheet: { properties: { title: CONFIG_SHEET } } }]);
+    }
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:J1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate',
     ]]);
-    return true;
+    return !exists;
   }
 
   async function handleGetConfig() {
@@ -742,32 +745,45 @@ const DataStore = (() => {
     if (justCreated) {
       const rows = CONFIG_DEFAULTS.map(it => [
         it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
+        (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
+        String(it.balanceDate || '').slice(0, 10),
       ]);
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J${CONFIG_DATA_ROW + rows.length - 1}`, rows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
-    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J`);
     const rows = res.values || [];
     if (rows.length === 0) {
-      // Header exists but no data rows (e.g. a Config tab created before this feature had defaults) — seed now.
+      // Header exists but no data rows — seed now.
       const seedRows = CONFIG_DEFAULTS.map(it => [
         it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
+        (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
+        String(it.balanceDate || '').slice(0, 10),
       ]);
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
     const items = rows
       .filter(r => r[1])
-      .map((r, idx) => ({
-        kind: String(r[0] || '').trim(),
-        name: String(r[1] || '').trim(),
-        color: String(r[2] || '').trim(),
-        ccy: String(r[3] || '').trim(),
-        assetType: String(r[4] || '').trim(),
-        archived: String(r[5] || '').trim().toUpperCase() === 'TRUE',
-        sortOrder: Number(r[6]) || idx,
-        linkedPM: String(r[7] || '').trim(),
-      }))
+      .map((r, idx) => {
+        let balVal = null;
+        if (r[8] !== undefined && r[8] !== null && String(r[8]).trim() !== '') {
+          const rawNum = Number(String(r[8]).replace(/[^0-9.-]/g, ''));
+          if (!isNaN(rawNum)) balVal = rawNum;
+        }
+        return {
+          kind: String(r[0] || '').trim(),
+          name: String(r[1] || '').trim(),
+          color: String(r[2] || '').trim(),
+          ccy: String(r[3] || '').trim(),
+          assetType: String(r[4] || '').trim(),
+          archived: String(r[5] || '').trim().toUpperCase() === 'TRUE',
+          sortOrder: Number(r[6]) || idx,
+          linkedPM: String(r[7] || '').trim(),
+          balance: balVal,
+          balanceDate: String(r[9] || '').trim(),
+        };
+      })
       .sort((a, b) => a.sortOrder - b.sortOrder);
     return { status: 'ok', items };
   }
@@ -777,7 +793,7 @@ const DataStore = (() => {
     if (action !== 'saveAll') return { status: 'error', message: 'Unknown action' };
     if (!Array.isArray(items)) return { status: 'error', message: 'items must be an array' };
     await ensureConfigSheetExists();
-    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H`);
+    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J`);
     if (items.length === 0) return { status: 'ok', count: 0 };
     const rows = items.map((it, idx) => [
       String(it.kind || '').slice(0, 20),
@@ -788,8 +804,10 @@ const DataStore = (() => {
       it.archived ? 'TRUE' : 'FALSE',
       Number.isFinite(it.sortOrder) ? it.sortOrder : idx,
       String(it.linkedPM || '').slice(0, 50),
+      (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
+      String(it.balanceDate || '').slice(0, 10),
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:H${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J${CONFIG_DATA_ROW + rows.length - 1}`, rows);
     return { status: 'ok', count: rows.length };
   }
 
@@ -821,6 +839,33 @@ const DataStore = (() => {
       Number(amount) || 0,
       String(txId || '').slice(0, 50),
     ]]);
+
+    // Update Column I & J in Config sheet for matching account
+    try {
+      await ensureConfigSheetExists();
+      const configRes = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J`);
+      const configRows = configRes.values || [];
+      let found = false;
+      for (let i = 0; i < configRows.length; i++) {
+        const row = configRows[i];
+        if (String(row[0] || '').trim() === 'account' && String(row[1] || '').trim().toLowerCase() === String(account).trim().toLowerCase()) {
+          while (row.length < 10) row.push('');
+          row[8] = Number(amount) || 0;
+          row[9] = String(date).slice(0, 10);
+          const rowNum = CONFIG_DATA_ROW + i;
+          await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${rowNum}:J${rowNum}`, [row]);
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        const newRow = ['account', String(account).trim(), '', '', '', 'FALSE', configRows.length, '', Number(amount) || 0, String(date).slice(0, 10)];
+        await SheetsClient.appendValues(spreadsheetId, `${CONFIG_SHEET}!A:J`, [newRow]);
+      }
+    } catch (e) {
+      console.warn('[handleSaveBalance] Could not update Config sheet columns I/J:', e);
+    }
+
     return { status: 'ok' };
   }
 

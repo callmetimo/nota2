@@ -1,0 +1,8 @@
+{
+  "name": "Nota",
+  "description": "Personal finance and transaction tracker app",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

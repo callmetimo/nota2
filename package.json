@@ -1,0 +1,15 @@
+{
+  "name": "nota",
+  "version": "1.0.0",
+  "description": "Nota personal finance and transaction tracker app",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "build": "echo 'No build step needed'"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

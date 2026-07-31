@@ -47,7 +47,11 @@ body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:
 .more-menu-divider{height:0.5px;background:var(--border);margin:0}
 .profile-back-btn{background:none;border:none;color:var(--text2);display:flex;align-items:center;gap:4px;font-size:14px;cursor:pointer;padding:6px 0;margin-bottom:4px}
 .profile-back-btn svg{width:18px;height:18px}
-.config-section-header{display:flex;align-items:center;justify-content:space-between;margin-top:22px;margin-bottom:8px}
+.settings-tab-toggle{display:flex;gap:4px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:4px;margin-top:12px;margin-bottom:16px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.settings-tab-btn{flex:1;min-width:0;padding:8px 6px;border-radius:var(--radius-sm);border:0.5px solid transparent;background:transparent;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;text-align:center;white-space:nowrap;transition:all 0.2s;-webkit-tap-highlight-color:transparent}
+.settings-tab-btn:active{color:var(--text)}
+.settings-tab-btn.active{background:var(--accent-dim);color:var(--accent);border-color:var(--accent);font-weight:700}
+.config-section-header{display:flex;align-items:center;justify-content:space-between;margin-top:12px;margin-bottom:8px}
 .config-section-title{font-size:13px;font-weight:700}
 .config-add-btn{background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:4px 0}
 .config-row{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius-sm);padding:11px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -889,7 +893,6 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     </button>
     <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Settings</div>
   </div>
-  <button class="submit-btn" style="background:var(--bg3);color:var(--text);margin-bottom:16px" onclick="installLivePrices()">Enable live stock prices (GOOGLEFINANCE)</button>
   <div id="settingsListsContainer"><div class="chart-loading">Loading…</div></div>
 </div>
 
@@ -974,6 +977,14 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <div class="form-group" id="configItemLinkedPMGroup" style="display:none">
         <label class="form-label">Linked Payment Method</label>
         <select class="form-input" id="configItemLinkedPM"></select>
+      </div>
+      <div class="form-group" id="configItemBalanceGroup" style="display:none">
+        <label class="form-label">Remaining Balance (IDR)</label>
+        <input type="number" class="form-input" id="configItemBalance" placeholder="0" min="0" inputmode="numeric">
+      </div>
+      <div class="form-group" id="configItemBalanceDateGroup" style="display:none">
+        <label class="form-label">Input Date / As of Date</label>
+        <input type="date" class="form-input" id="configItemBalanceDate">
       </div>
       <div id="configItemSetBalanceGroup" style="display:none;margin-bottom:12px">
         <button class="submit-btn" style="background:var(--bg3);color:var(--text);border:0.5px solid var(--border2)" onclick="openSetBalanceFromConfigOverlay()">Set Balance</button>
@@ -1303,9 +1314,40 @@ const ACCOUNT_CCY = {'USD CIMB':'USD'};
 const STOCK_TYPE = {'USDIDR CIMB':'Forex'};
 
 // ── CONFIG (Categories / PMs / Assets / Accounts, user-editable via Settings) ──
+const LS_CONFIG_KEY = 'notapub_config_items';
+const LS_RAW_BAL_KEY = 'notapub_raw_account_balances';
+
 let CONFIG_ITEMS = [];
-let rawAccountBalances = {}; // {accountName: {date, amount, txId}} latest snapshot per account from Balances sheet
-let accountBalances    = {}; // {accountName: {amount}} after applying transaction deltas
+try {
+  const cachedCfg = localStorage.getItem(LS_CONFIG_KEY);
+  if (cachedCfg) CONFIG_ITEMS = JSON.parse(cachedCfg);
+} catch(e) {}
+
+let rawAccountBalances = {}; // {accountName: {date, amount, txId}} latest snapshot per account
+try {
+  const cachedBal = localStorage.getItem(LS_RAW_BAL_KEY);
+  if (cachedBal) rawAccountBalances = JSON.parse(cachedBal);
+} catch(e) {}
+
+let accountBalances = {}; // {accountName: {amount}} after applying transaction deltas
+
+function syncConfigToRawAccountBalances() {
+  if (!CONFIG_ITEMS || !CONFIG_ITEMS.length) return;
+  CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).forEach(acct => {
+    if (acct.balance != null && acct.balance !== '' && acct.balanceDate) {
+      if (!rawAccountBalances[acct.name] || (acct.balanceDate >= (rawAccountBalances[acct.name].date || ''))) {
+        rawAccountBalances[acct.name] = {
+          date: acct.balanceDate,
+          amount: Number(acct.balance),
+          txId: 'config_' + acct.name
+        };
+      }
+    }
+  });
+  try {
+    localStorage.setItem(LS_RAW_BAL_KEY, JSON.stringify(rawAccountBalances));
+  } catch(e) {}
+}
 
 async function fetchConfig() {
   try {
@@ -1313,7 +1355,12 @@ async function fetchConfig() {
     const j = await res.json();
     if (j.status === 'ok' && Array.isArray(j.items)) {
       CONFIG_ITEMS = j.items;
+      try { localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS)); } catch(e) {}
       applyConfigToGlobals();
+      syncConfigToRawAccountBalances();
+      buildAccountBalances();
+      renderAccountBalanceCards();
+      renderSettingsLists();
     }
   } catch (e) { /* offline or first-run race — keep hardcoded defaults as fallback */ }
 }
@@ -1339,6 +1386,9 @@ function applyConfigToGlobals() {
 }
 
 async function saveConfigToServer() {
+  try {
+    localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS));
+  } catch(e) {}
   await fetchWithTimeout(APPS_SCRIPT_URL, {
     method: 'POST', headers: {'Content-Type': 'text/plain'},
     body: apiBody({ type: 'config', action: 'saveAll', items: CONFIG_ITEMS })
@@ -1346,9 +1396,21 @@ async function saveConfigToServer() {
   applyConfigToGlobals();
 }
 
+// Initial hydration from cached CONFIG_ITEMS
+if (CONFIG_ITEMS.length) {
+  applyConfigToGlobals();
+  syncConfigToRawAccountBalances();
+}
+
 // ── SETTINGS PAGE (Config CRUD) ───────────────────────────────
 const CONFIG_KIND_LABELS = { category: 'Categories', pm: 'Payment Methods', stock: 'Assets', account: 'Accounts' };
 let settingsShowArchived = { category: false, pm: false, stock: false, account: false };
+let currentSettingsTab = 'category';
+
+function setSettingsTab(tab) {
+  currentSettingsTab = tab;
+  renderSettingsLists();
+}
 
 // Embeds a JS string literal inside a double-quoted HTML attribute (e.g. onclick="fn(...)").
 // JSON.stringify alone produces its own double quotes, which would prematurely close the
@@ -1371,34 +1433,49 @@ async function fetchAccountBalances() {
   try {
     const res = await fetch(apiGet('type=balances'), { method: 'GET' });
     const j = await res.json();
-    if (j.status === 'ok') rawAccountBalances = j.balances || {};
+    if (j.status === 'ok') {
+      const incoming = j.balances || {};
+      Object.keys(incoming).forEach(k => {
+        const cur = rawAccountBalances[k];
+        if (!cur || (incoming[k].date && incoming[k].date >= cur.date)) {
+          rawAccountBalances[k] = incoming[k];
+        }
+      });
+      syncConfigToRawAccountBalances();
+      try { localStorage.setItem(LS_RAW_BAL_KEY, JSON.stringify(rawAccountBalances)); } catch(e) {}
+      buildAccountBalances();
+      renderAccountBalanceCards();
+    }
   } catch(e) { /* offline — keep whatever we have */ }
 }
 
-function computeAccountCurrentBalance(baseAmount, baseDate, linkedPM) {
-  if (!linkedPM) return baseAmount;
+function computeAccountCurrentBalance(baseAmount, baseDate, pmToMatch) {
+  if (!baseDate) return baseAmount;
   let delta = 0;
-  // Opex: expense/income transactions with this PM
-  (HIST.opex || []).forEach(r => {
-    if ((r.pm || '') !== linkedPM) return;
-    const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
-    if (rowDate <= baseDate) return;
-    delta += (r.inc || 0) - (r.exp || 0);
-  });
-  // Invest: buying forex/USD assets funded from this IDR account depletes its balance
-  (HIST.invest || []).forEach(r => {
-    if ((r.account || '') !== linkedPM) return;
-    if (ACCOUNT_CCY[r.stock] !== 'USD') return;
-    if (r.action !== 'Buy') return;
-    const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
-    if (rowDate <= baseDate) return;
-    delta -= (r.totalIdr || 0);
-  });
+  // Opex: expense/income transactions with this PM or account name
+  if (pmToMatch) {
+    (HIST.opex || []).forEach(r => {
+      if ((r.pm || '') !== pmToMatch) return;
+      const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
+      if (rowDate <= baseDate) return;
+      delta += (r.inc || 0) - (r.exp || 0);
+    });
+    // Invest: buying forex/USD assets funded from this account depletes its balance
+    (HIST.invest || []).forEach(r => {
+      if ((r.account || '') !== pmToMatch) return;
+      if (ACCOUNT_CCY[r.stock] !== 'USD') return;
+      if (r.action !== 'Buy') return;
+      const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
+      if (rowDate <= baseDate) return;
+      delta -= (r.totalIdr || 0);
+    });
+  }
   return baseAmount + delta;
 }
 
 function buildAccountBalances() {
   accountBalances = {};
+  syncConfigToRawAccountBalances();
   // USD/Forex accounts: balance derived from Invest sheet via computeInvestNetLots
   const investNetLots = (HIST.invest && HIST.invest.length) ? computeInvestNetLots(HIST.invest) : null;
   const manualUSD = parsePrice(stockPrices['USDIDR']);
@@ -1411,10 +1488,11 @@ function buildAccountBalances() {
       if (netUSD > 0) accountBalances[acct.name] = { amount: netUSD * usdRate };
       return;
     }
-    // IDR accounts: use Balances sheet snapshot + Opex/Invest deltas
+    // IDR accounts: use Config / Balances snapshot + Opex/Invest deltas
     const raw = rawAccountBalances[acct.name];
     if (!raw) return;
-    const current = computeAccountCurrentBalance(raw.amount, raw.date, acct.linkedPM || '');
+    const pmToMatch = acct.linkedPM || acct.name;
+    const current = computeAccountCurrentBalance(raw.amount, raw.date, pmToMatch);
     accountBalances[acct.name] = { amount: current };
   });
 }
@@ -1458,9 +1536,12 @@ function openSetBalanceFromConfigOverlay() {
   if (!accountName) return;
   document.getElementById('setBalanceAccount').value = accountName;
   document.getElementById('setBalanceTitle').textContent = `Set Balance: ${accountName}`;
+  const item = CONFIG_ITEMS.find(i => i.kind === 'account' && i.name === accountName);
   const raw = rawAccountBalances[accountName];
-  document.getElementById('setBalanceAmount').value = raw ? String(raw.amount) : '';
-  document.getElementById('setBalanceDate').value = new Date().toISOString().slice(0, 10);
+  const amtVal = (item && item.balance != null) ? item.balance : (raw ? raw.amount : '');
+  const dateVal = (item && item.balanceDate) ? item.balanceDate : (raw ? raw.date : new Date().toISOString().slice(0, 10));
+  document.getElementById('setBalanceAmount').value = amtVal !== '' ? String(amtVal) : '';
+  document.getElementById('setBalanceDate').value = dateVal;
   closeConfigItemOverlay();
   document.getElementById('setBalanceOverlay').classList.add('open');
 }
@@ -1470,21 +1551,41 @@ function closeSetBalanceOverlay() {
 }
 
 async function saveAccountBalance() {
-  const account = document.getElementById('setBalanceAccount').value;
+  const account = document.getElementById('setBalanceAccount').value.trim();
   const date    = document.getElementById('setBalanceDate').value;
   const amount  = Number(document.getElementById('setBalanceAmount').value) || 0;
   if (!account || !date) { showToast('Account and date required', 'error'); return; }
   const txId = 'bal_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   showToast('Saving…', 'loading');
   try {
+    let item = CONFIG_ITEMS.find(i => i.kind === 'account' && i.name.toLowerCase() === account.toLowerCase());
+    if (!item) {
+      const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === 'account').map(i => i.sortOrder));
+      item = { kind: 'account', name: account, color: '', ccy: '', assetType: '', linkedPM: '', archived: false, sortOrder: maxOrder + 1 };
+      CONFIG_ITEMS.push(item);
+    }
+    item.balance = amount;
+    item.balanceDate = date;
+
+    rawAccountBalances[item.name] = { date, amount, txId };
+    rawAccountBalances[account] = { date, amount, txId };
+
+    try { localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS)); } catch(e) {}
+    try { localStorage.setItem(LS_RAW_BAL_KEY, JSON.stringify(rawAccountBalances)); } catch(e) {}
+
+    buildAccountBalances();
+    renderAccountBalanceCards();
+    renderSettingsLists();
+    closeSetBalanceOverlay();
+
     await fetchWithTimeout(APPS_SCRIPT_URL, {
       method: 'POST', headers: {'Content-Type': 'text/plain'},
-      body: apiBody({ type: 'balances', action: 'saveBalance', account, date, amount, txId })
+      body: apiBody({ type: 'balances', action: 'saveBalance', account: item.name, date, amount, txId })
     });
-    rawAccountBalances[account] = { date, amount, txId };
-    if (histLoaded) buildAccountBalances();
-    renderAccountBalanceCards();
-    closeSetBalanceOverlay();
+
+    // Also persist to Config sheet columns I (balance) and J (balanceDate)
+    await saveConfigToServer();
+
     showToast('Balance saved', 'success');
   } catch(e) {
     showToast('Could not save: ' + e.message, 'error');
@@ -1495,29 +1596,55 @@ function renderSettingsLists() {
   const container = document.getElementById('settingsListsContainer');
   if (!container) return;
   const kinds = ['category', 'pm', 'stock', 'account'];
-  container.innerHTML = kinds.map(kind => {
-    const items = CONFIG_ITEMS.filter(i => i.kind === kind).sort((a,b) => a.sortOrder - b.sortOrder);
-    const active = items.filter(i => !i.archived);
-    const archived = items.filter(i => i.archived);
-    const showArchived = settingsShowArchived[kind];
-    const rowHtml = it => `<div class="config-row" onclick="openConfigItemOverlay('${kind}', ${jsAttr(it.name)})">
+  if (!kinds.includes(currentSettingsTab)) {
+    currentSettingsTab = 'category';
+  }
+
+  const toggleHtml = `
+    <div class="settings-tab-toggle">
+      ${kinds.map(k => `
+        <button class="settings-tab-btn ${currentSettingsTab === k ? 'active' : ''}" onclick="setSettingsTab('${k}')">
+          ${CONFIG_KIND_LABELS[k]}
+        </button>
+      `).join('')}
+    </div>
+  `;
+
+  const kind = currentSettingsTab;
+  const items = CONFIG_ITEMS.filter(i => i.kind === kind).sort((a,b) => a.sortOrder - b.sortOrder);
+  const active = items.filter(i => !i.archived);
+  const archived = items.filter(i => i.archived);
+  const showArchived = settingsShowArchived[kind];
+
+  const rowHtml = it => {
+    let metaStr = '';
+    if (kind === 'stock') metaStr = it.assetType || '';
+    else if (kind === 'account') {
+      if (it.ccy === 'USD') metaStr = 'USD';
+      else if (it.balance != null && it.balanceDate) metaStr = `${fRp(it.balance)} (${it.balanceDate})`;
+    }
+    return `<div class="config-row" onclick="openConfigItemOverlay('${kind}', ${jsAttr(it.name)})">
       <div class="config-row-name">
         ${it.color ? `<span class="config-color-dot" style="background:${it.color}"></span>` : ''}
         <span>${esc(it.name)}</span>
         ${it.archived ? '<span class="config-archived-badge">Deleted</span>' : ''}
       </div>
-      <span class="config-row-meta">${kind==='stock' ? (it.assetType||'') : (kind==='account' && it.ccy==='USD' ? 'USD' : '')}</span>
+      <span class="config-row-meta">${metaStr}</span>
     </div>`;
-    return `
-      <div class="config-section-header">
-        <div class="config-section-title">${CONFIG_KIND_LABELS[kind]}</div>
-        <button class="config-add-btn" onclick="openConfigItemOverlay('${kind}', null)">+ Add</button>
-      </div>
-      ${active.map(rowHtml).join('') || '<div style="color:var(--text2);font-size:13px;padding:8px 0">No items yet.</div>'}
-      ${archived.length ? `<button class="config-archived-toggle" onclick="settingsShowArchived['${kind}']=!settingsShowArchived['${kind}'];renderSettingsLists()">${showArchived ? 'Hide' : 'Show'} ${archived.length} deleted</button>` : ''}
-      ${showArchived ? archived.map(rowHtml).join('') : ''}
-    `;
-  }).join('');
+  };
+
+  const listHtml = `
+    <div class="config-section-header" style="margin-top:0">
+      <div class="config-section-title">${CONFIG_KIND_LABELS[kind]}</div>
+      <button class="config-add-btn" onclick="openConfigItemOverlay('${kind}', null)">+ Add</button>
+    </div>
+    ${active.map(rowHtml).join('') || '<div style="color:var(--text2);font-size:13px;padding:8px 0">No items yet.</div>'}
+    ${archived.length ? `<button class="config-archived-toggle" onclick="settingsShowArchived['${kind}']=!settingsShowArchived['${kind}'];renderSettingsLists()">${showArchived ? 'Hide' : 'Show'} ${archived.length} deleted</button>` : ''}
+    ${showArchived ? archived.map(rowHtml).join('') : ''}
+    ${kind === 'stock' ? `<button class="submit-btn" style="background:var(--bg3);color:var(--text);margin-top:20px;font-size:13px" onclick="installLivePrices()">Enable live stock prices (GOOGLEFINANCE)</button>` : ''}
+  `;
+
+  container.innerHTML = toggleHtml + listHtml;
 }
 
 function _configFieldsForKind(kind) {
@@ -1525,6 +1652,8 @@ function _configFieldsForKind(kind) {
   document.getElementById('configItemAssetTypeGroup').style.display = kind === 'stock' ? 'block' : 'none';
   document.getElementById('configItemCcyGroup').style.display = kind === 'account' ? 'block' : 'none';
   document.getElementById('configItemLinkedPMGroup').style.display = kind === 'account' ? 'block' : 'none';
+  if (document.getElementById('configItemBalanceGroup')) document.getElementById('configItemBalanceGroup').style.display = kind === 'account' ? 'block' : 'none';
+  if (document.getElementById('configItemBalanceDateGroup')) document.getElementById('configItemBalanceDateGroup').style.display = kind === 'account' ? 'block' : 'none';
   document.getElementById('configItemSetBalanceGroup').style.display = kind === 'account' ? 'block' : 'none';
 }
 
@@ -1540,6 +1669,16 @@ function openConfigItemOverlay(kind, name) {
   const linkedPMSel = document.getElementById('configItemLinkedPM');
   linkedPMSel.innerHTML = `<option value="">(None)</option>` +
     allPMs.map(pm => `<option value="${esc(pm)}"${(item && item.linkedPM === pm) ? ' selected' : ''}>${esc(pm)}</option>`).join('');
+  if (document.getElementById('configItemBalance')) {
+    const raw = item ? rawAccountBalances[item.name] : null;
+    const amtVal = (item && item.balance != null) ? item.balance : (raw ? raw.amount : '');
+    document.getElementById('configItemBalance').value = (amtVal !== '' && amtVal != null) ? String(amtVal) : '';
+  }
+  if (document.getElementById('configItemBalanceDate')) {
+    const raw = item ? rawAccountBalances[item.name] : null;
+    const dateVal = (item && item.balanceDate) ? item.balanceDate : (raw ? raw.date : new Date().toISOString().slice(0, 10));
+    document.getElementById('configItemBalanceDate').value = dateVal;
+  }
   document.getElementById('configItemArchiveBtn').style.display = item ? 'block' : 'none';
   document.getElementById('configItemArchiveBtn').textContent = item && item.archived ? 'Restore' : 'Delete';
   _configFieldsForKind(kind);
@@ -1564,13 +1703,28 @@ async function saveConfigItem() {
   const assetType = kind === 'stock' ? document.getElementById('configItemAssetType').value : '';
   const ccy = kind === 'account' && document.getElementById('configItemUsdCheckbox').checked ? 'USD' : '';
   const linkedPM = kind === 'account' ? (document.getElementById('configItemLinkedPM').value || '') : '';
+  const balanceRaw = (kind === 'account' && document.getElementById('configItemBalance')) ? document.getElementById('configItemBalance').value : null;
+  const balance = (balanceRaw !== null && balanceRaw !== '' && !isNaN(Number(balanceRaw))) ? Number(balanceRaw) : null;
+  const balanceDate = (kind === 'account' && document.getElementById('configItemBalanceDate')) ? (document.getElementById('configItemBalanceDate').value || '') : '';
 
   if (existing) {
     existing.name = name; existing.color = color; existing.assetType = assetType; existing.ccy = ccy; existing.linkedPM = linkedPM;
+    if (kind === 'account') {
+      existing.balance = balance;
+      existing.balanceDate = balanceDate;
+    }
   } else {
     const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === kind).map(i => i.sortOrder));
-    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, archived: false, sortOrder: maxOrder + 1 });
+    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, balance, balanceDate, archived: false, sortOrder: maxOrder + 1 });
   }
+
+  if (kind === 'account' && balance !== null && balanceDate) {
+    rawAccountBalances[name] = { amount: balance, date: balanceDate, txId: 'config_' + name };
+  }
+  syncConfigToRawAccountBalances();
+  try { localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS)); } catch(e) {}
+  buildAccountBalances();
+  renderAccountBalanceCards();
   closeConfigItemOverlay();
   renderSettingsLists();
   showToast('Saving…', 'loading');
@@ -5424,6 +5578,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   // ACCOUNT_CCY/STOCK_TYPE from the user's Config sheet once it resolves. Any picker/lookup
   // that runs before this resolves just sees the hardcoded defaults for a moment.
   fetchConfig();
+  fetchAccountBalances();
+  buildAccountBalances();
+  renderAccountBalanceCards();
 
   // Reliable tap-to-edit on mobile: inline onclick is swallowed by iOS
   // -webkit-overflow-scrolling:touch scroll layers. Use touchstart/touchend

@@ -699,13 +699,13 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">From</label>
           <input type="text" class="form-input" id="xfrFrom" placeholder="Source account…" autocomplete="off" maxlength="50"
-            oninput="showAC('xfrFrom', getSmartPms())" onfocus="showAC('xfrFrom', getSmartPms())">
+            oninput="showAC('xfrFrom', getSmartTransferPms())" onfocus="showAC('xfrFrom', getSmartTransferPms())">
           <div class="autocomplete-list" id="ac-xfrFrom" style="display:none"></div>
         </div>
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">To</label>
           <input type="text" class="form-input" id="xfrTo" placeholder="Destination account…" autocomplete="off" maxlength="50"
-            oninput="showAC('xfrTo', getSmartPms())" onfocus="showAC('xfrTo', getSmartPms())">
+            oninput="showAC('xfrTo', getSmartTransferPms())" onfocus="showAC('xfrTo', getSmartTransferPms())">
           <div class="autocomplete-list" id="ac-xfrTo" style="display:none"></div>
         </div>
       </div>
@@ -1481,27 +1481,66 @@ async function fetchAccountBalances() {
   } catch(e) { /* offline — keep whatever we have */ }
 }
 
-function computeAccountCurrentBalance(baseAmount, baseDate, pmToMatch) {
-  if (!baseDate) return baseAmount;
-  let delta = 0;
-  // Opex: expense/income transactions with this PM or account name
-  if (pmToMatch) {
-    (HIST.opex || []).forEach(r => {
-      if ((r.pm || '') !== pmToMatch) return;
-      const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
-      if (rowDate <= baseDate) return;
-      delta += (r.inc || 0) - (r.exp || 0);
-    });
-    // Invest: buying forex/USD assets funded from this account depletes its balance
-    (HIST.invest || []).forEach(r => {
-      if ((r.account || '') !== pmToMatch) return;
-      if (ACCOUNT_CCY[r.stock] !== 'USD') return;
-      if (r.action !== 'Buy') return;
-      const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
-      if (rowDate <= baseDate) return;
-      delta -= (r.totalIdr || 0);
-    });
+function getAccountMatchNames(acctOrPm) {
+  const names = new Set();
+  if (typeof acctOrPm === 'string') {
+    if (acctOrPm.trim()) names.add(acctOrPm.toLowerCase().trim());
+  } else if (acctOrPm && typeof acctOrPm === 'object') {
+    if (acctOrPm.name) names.add(acctOrPm.name.toLowerCase().trim());
+    if (acctOrPm.linkedPM) names.add(acctOrPm.linkedPM.toLowerCase().trim());
+    if (acctOrPm.name) {
+      const stripped = acctOrPm.name.replace(/^(IDR|USD)\s+/i, '').toLowerCase().trim();
+      if (stripped) names.add(stripped);
+    }
   }
+  return Array.from(names);
+}
+
+function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm) {
+  const matchNames = getAccountMatchNames(acctOrPm);
+  if (!matchNames.length) return baseAmount;
+  let delta = 0;
+
+  // 1. Opex: synced and cached sheet transactions (including transfers)
+  (HIST.opex || []).forEach(r => {
+    const rPm = String(r.pm || '').toLowerCase().trim();
+    if (!matchNames.includes(rPm)) return;
+    const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
+    if (baseDate && rowDate <= baseDate) return;
+    delta += (Number(r.inc) || 0) - (Number(r.exp) || 0);
+  });
+
+  // 2. Local unsynced transactions and transfers from txHistory
+  (txHistory || []).forEach(r => {
+    if (r.synced) return;
+    if (baseDate && r.date && r.date <= baseDate) return;
+
+    if (r.type === 'transfer') {
+      const fromMatch = matchNames.includes(String(r.fromPm || '').toLowerCase().trim());
+      const toMatch = matchNames.includes(String(r.toPm || '').toLowerCase().trim());
+      const amt = Number(r.amount) || 0;
+      if (fromMatch && !toMatch) delta -= amt;
+      else if (toMatch && !fromMatch) delta += amt;
+    } else {
+      const rPm = String(r.pm || '').toLowerCase().trim();
+      if (!matchNames.includes(rPm)) return;
+      const amt = Number(r.amount) || 0;
+      if (r.type === 'income') delta += amt;
+      else if (r.type === 'expense') delta -= amt;
+    }
+  });
+
+  // 3. Invest: buying USD assets funded from this account
+  (HIST.invest || []).forEach(r => {
+    const rAcct = String(r.account || '').toLowerCase().trim();
+    if (!matchNames.includes(rAcct)) return;
+    if (ACCOUNT_CCY[r.stock] !== 'USD') return;
+    if (r.action !== 'Buy') return;
+    const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
+    if (baseDate && rowDate <= baseDate) return;
+    delta -= (Number(r.totalIdr) || 0);
+  });
+
   return baseAmount + delta;
 }
 
@@ -1521,10 +1560,8 @@ function buildAccountBalances() {
       return;
     }
     // IDR accounts: use Config / Balances snapshot + Opex/Invest deltas
-    const raw = rawAccountBalances[acct.name];
-    if (!raw) return;
-    const pmToMatch = acct.linkedPM || acct.name;
-    const current = computeAccountCurrentBalance(raw.amount, raw.date, pmToMatch);
+    const raw = rawAccountBalances[acct.name] || { amount: 0, date: '2000-01-01' };
+    const current = computeAccountCurrentBalance(raw.amount, raw.date, acct);
     accountBalances[acct.name] = { amount: current };
   });
 }
@@ -2378,6 +2415,9 @@ function getSmartPms() {
               (txLow && Object.keys(txPm).find(k => txLow.includes(k.toLowerCase()) || k.toLowerCase().includes(txLow)));
   return key ? txPm[key] : allPMs;
 }
+function getSmartTransferPms() {
+  return Array.from(new Set([...allAccounts, ...allPMs]));
+}
 function getSmartAccounts() {
   const stockLow = (document.getElementById('inputStock').value || '').toLowerCase().trim();
   const txAccount = HIST.txAccount || {};
@@ -2817,14 +2857,28 @@ function submitTransfer() {
   const r = { id: Date.now(), date, fromPm, toPm, amount, notes, type: 'transfer', synced: false };
   switchTab('home', null);
   showToast('Saving transfer…', 'loading', 0);
+
+  // Optimistically save transfer locally and recompute balances
+  txHistory.unshift(r);
+  saveLocal();
+  buildAccountBalances();
+  renderAccountBalanceCards();
+
   syncTransfer(r).then(ok => {
     isSyncing = false;
     if (ok) {
+      r.synced = true;
+      saveLocal();
       showToast('Transfer saved ✓', 'success');
       Promise.all([
         fetchCurrentMonth(true),
         fetchAllOpex(),
-      ]).then(() => { calInited = false; if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); } });
+      ]).then(() => {
+        calInited = false;
+        if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); }
+        buildAccountBalances();
+        renderAccountBalanceCards();
+      });
     } else {
       showToast(navigator.onLine ? 'Save failed' : 'Offline — sync pending', '');
     }
@@ -2860,6 +2914,14 @@ async function syncTransfer(r) {
 async function deleteTransfer(txId) {
   if (!txId) return;
   showToast('Deleting transfer…', 'loading', 0);
+
+  // Optimistically remove transfer from local memory and update balances immediately
+  txHistory = txHistory.filter(h => h.id !== txId && h.txId !== txId && String(h.id) !== String(txId));
+  HIST.opex = (HIST.opex || []).filter(r => r.id !== txId && String(r.id) !== String(txId));
+  saveLocal();
+  buildAccountBalances();
+  renderAccountBalanceCards();
+
   try {
     const payload = { type: 'transfer', action: 'delete', id: txId };
     const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: apiBody(payload) });
@@ -2869,6 +2931,8 @@ async function deleteTransfer(txId) {
       Promise.all([fetchCurrentMonth(true), fetchAllOpex()]).then(() => {
         calInited = false;
         if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); }
+        buildAccountBalances();
+        renderAccountBalanceCards();
       });
     } else {
       showToast('Delete failed', 'error');
@@ -4555,6 +4619,8 @@ async function loadHistData() {
     if (j.txPm)  { HIST.txPm  = j.txPm;  localStorage.setItem('notapub_txPm', JSON.stringify(j.txPm)); }
     histLoaded = true;
     pruneStaleHistory();
+    buildAccountBalances();
+    renderAccountBalanceCards();
     histLoadCallbacks.forEach(cb => cb());
     histLoadCallbacks = [];
   } catch(e) {
@@ -4565,6 +4631,8 @@ async function loadHistData() {
     if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
     histLoaded = true;
     pruneStaleHistory();
+    buildAccountBalances();
+    renderAccountBalanceCards();
     histLoadCallbacks.forEach(cb => cb());
     histLoadCallbacks = [];
   }

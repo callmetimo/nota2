@@ -1400,7 +1400,7 @@ async function fetchConfig() {
 function applyConfigToGlobals() {
   if (!CONFIG_ITEMS.length) return;
   const byKind = k => CONFIG_ITEMS.filter(i => i.kind === k && !i.archived)
-    .sort((a, b) => a.sortOrder - b.sortOrder).map(i => i.name);
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })).map(i => i.name);
 
   allCategories.length = 0; allCategories.push(...byKind('category'));
   allPMs.length = 0;        allPMs.push(...byKind('pm'));
@@ -1705,7 +1705,7 @@ function renderSettingsLists() {
   `;
 
   const kind = currentSettingsTab;
-  const items = CONFIG_ITEMS.filter(i => i.kind === kind).sort((a,b) => a.sortOrder - b.sortOrder);
+  const items = CONFIG_ITEMS.filter(i => i.kind === kind).sort((a,b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
   const active = items.filter(i => !i.archived);
   const archived = items.filter(i => i.archived);
   const showArchived = settingsShowArchived[kind];

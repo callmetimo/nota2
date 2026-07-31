@@ -1013,7 +1013,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       </div>
       <div class="form-group" id="configItemBalanceGroup" style="display:none">
         <label class="form-label">Remaining Balance</label>
-        <input type="number" class="form-input" id="configItemBalance" placeholder="0" min="0" inputmode="numeric">
+        <input type="text" class="form-input" id="configItemBalance" placeholder="0" inputmode="decimal" oninput="formatDecimalAmountInput(this)">
       </div>
       <div class="form-group" id="configItemBalanceDateGroup" style="display:none">
         <label class="form-label">Input Date / As of Date</label>
@@ -1034,7 +1034,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <input type="hidden" id="setBalanceAccount">
       <div class="form-group">
         <label class="form-label">Amount (IDR)</label>
-        <input type="number" class="form-input" id="setBalanceAmount" placeholder="0" min="0" inputmode="numeric">
+        <input type="text" class="form-input" id="setBalanceAmount" placeholder="0" inputmode="decimal" oninput="formatDecimalAmountInput(this)">
       </div>
       <div class="form-group">
         <label class="form-label">As of date</label>
@@ -1790,7 +1790,14 @@ function openConfigItemOverlay(kind, name) {
   if (document.getElementById('configItemBalance')) {
     const raw = item ? rawAccountBalances[item.name] : null;
     const amtVal = (item && item.balance != null) ? item.balance : (raw ? raw.amount : '');
-    document.getElementById('configItemBalance').value = (amtVal !== '' && amtVal != null) ? String(amtVal) : '';
+    if (amtVal !== '' && amtVal != null && !isNaN(Number(amtVal))) {
+      const num = Number(amtVal);
+      const parts = String(num).split('.');
+      const intFormatted = Number(parts[0]).toLocaleString('en-US');
+      document.getElementById('configItemBalance').value = parts.length > 1 ? `${intFormatted}.${parts[1]}` : intFormatted;
+    } else {
+      document.getElementById('configItemBalance').value = '';
+    }
   }
   if (document.getElementById('configItemBalanceDate')) {
     const raw = item ? rawAccountBalances[item.name] : null;
@@ -1831,7 +1838,8 @@ async function saveConfigItem() {
   }
   const linkedPM = kind === 'account' ? (document.getElementById('configItemLinkedPM').value || '') : '';
   const balanceRaw = (kind === 'account' && document.getElementById('configItemBalance')) ? document.getElementById('configItemBalance').value : null;
-  const balance = (balanceRaw !== null && balanceRaw !== '' && !isNaN(Number(balanceRaw))) ? Number(balanceRaw) : null;
+  const cleanBalanceStr = balanceRaw ? String(balanceRaw).replace(/,/g, '').trim() : '';
+  const balance = (cleanBalanceStr !== '' && !isNaN(Number(cleanBalanceStr))) ? Number(cleanBalanceStr) : null;
   const balanceDate = (kind === 'account' && document.getElementById('configItemBalanceDate')) ? (document.getElementById('configItemBalanceDate').value || '') : '';
 
   if (existing) {
@@ -2594,6 +2602,51 @@ function formatAmountInput(el){
   el.value = digits ? Number(digits).toLocaleString('en-US') : '';
   const newPos = Math.max(0, el.value.length - cursorFromEnd);
   el.setSelectionRange(newPos, newPos);
+}
+
+function formatDecimalAmountInput(el) {
+  const rawVal = el.value;
+  if (!rawVal) return;
+  const cursorFromEnd = rawVal.length - (el.selectionEnd || 0);
+
+  let cleaned = '';
+  let hasDot = false;
+  for (let i = 0; i < rawVal.length; i++) {
+    const ch = rawVal[i];
+    if (ch >= '0' && ch <= '9') {
+      cleaned += ch;
+    } else if (ch === '.' && !hasDot) {
+      cleaned += '.';
+      hasDot = true;
+    }
+  }
+
+  const parts = cleaned.split('.');
+  let intPart = parts[0];
+  let decPart = parts.length > 1 ? parts[1] : null;
+
+  let formattedInt = '';
+  if (intPart) {
+    if (/^0+$/.test(intPart)) {
+      formattedInt = '0';
+    } else {
+      const cleanInt = intPart.replace(/^0+/, '') || '0';
+      formattedInt = Number(cleanInt).toLocaleString('en-US');
+    }
+  } else if (hasDot) {
+    formattedInt = '0';
+  }
+
+  let formatted = formattedInt;
+  if (hasDot) {
+    formatted += '.' + (decPart !== null ? decPart : '');
+  }
+
+  el.value = formatted;
+  if (el.selectionEnd != null) {
+    const newPos = Math.max(0, formatted.length - cursorFromEnd);
+    el.setSelectionRange(newPos, newPos);
+  }
 }
 
 function fUSD(idrAmount, rate){

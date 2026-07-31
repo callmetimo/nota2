@@ -37,7 +37,11 @@ signed-in user's own short-lived OAuth token.
 ### Session 5: Custom Asset Type Configuration & Dynamic Net Worth Allocation
 - **Configurable Account & Stock Asset Types**: Added **Asset Type** selection (`Cash`, `Reksa Dana`, `Forex`, `US Stock`, `JHT`, or `Custom...`) for Accounts and Stocks under Profile → Settings → Accounts / Stocks.
 - **Google Sheets Config Sync**: Synchronized account and stock asset type configurations with Column E (`assetType`) in the Google Sheets `Config` sheet.
-- **Dynamic Net Worth Allocation Diagram**: Updated the 'Allocation by Type' donut chart on the Net Worth Overview screen to dynamically aggregate balances by user-configured asset types, removing hardcoded fallback slices ("Other") and dynamically mapping custom asset types with distinct colors.
+- **Stock Balance Inputs**: Enabled Balance and Balance Date settings for Stock items in the Config modal, allowing non-transactional asset holdings (e.g., JHT) to maintain a static balance.
+- **Net Worth Holdings Alignment**:
+  - Unified asset type categorization via `getAssetTypeForItem(name, explicitType, isAccount)` shared across both Overview and Holdings pages.
+  - Revised `renderHoldings()` to group all accounts, investments, and fallback snapshots under their respective Asset Type sections (e.g., `JHT`, `US Stock`, `Cash`, `Reksa Dana`, `Forex`, `Deposit`), matching the allocation categories and totals of Net Worth Overview.
+  - Added per-asset-type group cost basis, estimated value, and P&L totals in Holdings, sorting allocation sections descending by value to match the Net Worth Overview donut chart sequence.
 
 ## How it works
 
@@ -216,6 +220,9 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
   `.cal-scroll` that aren't snap targets; they may become unreachable.
 - **`retryPendingQueue()` is safe to call repeatedly** — items are removed
   from the queue before the next retry.
+- **Config Balance Parsing (`parseConfigBalance` & `data-store.js`)**: Config balance strings formatted like `Rp 150.000.000` or `150,000,000` MUST NOT be parsed with naive `replace(/[^\d.-]/g, '')`. In dot-separated formats, `Number("150.000.000")` turns into `150` or `NaN`. Use `parseConfigBalance()` which handles currency prefixes, thousand dots, and commas before numeric conversion.
+- **Asset Type Fallback Priority**: Always perform keyword-based asset identification (e.g. `sUpper.includes('JHT')`) BEFORE testing generic fallbacks (`!type || type === 'Other'`). Otherwise, items configured with `Other` or missing asset types will fall back to `Cash` or `US Stock` instead of `JHT`.
+- **Net Worth Fallback Aggregation (`renderNetWorthOverview`)**: Non-invest stock items and static account snapshots stored in `rawAccountBalances` or `CONFIG_ITEMS` (like JHT) must be included via the fallback pass in `renderNetWorthOverview()` step 3, ensuring assets without Opex/Invest sheet transaction rows are still counted in total net worth and donut visualization.
 
 ### Resilience & error handling patterns
 

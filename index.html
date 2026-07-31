@@ -4247,10 +4247,7 @@ async function renderNetWorth(){
     }
     const balNum = parseConfigBalance(rawBal);
     if (balNum !== null && balNum > 0) {
-      let type = (sItem.assetType || STOCK_TYPE[sItem.name] || '').trim();
-      const sUpper = sItem.name.toUpperCase();
-      if (sUpper.includes('JHT')) type = 'JHT';
-      else if (!type || type === 'Other') type = 'US Stock';
+      let type = getAssetTypeForItem(sItem.name, sItem.assetType || STOCK_TYPE[sItem.name], false);
 
       holdings.push({
         stock: sItem.name,
@@ -4274,132 +4271,226 @@ async function renderNetWorth(){
   }
 }
 
+function getAssetTypeForItem(name, explicitType, isAccount) {
+  const sUpper = (name || '').toUpperCase();
+  if (sUpper.includes('JHT')) return 'JHT';
+  let t = (explicitType || '').trim();
+  if (t && t !== 'Other') return t;
+  if (!isAccount) {
+    if (name.startsWith('USDIDR') || name === 'CHFIDR') return 'Forex';
+    if (name === 'Star Stable Income Fund') return 'Reksa Dana';
+    return 'US Stock';
+  }
+  return 'Cash';
+}
+
 function renderHoldings(holdings, usdRate, chfRate, acctBals){
   acctBals = acctBals || {};
+  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false);
+
   const DYNAMIC_TYPE_COLORS = {
-    'US Stock': { color: 'var(--accent)', bg: 'var(--accent-dim)' },
-    'Cash': { color: 'var(--text2)', bg: 'var(--bg3)' },
+    'US Stock': { color: '#5b8ef0', bg: 'rgba(91,142,240,0.15)' },
+    'Cash': { color: '#888780', bg: 'rgba(136,135,128,0.15)' },
     'Reksa Dana': { color: 'var(--green)', bg: 'var(--green-dim)' },
     'Forex': { color: 'var(--blue)', bg: 'var(--blue-dim)' },
-    'JHT': { color: '#a855f7', bg: 'rgba(168,85,247,0.15)' }
+    'JHT': { color: '#a855f7', bg: 'rgba(168,85,247,0.15)' },
+    'Deposit': { color: '#06b6d4', bg: 'rgba(6,182,212,0.15)' },
+    'Gold': { color: '#eab308', bg: 'rgba(234,179,8,0.15)' },
+    'Crypto': { color: '#ec4899', bg: 'rgba(236,72,153,0.15)' },
+    'Bonds': { color: '#14b8a6', bg: 'rgba(20,184,166,0.15)' }
   };
+  const FALLBACK_PALETTE = ['#f43f5e', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#3b82f6'];
   function getHoldingTheme(type) {
     if (DYNAMIC_TYPE_COLORS[type]) return DYNAMIC_TYPE_COLORS[type];
-    return { color: '#38bdf8', bg: 'rgba(56,189,248,0.15)' };
+    let hash = 0;
+    for (let i = 0; i < type.length; i++) hash = type.charCodeAt(i) + ((hash << 5) - hash);
+    const color = FALLBACK_PALETTE[Math.abs(hash) % FALLBACK_PALETTE.length];
+    return { color, bg: `${color}25` };
   }
+
+  const groups = {};
+
+  // 1. Accounts grouped by assetType allocation
+  activeAccounts.forEach(acct => {
+    const balObj = acctBals[acct.name];
+    const bal = balObj?.amount || 0;
+    if (bal <= 0 && acctBals[acct.name] == null) return;
+    const t = getAssetTypeForItem(acct.name, acct.assetType, true);
+    if (!groups[t]) groups[t] = [];
+    groups[t].push({
+      itemKind: 'account',
+      name: acct.name,
+      acct,
+      bal,
+      balObj,
+      costBasis: bal,
+      currentValue: bal,
+      ccy: acct.ccy || 'IDR'
+    });
+  });
+
+  // 2. Investment holdings grouped by assetType allocation
+  holdings.forEach(h => {
+    const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === h.stock);
+    const t = getAssetTypeForItem(h.stock, stockConfig?.assetType || h.type, false);
+    if (!groups[t]) groups[t] = [];
+    groups[t].push({
+      itemKind: 'stock',
+      name: h.stock,
+      holding: h,
+      costBasis: h.costBasis,
+      currentValue: h.currentValue
+    });
+  });
+
+  // 3. Fallback rawAccountBalances grouped by assetType allocation
+  Object.keys(rawAccountBalances).forEach(k => {
+    const amt = Number(rawAccountBalances[k]?.amount) || 0;
+    if (amt <= 0) return;
+    const inAccts = activeAccounts.some(a => a.name.toLowerCase() === k.toLowerCase());
+    const inHoldings = holdings.some(h => h.stock.toLowerCase() === k.toLowerCase());
+    if (!inAccts && !inHoldings) {
+      const cfg = CONFIG_ITEMS.find(i => i.name.toLowerCase() === k.toLowerCase());
+      const t = getAssetTypeForItem(k, cfg?.assetType, cfg ? cfg.kind !== 'stock' : true);
+      if (!groups[t]) groups[t] = [];
+      groups[t].push({
+        itemKind: 'raw',
+        name: k,
+        bal: amt,
+        costBasis: amt,
+        currentValue: amt,
+        ccy: 'IDR'
+      });
+    }
+  });
+
+  // Sort allocation type groups by total group value descending
+  const sortedTypes = Object.keys(groups).sort((a, b) => {
+    const valA = groups[a].reduce((s, i) => s + (i.currentValue > 0 ? i.currentValue : i.costBasis), 0);
+    const valB = groups[b].reduce((s, i) => s + (i.currentValue > 0 ? i.currentValue : i.costBasis), 0);
+    return valB - valA;
+  });
 
   let html = '';
 
-  // Accounts section
-  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && acctBals[i.name] != null);
-  if (activeAccounts.length) {
-    activeAccounts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-    const totalCash = activeAccounts.reduce((s, a) => s + (acctBals[a.name]?.amount || 0), 0);
-    html += `<div class="chart-card-title" style="margin-top:6px;margin-bottom:8px">Accounts</div>`;
-    activeAccounts.forEach(acct => {
-      const bal = acctBals[acct.name]?.amount || 0;
-      const typeBadge = (acct.assetType || 'Cash').trim() || 'Cash';
-      html += `<div class="holding-item">
-        <div class="holding-header">
-          <div class="holding-name">${esc(acct.name)}</div>
-          <div style="display:flex;gap:4px;align-items:center">
-            <span class="holding-badge" style="background:var(--bg3);color:var(--text2)">${esc(typeBadge)}</span>
-            <span class="holding-badge" style="background:var(--bg3);color:var(--text2)">${acct.ccy === 'USD' ? 'USD' : 'IDR'}</span>
-          </div>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px">
-          <div>
-            <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Balance</div>
-            ${dualValSmFull(bal, usdRate)}
-          </div>
-        </div>
-      </div>`;
-    });
-    if (activeAccounts.length > 1) {
-      html += `<div class="holding-item" style="border-color:var(--border2);background:var(--bg3)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div style="font-size:12px;font-weight:600;color:var(--text2)">Total Accounts</div>
-          <div style="text-align:right">${dualValSmFull(totalCash, usdRate)}</div>
-        </div>
-      </div>`;
-    }
-  }
-
-  // Dynamic grouping for investment holdings
-  const groups = {};
-  holdings.forEach(h => {
-    const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === h.stock);
-    const t = (stockConfig?.assetType || h.type || 'US Stock').trim() || 'US Stock';
-    if (!groups[t]) groups[t] = [];
-    groups[t].push(h);
-  });
-
-  Object.entries(groups).forEach(([type, items]) => {
+  sortedTypes.forEach(type => {
+    const items = groups[type];
     if (!items.length) return;
-    if (type === 'Forex' || type === 'US Stock') items.sort((a, b) => b.currentValue - a.currentValue);
+
+    items.sort((a, b) => {
+      if (a.itemKind === 'stock' && b.itemKind !== 'stock') return -1;
+      if (a.itemKind !== 'stock' && b.itemKind === 'stock') return 1;
+      if (a.itemKind === 'stock' && b.itemKind === 'stock') return b.currentValue - a.currentValue;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+
     const theme = getHoldingTheme(type);
     let groupCost = 0, groupValue = 0;
-    html += `<div class="chart-card-title" style="margin-top:14px;margin-bottom:8px;color:${theme.color}">${esc(type)}</div>`;
-    items.forEach(h => {
-      groupCost  += h.costBasis;
-      groupValue += h.currentValue;
-      const hasValue = h.currentValue > 0;
-      const pnl    = hasValue ? h.currentValue - h.costBasis : null;
-      const pnlPct = pnl !== null && h.costBasis > 0 ? (pnl/h.costBasis*100) : null;
-      const lotStr = h.type==='US Stock' ? `${h.netLot} shares` :
-                     h.stock.startsWith('USDIDR') ? `${h.netLot.toFixed(2)} USD` :
-                     h.stock==='CHFIDR'  ? `${h.netLot} CHF` :
-                     `${h.netLot.toLocaleString('id-ID')} units`;
-      const avgStr = h.type==='US Stock'
-        ? `Avg $${Number(Math.round(h.avgNativePrice + 'e2') + 'e-2').toFixed(2)}`
-        : h.stock.startsWith('USDIDR')
-          ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/USD`
-          : h.stock==='CHFIDR'
-            ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/CHF`
-            : `Avg ${fRp(Math.round(h.avgNativePrice))}/unit`;
 
-      html += `<div class="holding-item">
-        <div class="holding-header">
-          <div class="holding-name" style="color:${theme.color}">${esc(h.stock)}</div>
-          <span class="holding-badge" style="background:${theme.bg};color:${theme.color}">${lotStr}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px">
-          <div>
-            <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Cost basis</div>
-            ${dualValSm(h.costBasis, usdRate)}
+    html += `<div class="chart-card-title" style="margin-top:14px;margin-bottom:8px;color:${theme.color};font-size:14px;font-weight:700">${esc(type)}</div>`;
+
+    items.forEach(item => {
+      groupCost += item.costBasis;
+      groupValue += item.currentValue;
+
+      if (item.itemKind === 'account') {
+        const acct = item.acct;
+        const bal = item.bal;
+        const ccy = (ACCOUNT_CCY[acct.name] || acct.ccy || 'IDR').toUpperCase();
+        let subText = '';
+        if (ccy !== 'IDR' && item.balObj?.nativeAmount != null) {
+          subText = `<div style="font-size:10px;color:var(--text2);margin-top:2px">${ccy} ${item.balObj.nativeAmount.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})}</div>`;
+        }
+
+        html += `<div class="holding-item">
+          <div class="holding-header">
+            <div class="holding-name">${esc(acct.name)}</div>
+            <div style="display:flex;gap:4px;align-items:center">
+              <span class="holding-badge" style="background:${theme.bg};color:${theme.color}">${esc(type)}</span>
+              <span class="holding-badge" style="background:var(--bg3);color:var(--text2)">${ccy}</span>
+            </div>
           </div>
-          <div style="text-align:right">
-            <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Value</div>
-            ${hasValue ? dualVal(h.currentValue, usdRate) : `<div style="color:var(--text2);font-size:12px">Loading…</div>`}
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px">
+            <div>
+              <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Balance</div>
+              ${dualValSmFull(bal, usdRate)}
+              ${subText}
+            </div>
           </div>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px">
-          <span style="font-size:11px;color:var(--text2)">${avgStr}</span>
-          ${pnl!==null ? pnlDual(pnl, pnlPct, usdRate, pnl>=0?'var(--green)':'var(--red)') : ''}
-        </div>
-      </div>`;
+        </div>`;
+      } else if (item.itemKind === 'raw') {
+        html += `<div class="holding-item">
+          <div class="holding-header">
+            <div class="holding-name">${esc(item.name)}</div>
+            <span class="holding-badge" style="background:${theme.bg};color:${theme.color}">${esc(type)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px">
+            <div>
+              <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Balance</div>
+              ${dualValSmFull(item.bal, usdRate)}
+            </div>
+          </div>
+        </div>`;
+      } else if (item.itemKind === 'stock') {
+        const h = item.holding;
+        const hasValue = h.currentValue > 0;
+        const pnl = hasValue ? h.currentValue - h.costBasis : null;
+        const pnlPct = pnl !== null && h.costBasis > 0 ? (pnl / h.costBasis * 100) : null;
+        const lotStr = h.type === 'US Stock' ? `${h.netLot} shares` :
+                       h.stock.startsWith('USDIDR') ? `${h.netLot.toFixed(2)} USD` :
+                       h.stock === 'CHFIDR' ? `${h.netLot} CHF` :
+                       `${h.netLot.toLocaleString('id-ID')} units`;
+        const avgStr = h.type === 'US Stock'
+          ? `Avg $${Number(Math.round(h.avgNativePrice + 'e2') + 'e-2').toFixed(2)}`
+          : h.stock.startsWith('USDIDR')
+            ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/USD`
+            : h.stock === 'CHFIDR'
+              ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/CHF`
+              : `Avg ${fRp(Math.round(h.avgNativePrice))}/unit`;
+
+        html += `<div class="holding-item">
+          <div class="holding-header">
+            <div class="holding-name" style="color:${theme.color}">${esc(h.stock)}</div>
+            <span class="holding-badge" style="background:${theme.bg};color:${theme.color}">${lotStr}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px">
+            <div>
+              <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Cost basis</div>
+              ${dualValSm(h.costBasis, usdRate)}
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Value</div>
+              ${hasValue ? dualVal(h.currentValue, usdRate) : `<div style="color:var(--text2);font-size:12px">Loading…</div>`}
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px">
+            <span style="font-size:11px;color:var(--text2)">${avgStr}</span>
+            ${pnl !== null ? pnlDual(pnl, pnlPct, usdRate, pnl >= 0 ? 'var(--green)' : 'var(--red)') : ''}
+          </div>
+        </div>`;
+      }
     });
-    if (items.length > 1 || type === 'US Stock') {
-      const gPnl    = groupValue > 0 ? groupValue - groupCost : null;
-      const gPnlPct = gPnl !== null && groupCost > 0 ? (gPnl / groupCost * 100) : null;
-      html += `<div class="holding-item" style="border-color:${theme.color};background:${theme.bg}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <div style="font-size:12px;font-weight:600;color:${theme.color};margin-bottom:4px">Total ${esc(type)}</div>
-            <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Cost basis</div>
-            <div style="font-size:13px;font-weight:600;color:${theme.color}">${fUSD(groupCost,usdRate)}</div>
-            <div style="font-size:13px;font-weight:600;color:${theme.color};opacity:0.7">${fRpS(Math.round(groupCost))}</div>
-          </div>
-          ${gPnl!==null ? `<div style="text-align:right">
-            <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Est. value</div>
-            <div style="font-size:13px;font-weight:600;color:${theme.color}">${fUSD(groupValue,usdRate)}</div>
-            <div style="font-size:13px;font-weight:600;color:${theme.color};opacity:0.7">${fRpS(Math.round(groupValue))}</div>
-            ${pnlDual(gPnl, gPnlPct, usdRate, gPnl>=0?'var(--green)':'var(--red)')}
-          </div>` : ''}
+
+    const gPnl = (groupValue > 0 && groupValue !== groupCost) ? groupValue - groupCost : null;
+    const gPnlPct = gPnl !== null && groupCost > 0 ? (gPnl / groupCost * 100) : null;
+    html += `<div class="holding-item" style="border-color:${theme.color};background:${theme.bg};margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:${theme.color};margin-bottom:4px">Total ${esc(type)}</div>
+          <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Cost basis</div>
+          <div style="font-size:13px;font-weight:600;color:${theme.color}">${fUSD(groupCost, usdRate)}</div>
+          <div style="font-size:13px;font-weight:600;color:${theme.color};opacity:0.7">${fRpS(Math.round(groupCost))}</div>
         </div>
-      </div>`;
-    }
+        <div style="text-align:right">
+          <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Est. value</div>
+          <div style="font-size:13px;font-weight:600;color:${theme.color}">${fUSD(groupValue, usdRate)}</div>
+          <div style="font-size:13px;font-weight:600;color:${theme.color};opacity:0.7">${fRpS(Math.round(groupValue))}</div>
+          ${gPnl !== null ? pnlDual(gPnl, gPnlPct, usdRate, gPnl >= 0 ? 'var(--green)' : 'var(--red)') : ''}
+        </div>
+      </div>
+    </div>`;
   });
+
   document.getElementById('nwContent').innerHTML = html || '<div class="empty-state">No holdings found</div>';
 }
 
@@ -4462,13 +4553,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
 
   // 1. Accumulate Account balances into their configured assetType
   activeAccounts.forEach(acct => {
-    let acctType = (acct.assetType || '').trim();
-    const aUpper = acct.name.toUpperCase();
-    if (aUpper.includes('JHT')) {
-      acctType = 'JHT';
-    } else if (!acctType || acctType === 'Other') {
-      acctType = 'Cash';
-    }
+    const acctType = getAssetTypeForItem(acct.name, acct.assetType, true);
     const amt = Number(acctBals[acct.name]?.amount) || 0;
     if (amt > 0) {
       if (!byType[acctType]) byType[acctType] = { cost: 0, value: 0 };
@@ -4480,15 +4565,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
   // 2. Accumulate Stock / Investment holdings into their configured assetType
   holdings.forEach(h => {
     const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === h.stock);
-    let t = (stockConfig?.assetType || h.type || '').trim();
-    const sUpper = (h.stock || '').toUpperCase();
-    if (sUpper.includes('JHT')) {
-      t = 'JHT';
-    } else if (!t || t === 'Other') {
-      if (h.stock.startsWith('USDIDR') || h.stock === 'CHFIDR') t = 'Forex';
-      else if (h.stock === 'Star Stable Income Fund') t = 'Reksa Dana';
-      else t = 'US Stock';
-    }
+    const t = getAssetTypeForItem(h.stock, stockConfig?.assetType || h.type, false);
     if (!byType[t]) byType[t] = { cost: 0, value: 0 };
     byType[t].cost  += h.costBasis;
     byType[t].value += h.currentValue;
@@ -4502,8 +4579,8 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
     const inAccts = activeAccounts.some(a => a.name.toLowerCase() === k.toLowerCase());
     const inHoldings = holdings.some(h => h.stock.toLowerCase() === k.toLowerCase());
     if (!inAccts && !inHoldings) {
-      let kType = 'Cash';
-      if (k.toUpperCase().includes('JHT')) kType = 'JHT';
+      const cfg = CONFIG_ITEMS.find(i => i.name.toLowerCase() === k.toLowerCase());
+      const kType = getAssetTypeForItem(k, cfg?.assetType, cfg ? cfg.kind !== 'stock' : true);
       if (!byType[kType]) byType[kType] = { cost: 0, value: 0 };
       byType[kType].cost += amt;
       byType[kType].value += amt;

@@ -4532,6 +4532,31 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
               ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/CHF`
               : `Avg ${fRp(Math.round(h.avgNativePrice))}/unit`;
 
+        let mktStr = '';
+        if (h.stock === 'Star Stable Income Fund' || h.stock.toLowerCase().includes('star stable')) {
+          const nav = parsePrice(stockPrices['StarStable']) || parsePrice(stockPrices['Star Stable Income Fund']);
+          if (nav > 0) {
+            const navUsd = usdRate > 0 ? (nav / usdRate) : 0;
+            mktStr = `Mkt Rp${Math.round(nav).toLocaleString('id-ID')}/unit · $${navUsd.toFixed(2)}`;
+          }
+        } else if (h.stock.startsWith('USDIDR') || (isUSD && !isUSDStock)) {
+          const mktRate = parsePrice(stockPrices['USDIDR']) || usdRate;
+          if (mktRate > 0) {
+            mktStr = `Mkt rate Rp${Math.round(mktRate).toLocaleString('id-ID')}/USD`;
+          }
+        } else if (h.stock === 'CHFIDR' || isCHF) {
+          const mktRate = parsePrice(stockPrices['CHFIDR']) || chfRate;
+          if (mktRate > 0) {
+            mktStr = `Mkt rate Rp${Math.round(mktRate).toLocaleString('id-ID')}/CHF`;
+          }
+        } else if (isUSDStock || parsePrice(stockPrices[h.stock]) > 0) {
+          const p = parsePrice(stockPrices[h.stock]);
+          if (p > 0) {
+            const pIdr = p * usdRate;
+            mktStr = `Mkt $${Number(Math.round(p + 'e2') + 'e-2').toFixed(2)} · ${fRpS(Math.round(pIdr))}`;
+          }
+        }
+
         html += `<div class="holding-item">
           <div class="holding-header">
             <div class="holding-name" style="color:${theme.color}">${esc(h.stock)}</div>
@@ -4547,9 +4572,14 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
               ${hasValue ? dualVal(h.currentValue, usdRate) : `<div style="color:var(--text2);font-size:12px">Loading…</div>`}
             </div>
           </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px">
-            <span style="font-size:11px;color:var(--text2)">${avgStr}</span>
-            ${pnl !== null ? pnlDual(pnl, pnlPct, usdRate, pnl >= 0 ? 'var(--green)' : 'var(--red)') : ''}
+          <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:6px;padding-top:6px;border-top:0.5px solid var(--border)">
+            <div style="font-size:11px;color:var(--text2);line-height:1.35">
+              <div>${avgStr}</div>
+              ${mktStr ? `<div style="color:var(--blue);font-weight:500;margin-top:1px">${mktStr}</div>` : ''}
+            </div>
+            <div style="text-align:right;margin-bottom:1px">
+              ${pnl !== null ? pnlDual(pnl, pnlPct, usdRate, pnl >= 0 ? 'var(--green)' : 'var(--red)') : ''}
+            </div>
           </div>
         </div>`;
       }

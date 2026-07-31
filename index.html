@@ -1443,7 +1443,7 @@ function applyConfigToGlobals() {
   CONFIG_ITEMS.filter(i => i.kind === 'account' && i.ccy).forEach(i => { ACCOUNT_CCY[i.name] = i.ccy; });
 
   Object.keys(STOCK_TYPE).forEach(k => delete STOCK_TYPE[k]);
-  CONFIG_ITEMS.filter(i => i.kind === 'stock' && i.assetType).forEach(i => { STOCK_TYPE[i.name] = i.assetType; });
+  CONFIG_ITEMS.filter(i => i.assetType).forEach(i => { STOCK_TYPE[i.name] = i.assetType; });
 }
 
 async function saveConfigToServer() {
@@ -4204,7 +4204,7 @@ async function renderNetWorth(){
   const holdings = Object.keys(buyLots).map(stock=>{
     const netLot = buyLots[stock] - (sellLots[stock]||0);
     if(netLot <= 0) return null;
-    const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === stock);
+    const stockConfig = CONFIG_ITEMS.find(i => i.name && i.name.toLowerCase() === stock.toLowerCase());
     let type = getAssetTypeForItem(stock, stockConfig?.assetType || STOCK_TYPE[stock], false);
     const buyRatio = buyLots[stock] > 0 ? netLot / buyLots[stock] : 0;
     const costBasis = buyTotalIdr[stock] * buyRatio;
@@ -4266,16 +4266,46 @@ async function renderNetWorth(){
 }
 
 function getAssetTypeForItem(name, explicitType, isAccount) {
-  const sUpper = (name || '').toUpperCase();
+  const sName = (name || '').trim();
+  const sUpper = sName.toUpperCase();
   if (sUpper.includes('JHT')) return 'JHT';
-  let t = (explicitType || '').trim();
+
+  const cfg = CONFIG_ITEMS.find(i => i.name && i.name.toLowerCase() === sName.toLowerCase());
+
+  let t = (explicitType || cfg?.assetType || STOCK_TYPE[sName] || '').trim();
   if (t && t !== 'Other') return t;
-  if (!isAccount) {
-    if (name.startsWith('USDIDR') || name === 'CHFIDR') return 'Forex';
-    if (name === 'Star Stable Income Fund') return 'Reksa Dana';
-    return 'US Stock';
+
+  const ccy = (ACCOUNT_CCY[sName] || cfg?.ccy || '').toUpperCase();
+
+  if (
+    sName.startsWith('USDIDR') ||
+    sName.startsWith('CHFIDR') ||
+    sName.startsWith('EURIDR') ||
+    sName.startsWith('SGDIDR') ||
+    sUpper.includes('USD') ||
+    sUpper.includes('CHF') ||
+    sUpper.includes('EUR') ||
+    sUpper.includes('SGD') ||
+    sUpper.includes('FOREX') ||
+    (ccy && ccy !== 'IDR')
+  ) {
+    return 'Forex';
   }
-  return 'Cash';
+
+  if (
+    sName === 'Star Stable Income Fund' ||
+    sUpper.includes('REKSA DANA') ||
+    sUpper.includes('MUTUAL FUND') ||
+    sUpper.includes('INCOME FUND')
+  ) {
+    return 'Reksa Dana';
+  }
+
+  if (isAccount || cfg?.kind === 'account') {
+    return 'Cash';
+  }
+
+  return 'US Stock';
 }
 
 function getTypeColor(type) {
@@ -4302,16 +4332,69 @@ function getHoldingTheme(type) {
   return { color, bg: `${color}25` };
 }
 
+function isFxAccountMatch(acctName, ccy, stockName) {
+  const aName = (acctName || '').trim();
+  const sName = (stockName || '').trim();
+  if (!aName || !sName) return false;
+
+  const aLower = aName.toLowerCase();
+  const sLower = sName.toLowerCase();
+
+  // 1. Exact match (case-insensitive)
+  if (aLower === sLower) return true;
+
+  // 2. Normalized token match (e.g., "USD CIMB" <-> "USDIDR CIMB")
+  const normA = aLower.replace(/^(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)\s+/i, '')
+                      .replace(/\s+(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)$/i, '')
+                      .replace(/\s+/g, ' ').trim();
+
+  const normS = sLower.replace(/^(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)\s+/i, '')
+                      .replace(/\s+(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)$/i, '')
+                      .replace(/\s+/g, ' ').trim();
+
+  if (normA && normS && normA === normS) {
+    return true;
+  }
+
+  // 3. Match generic FX pair names like "USDIDR" / "CHFIDR" with currency accounts
+  if ((sLower === 'usdidr' || sLower === 'chfidr') && (ccy === 'USD' || ccy === 'CHF' || aLower.includes(ccy?.toLowerCase() || ''))) {
+    return true;
+  }
+
+  return false;
+}
+
 function getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBalances) {
   acctBals = acctBals || {};
   rawAccountBalances = rawAccountBalances || {};
   const groups = {};
 
-  // 1. Active Accounts grouped by assetType allocation
+  // 1. Investment holdings grouped by assetType allocation (processed FIRST to preserve rich lot/cost details)
+  holdings.forEach(h => {
+    const cfg = CONFIG_ITEMS.find(i => i.name && i.name.toLowerCase() === h.stock.toLowerCase());
+    const t = getAssetTypeForItem(h.stock, cfg?.assetType || h.type, false);
+    if (!groups[t]) groups[t] = { type: t, cost: 0, value: 0, items: [] };
+    groups[t].cost += h.costBasis;
+    groups[t].value += h.currentValue;
+    groups[t].items.push({
+      itemKind: 'stock',
+      name: h.stock,
+      holding: h,
+      costBasis: h.costBasis,
+      currentValue: h.currentValue
+    });
+  });
+
+  // 2. Active Accounts grouped by assetType allocation (deduplicating items already represented in holdings)
   activeAccounts.forEach(acct => {
     const balObj = acctBals[acct.name];
     const amt = Number(balObj?.amount) || 0;
     if (amt <= 0) return;
+
+    // Deduplicate: Skip account if it is already represented by an investment/FX holding
+    const isAlreadyInHoldings = holdings.some(h => isFxAccountMatch(acct.name, acct.ccy, h.stock));
+    if (isAlreadyInHoldings) return;
+
     const t = getAssetTypeForItem(acct.name, acct.assetType, true);
     if (!groups[t]) groups[t] = { type: t, cost: 0, value: 0, items: [] };
     groups[t].cost += amt;
@@ -4328,29 +4411,14 @@ function getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBa
     });
   });
 
-  // 2. Investment holdings grouped by assetType allocation
-  holdings.forEach(h => {
-    const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === h.stock);
-    const t = getAssetTypeForItem(h.stock, stockConfig?.assetType || h.type, false);
-    if (!groups[t]) groups[t] = { type: t, cost: 0, value: 0, items: [] };
-    groups[t].cost += h.costBasis;
-    groups[t].value += h.currentValue;
-    groups[t].items.push({
-      itemKind: 'stock',
-      name: h.stock,
-      holding: h,
-      costBasis: h.costBasis,
-      currentValue: h.currentValue
-    });
-  });
-
   // 3. Fallback rawAccountBalances grouped by assetType allocation
   Object.keys(rawAccountBalances).forEach(k => {
     const rawObj = rawAccountBalances[k];
     const amt = Number(rawObj?.amount) || 0;
     if (amt <= 0) return;
+
     const inAccts = activeAccounts.some(a => a.name.toLowerCase() === k.toLowerCase());
-    const inHoldings = holdings.some(h => h.stock.toLowerCase() === k.toLowerCase());
+    const inHoldings = holdings.some(h => isFxAccountMatch(k, null, h.stock));
     if (!inAccts && !inHoldings) {
       const cfg = CONFIG_ITEMS.find(i => i.name.toLowerCase() === k.toLowerCase());
       const kType = getAssetTypeForItem(k, cfg?.assetType, cfg ? cfg.kind !== 'stock' : true);
@@ -4447,15 +4515,20 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
         const hasValue = h.currentValue > 0;
         const pnl = hasValue ? h.currentValue - h.costBasis : null;
         const pnlPct = pnl !== null && h.costBasis > 0 ? (pnl / h.costBasis * 100) : null;
-        const lotStr = type === 'US Stock' ? `${h.netLot} shares` :
-                       h.stock.startsWith('USDIDR') ? `${h.netLot.toFixed(2)} USD` :
-                       h.stock === 'CHFIDR' ? `${h.netLot} CHF` :
+        const isUSDStock = type === 'US Stock';
+        const isUSD = h.stock.toUpperCase().includes('USD') || h.stock.startsWith('USDIDR') || isUSDStock;
+        const isCHF = h.stock.toUpperCase().includes('CHF') || h.stock === 'CHFIDR';
+
+        const lotStr = isUSDStock ? `${h.netLot.toLocaleString('en-US')} shares` :
+                       isUSD ? `${h.netLot.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})} USD` :
+                       isCHF ? `${h.netLot.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})} CHF` :
                        `${h.netLot.toLocaleString('id-ID')} units`;
-        const avgStr = type === 'US Stock'
+
+        const avgStr = isUSDStock
           ? `Avg $${Number(Math.round(h.avgNativePrice + 'e2') + 'e-2').toFixed(2)}`
-          : h.stock.startsWith('USDIDR')
+          : isUSD
             ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/USD`
-            : h.stock === 'CHFIDR'
+            : isCHF
               ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/CHF`
               : `Avg ${fRp(Math.round(h.avgNativePrice))}/unit`;
 

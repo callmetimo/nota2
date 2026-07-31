@@ -4154,7 +4154,7 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
   let html = '';
 
   // Cash section
-  const cashAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false && acctBals[i.name] != null);
+  const cashAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && acctBals[i.name] != null);
   if (cashAccounts.length) {
     cashAccounts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     const totalCash = cashAccounts.reduce((s, a) => s + (acctBals[a.name]?.amount || 0), 0);
@@ -4254,10 +4254,10 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
 
 function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
   acctBals = acctBals || {};
-  const checkedAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false);
-  const displayCash = checkedAccounts.length > 0
-    ? checkedAccounts.reduce((s, a) => s + (acctBals[a.name]?.amount || 0), 0)
-    : (CONFIG_ITEMS.some(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false) ? 0 : cashBalance);
+  const acctBalsKeys = Object.keys(acctBals);
+  const displayCash = acctBalsKeys.length > 0
+    ? acctBalsKeys.reduce((s, k) => s + (acctBals[k]?.amount || 0), 0)
+    : cashBalance;
   cashBalance = displayCash;
   const totalInvestCost  = holdings.reduce((s,h)=>s+h.costBasis, 0);
   const totalInvestValue = holdings.reduce((s,h)=>s+h.currentValue, 0);

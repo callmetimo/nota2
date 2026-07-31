@@ -1,6 +1,5 @@
 // Nota — Google sign-in using Google Identity Services (GIS) Token Client
-// No backend needed: the browser holds an OAuth access token scoped to drive.file
-// and spreadsheets, talking to Google APIs directly.
+// Pure client-side OAuth 2.0 without Firebase or redirect URL setup.
 
 (function () {
   let accessToken = sessionStorage.getItem('notaAuth_accessToken') || null;
@@ -78,8 +77,14 @@
       scope: scope,
       callback: async (resp) => {
         if (resp.error) {
-          console.error('[auth] GIS error', resp);
-          overlay.setStatus('Sign-in failed: ' + (resp.error_description || resp.error));
+          console.error('[auth] GIS response error:', resp);
+          if (resp.error === 'popup_closed_by_user') {
+            overlay.setStatus('Sign-in popup was closed. Click button to try again.');
+          } else if (resp.error === 'access_denied') {
+            overlay.setStatus('Permission was not granted. Please sign in to continue.');
+          } else {
+            overlay.setStatus('Sign-in error: ' + (resp.error_description || resp.error));
+          }
           return;
         }
         if (resp.access_token) {
@@ -94,6 +99,14 @@
             overlay.setStatus('Setup failed: ' + (err.message || 'Error'));
           }
         }
+      },
+      error_callback: (err) => {
+        console.warn('[auth] GIS error_callback:', err);
+        if (err && (err.type === 'popup_closed' || err.message === 'popup_closed')) {
+          overlay.setStatus('Sign-in popup was closed. Click button to try again.');
+        } else {
+          overlay.setStatus('Sign-in error: ' + (err.message || err.type || 'Popup closed or blocked'));
+        }
       }
     });
     return tokenClient;
@@ -104,7 +117,7 @@
     overlay.setStatus('Opening Google sign-in…');
     try {
       const client = initGisTokenClient();
-      client.requestAccessToken({ prompt: 'consent' });
+      client.requestAccessToken({ prompt: 'select_account' });
     } catch (err) {
       console.error('[auth] sign-in error', err);
       overlay.setStatus('Sign-in error: ' + err.message);

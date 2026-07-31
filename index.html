@@ -986,6 +986,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           <option value="Reksa Dana">Reksa Dana</option>
           <option value="Forex">Forex</option>
           <option value="US Stock">US Stock</option>
+          <option value="JHT">JHT</option>
         </select>
       </div>
       <div class="form-group" id="configItemCcyGroup" style="display:none">
@@ -4126,7 +4127,14 @@ async function renderNetWorth(){
   const holdings = Object.keys(buyLots).map(stock=>{
     const netLot = buyLots[stock] - (sellLots[stock]||0);
     if(netLot <= 0) return null;
-    const type = STOCK_TYPE[stock]||'';
+    let type = STOCK_TYPE[stock]||'';
+    if (!type || type === 'Other' || (type !== 'US Stock' && type !== 'Reksa Dana' && type !== 'Forex' && type !== 'JHT')) {
+      const sUpper = stock.toUpperCase();
+      if (sUpper.includes('JHT')) type = 'JHT';
+      else if (stock.startsWith('USDIDR') || stock === 'CHFIDR') type = 'Forex';
+      else if (stock === 'Star Stable Income Fund') type = 'Reksa Dana';
+      else type = 'US Stock';
+    }
     const buyRatio = buyLots[stock] > 0 ? netLot / buyLots[stock] : 0;
     const costBasis = buyTotalIdr[stock] * buyRatio;
     const avgCostPerUnit = buyLots[stock] > 0 ? buyTotalIdr[stock] / buyLots[stock] : 0;
@@ -4330,7 +4338,14 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
 
   const byType = {'Cash': {cost: cashBalance, value: cashBalance}};
   holdings.forEach(h=>{
-    const t = h.type || 'Other';
+    let t = h.type;
+    if (!t || t === 'Other' || (t !== 'US Stock' && t !== 'Reksa Dana' && t !== 'Forex' && t !== 'JHT')) {
+      const sUpper = (h.stock || '').toUpperCase();
+      if (sUpper.includes('JHT')) t = 'JHT';
+      else if (h.stock.startsWith('USDIDR') || h.stock === 'CHFIDR') t = 'Forex';
+      else if (h.stock === 'Star Stable Income Fund') t = 'Reksa Dana';
+      else t = 'US Stock';
+    }
     if(!byType[t]) byType[t] = {cost:0, value:0};
     byType[t].cost  += h.costBasis;
     byType[t].value += h.currentValue;

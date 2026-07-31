@@ -1547,16 +1547,41 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm) {
 function buildAccountBalances() {
   accountBalances = {};
   syncConfigToRawAccountBalances();
-  // USD/Forex accounts: balance derived from Invest sheet via computeInvestNetLots
-  const investNetLots = (HIST.invest && HIST.invest.length) ? computeInvestNetLots(HIST.invest) : null;
+
+  const allInvest = getAllInvestRows();
+  const investNetLots = (allInvest && allInvest.length) ? computeInvestNetLots(allInvest) : null;
   const manualUSD = parsePrice(stockPrices['USDIDR']);
+  const manualCHF = parsePrice(stockPrices['CHFIDR']);
   const usdRate = manualUSD > 0 ? manualUSD : (fxRates.USD || 16500);
+  const chfRate = manualCHF > 0 ? manualCHF : (fxRates.CHF || 19000);
 
   CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).forEach(acct => {
-    if (ACCOUNT_CCY[acct.name] === 'USD') {
+    const ccy = (ACCOUNT_CCY[acct.name] || acct.ccy || 'IDR').toUpperCase();
+    if (ccy !== 'IDR') {
       if (!investNetLots) return;
-      const netUSD = (investNetLots.buyLots[acct.name] || 0) - (investNetLots.sellLots[acct.name] || 0);
-      if (netUSD > 0) accountBalances[acct.name] = { amount: netUSD * usdRate };
+      const keys = new Set([
+        acct.name,
+        acct.name.replace(/^(IDR|USD|CHF|EUR|SGD)\s+/i, '').trim(),
+        ccy,
+        `${ccy}IDR`,
+        `${ccy} ${acct.name}`,
+        `${acct.name} ${ccy}`
+      ]);
+      let netLot = 0;
+      keys.forEach(k => {
+        if (investNetLots.buyLots[k] != null || investNetLots.sellLots[k] != null) {
+          netLot += (investNetLots.buyLots[k] || 0) - (investNetLots.sellLots[k] || 0);
+        }
+      });
+
+      let rate = 1;
+      if (ccy === 'USD') rate = usdRate;
+      else if (ccy === 'CHF') rate = chfRate;
+      else if (fxRates[ccy]) rate = fxRates[ccy];
+
+      if (netLot > 0) {
+        accountBalances[acct.name] = { amount: netLot * rate, nativeAmount: netLot, ccy };
+      }
       return;
     }
     // IDR accounts: use Config / Balances snapshot + Opex/Invest deltas
@@ -3953,11 +3978,13 @@ function computeInvestNetLots(allInvest) {
 
   allInvest.forEach(r => {
     if (r.action !== 'Buy') return;
-    if (!r.account || !STOCK_TYPE[r.account] || ACCOUNT_CCY[r.account] !== 'USD') return;
-    const usdSpent = (r.lot || 0) * (r.price || 0);
-    if (usdSpent > 0) {
+    if (!r.account) return;
+    const acctCcy = (ACCOUNT_CCY[r.account] || '').toUpperCase();
+    if (!acctCcy || acctCcy === 'IDR') return;
+    const fxSpent = (r.lot || 0) * (r.price || 0);
+    if (fxSpent > 0) {
       if (!(r.account in sellLots)) { buyLots[r.account] = buyLots[r.account] || 0; sellLots[r.account] = 0; }
-      sellLots[r.account] += usdSpent;
+      sellLots[r.account] += fxSpent;
     }
   });
 

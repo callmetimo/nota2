@@ -752,9 +752,25 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
   <div class="chart-page-section">
     <div class="insights-sticky">
       <div class="toggle-row" id="insightsModeToggle">
+        <div class="toggle-btn" data-m="weekly" onclick="setIM('weekly',this)">Weekly</div>
         <div class="toggle-btn active" data-m="monthly" onclick="setIM('monthly',this)">Monthly</div>
         <div class="toggle-btn" data-m="yearly" onclick="setIM('yearly',this)">Yearly</div>
         <div class="toggle-btn" data-m="category" onclick="setIM('category',this)">Category</div>
+      </div>
+      <div id="weeklyControls" style="display:none">
+        <div class="toggle-row" id="weeklySourceToggle">
+          <div class="toggle-btn active" data-v="all" onclick="setWV('all',this)">All</div>
+          <div class="toggle-btn" data-v="flazz" onclick="setWV('flazz',this)">Flazz</div>
+          <div class="toggle-btn" data-v="ewallet" onclick="setWV('ewallet',this)">eWallet</div>
+          <div class="toggle-btn" data-v="bank" onclick="setWV('bank',this)">Bank</div>
+          <div class="toggle-btn" data-v="cc" onclick="setWV('cc',this)">CC</div>
+        </div>
+        <div class="toggle-row" id="weeklyRangeToggle">
+          <div class="toggle-btn active" data-r="4" onclick="setWR(4,this)">4 Wk</div>
+          <div class="toggle-btn" data-r="8" onclick="setWR(8,this)">8 Wk</div>
+          <div class="toggle-btn" data-r="12" onclick="setWR(12,this)">12 Wk</div>
+          <div class="toggle-btn" data-r="ytd" onclick="setWR('ytd',this)">YTD</div>
+        </div>
       </div>
       <div id="monthlyControls">
         <div class="toggle-row" id="monthlySourceToggle">
@@ -802,6 +818,9 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       </div>
     </div>
     <div style="height:14px"></div>
+    <div id="weeklySummary" style="display:none"></div>
+    <div id="weeklyBarCard" style="display:none"></div>
+    <div id="weeklyDonutCard" style="display:none"></div>
     <div id="monthlySummary"></div>
     <div id="monthlyBarCard"></div>
     <div id="monthlyDonutCard"></div>
@@ -865,12 +884,12 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     <div class="more-menu-divider"></div>
     <button class="more-menu-item" onclick="switchTabFromMore('goals')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-      <span>Goals</span>
+      <span>Financial Goals</span>
     </button>
     <div class="more-menu-divider"></div>
     <button class="more-menu-item" onclick="switchTabFromMore('recurring')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-      <span>Recurring</span>
+      <span>Recurring Transactions</span>
     </button>
     <div class="more-menu-divider"></div>
     <button class="more-menu-item" onclick="switchTabFromMore('settings')">
@@ -970,25 +989,35 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         </select>
       </div>
       <div class="form-group" id="configItemCcyGroup" style="display:none">
-        <label class="goal-source-row" style="padding:9px 0">
-          <input type="checkbox" id="configItemUsdCheckbox">
-          <span style="font-size:14px">USD-denominated</span>
-        </label>
+        <label class="form-label">Currency</label>
+        <div style="display:flex;gap:8px">
+          <select class="form-input" id="configItemCcy" style="flex:1" onchange="_onConfigCcyChange()">
+            <option value="IDR">IDR (Indonesian Rupiah)</option>
+            <option value="USD">USD (US Dollar)</option>
+            <option value="SGD">SGD (Singapore Dollar)</option>
+            <option value="EUR">EUR (Euro)</option>
+            <option value="AUD">AUD (Australian Dollar)</option>
+            <option value="JPY">JPY (Japanese Yen)</option>
+            <option value="GBP">GBP (British Pound)</option>
+            <option value="MYR">MYR (Malaysian Ringgit)</option>
+            <option value="THB">THB (Thai Baht)</option>
+            <option value="CNY">CNY (Chinese Yuan)</option>
+            <option value="CUSTOM">Other...</option>
+          </select>
+          <input type="text" class="form-input" id="configItemCcyCustom" placeholder="e.g. CAD" style="flex:1;display:none;text-transform:uppercase" maxlength="10">
+        </div>
       </div>
       <div class="form-group" id="configItemLinkedPMGroup" style="display:none">
         <label class="form-label">Linked Payment Method</label>
         <select class="form-input" id="configItemLinkedPM"></select>
       </div>
       <div class="form-group" id="configItemBalanceGroup" style="display:none">
-        <label class="form-label">Remaining Balance (IDR)</label>
+        <label class="form-label">Remaining Balance</label>
         <input type="number" class="form-input" id="configItemBalance" placeholder="0" min="0" inputmode="numeric">
       </div>
       <div class="form-group" id="configItemBalanceDateGroup" style="display:none">
         <label class="form-label">Input Date / As of Date</label>
         <input type="date" class="form-input" id="configItemBalanceDate">
-      </div>
-      <div id="configItemSetBalanceGroup" style="display:none;margin-bottom:12px">
-        <button class="submit-btn" style="background:var(--bg3);color:var(--text);border:0.5px solid var(--border2)" onclick="openSetBalanceFromConfigOverlay()">Set Balance</button>
       </div>
       <button class="submit-btn expense" onclick="saveConfigItem()">Save</button>
       <button class="btn-delete" style="width:100%;margin-top:8px" id="configItemArchiveBtn" onclick="toggleArchiveCurrentConfigItem()">Delete</button>
@@ -1134,7 +1163,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     </button>
   </div>
   <div style="padding:0 0 14px;display:flex;align-items:center;justify-content:space-between">
-    <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Recurring</div>
+    <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Recurring Transactions</div>
   </div>
   <div id="recurringListContainer"></div>
   <button class="submit-btn expense" style="margin-top:8px" onclick="openAddRecurring()">+ Add Recurring</button>
@@ -1202,6 +1231,8 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 <script src="config.js"></script>
 <script src="sheets-client.js"></script>
 <script src="data-store.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="auth.js"></script>
 
 <script>
@@ -1380,7 +1411,7 @@ function applyConfigToGlobals() {
   CONFIG_ITEMS.filter(i => i.kind === 'category' && i.color).forEach(i => { CAT_COLORS[i.name] = i.color; });
 
   Object.keys(ACCOUNT_CCY).forEach(k => delete ACCOUNT_CCY[k]);
-  CONFIG_ITEMS.filter(i => i.kind === 'account' && i.ccy === 'USD').forEach(i => { ACCOUNT_CCY[i.name] = 'USD'; });
+  CONFIG_ITEMS.filter(i => i.kind === 'account' && i.ccy).forEach(i => { ACCOUNT_CCY[i.name] = i.ccy; });
 
   Object.keys(STOCK_TYPE).forEach(k => delete STOCK_TYPE[k]);
   CONFIG_ITEMS.filter(i => i.kind === 'stock' && i.assetType).forEach(i => { STOCK_TYPE[i.name] = i.assetType; });
@@ -1621,8 +1652,9 @@ function renderSettingsLists() {
     let metaStr = '';
     if (kind === 'stock') metaStr = it.assetType || '';
     else if (kind === 'account') {
-      if (it.ccy === 'USD') metaStr = 'USD';
-      else if (it.balance != null && it.balanceDate) metaStr = `${fRp(it.balance)} (${it.balanceDate})`;
+      const ccyCode = it.ccy || 'IDR';
+      if (it.balance != null && it.balanceDate) metaStr = `${ccyCode} ${fRp(it.balance)} (${it.balanceDate})`;
+      else metaStr = ccyCode;
     }
     return `<div class="config-row" onclick="openConfigItemOverlay('${kind}', ${jsAttr(it.name)})">
       <div class="config-row-name">
@@ -1655,7 +1687,17 @@ function _configFieldsForKind(kind) {
   document.getElementById('configItemLinkedPMGroup').style.display = kind === 'account' ? 'block' : 'none';
   if (document.getElementById('configItemBalanceGroup')) document.getElementById('configItemBalanceGroup').style.display = kind === 'account' ? 'block' : 'none';
   if (document.getElementById('configItemBalanceDateGroup')) document.getElementById('configItemBalanceDateGroup').style.display = kind === 'account' ? 'block' : 'none';
-  document.getElementById('configItemSetBalanceGroup').style.display = kind === 'account' ? 'block' : 'none';
+}
+
+function _onConfigCcyChange() {
+  const sel = document.getElementById('configItemCcy').value;
+  const customEl = document.getElementById('configItemCcyCustom');
+  if (sel === 'CUSTOM') {
+    customEl.style.display = 'block';
+    customEl.focus();
+  } else {
+    customEl.style.display = 'none';
+  }
 }
 
 function openConfigItemOverlay(kind, name) {
@@ -1666,7 +1708,21 @@ function openConfigItemOverlay(kind, name) {
   document.getElementById('configItemName').value = item ? item.name : '';
   document.getElementById('configItemColor').value = (item && item.color) || '#c8f060';
   document.getElementById('configItemAssetType').value = (item && item.assetType) || 'Reksa Dana';
-  document.getElementById('configItemUsdCheckbox').checked = !!(item && item.ccy === 'USD');
+
+  const ccyVal = (item && item.ccy) ? item.ccy.toUpperCase() : 'IDR';
+  const ccySel = document.getElementById('configItemCcy');
+  const ccyCustom = document.getElementById('configItemCcyCustom');
+  const presets = ['IDR', 'USD', 'SGD', 'EUR', 'AUD', 'JPY', 'GBP', 'MYR', 'THB', 'CNY'];
+  if (presets.includes(ccyVal)) {
+    ccySel.value = ccyVal;
+    ccyCustom.style.display = 'none';
+    ccyCustom.value = '';
+  } else {
+    ccySel.value = 'CUSTOM';
+    ccyCustom.style.display = 'block';
+    ccyCustom.value = ccyVal;
+  }
+
   const linkedPMSel = document.getElementById('configItemLinkedPM');
   linkedPMSel.innerHTML = `<option value="">(None)</option>` +
     allPMs.map(pm => `<option value="${esc(pm)}"${(item && item.linkedPM === pm) ? ' selected' : ''}>${esc(pm)}</option>`).join('');
@@ -1702,7 +1758,16 @@ async function saveConfigItem() {
   const existing = origName ? CONFIG_ITEMS.find(i => i.kind === kind && i.name === origName) : null;
   const color = kind === 'category' ? document.getElementById('configItemColor').value : '';
   const assetType = kind === 'stock' ? document.getElementById('configItemAssetType').value : '';
-  const ccy = kind === 'account' && document.getElementById('configItemUsdCheckbox').checked ? 'USD' : '';
+
+  let ccy = '';
+  if (kind === 'account') {
+    const selVal = document.getElementById('configItemCcy').value;
+    if (selVal === 'CUSTOM') {
+      ccy = (document.getElementById('configItemCcyCustom').value || '').trim().toUpperCase() || 'IDR';
+    } else {
+      ccy = selVal;
+    }
+  }
   const linkedPM = kind === 'account' ? (document.getElementById('configItemLinkedPM').value || '') : '';
   const balanceRaw = (kind === 'account' && document.getElementById('configItemBalance')) ? document.getElementById('configItemBalance').value : null;
   const balance = (balanceRaw !== null && balanceRaw !== '' && !isNaN(Number(balanceRaw))) ? Number(balanceRaw) : null;
@@ -2162,6 +2227,7 @@ function _reconcileUnsyncedWithSheet(rows, y, m) {
 
 let insightsMode = 'monthly';
 let nwMode = 'holdings';
+let wView='all', wRange=4, wSelWeek=null, wSelCat=null;
 let mView='all', mRange=3, mSelMonth=null, mSelCat=null;
 let yView='all', yRange=3, ySelYear=null, ySelCat=null;
 let cView='all', cRange=3, cSelCat=null;
@@ -2515,10 +2581,22 @@ function switchTab(tab, el) {
   if(tab==='insights'){
     const insPage=document.getElementById('page-insights');
     if(insPage)insPage.scrollTop=0;
-    ['monthlySummary','monthlyBarCard','monthlyDonutCard'].forEach(id=>{document.getElementById(id).style.display='block'});
-    ['yearlySummary','yearlyBarCard','yearlyMonthCard','yearlyDonutCard','catRankingCard','catTrendCard'].forEach(id=>{document.getElementById(id).style.display='none'});
+    const wCtrl=document.getElementById('weeklyControls');if(wCtrl)wCtrl.style.display=insightsMode==='weekly'?'block':'none';
+    const mCtrl=document.getElementById('monthlyControls');if(mCtrl)mCtrl.style.display=insightsMode==='monthly'?'block':'none';
+    const yCtrl=document.getElementById('yearlyControls');if(yCtrl)yCtrl.style.display=insightsMode==='yearly'?'block':'none';
+    const cCtrl=document.getElementById('categoryControls');if(cCtrl)cCtrl.style.display=insightsMode==='category'?'block':'none';
+    const wEls=['weeklySummary','weeklyBarCard','weeklyDonutCard'];
+    const mEls=['monthlySummary','monthlyBarCard','monthlyDonutCard'];
+    const yEls=['yearlySummary','yearlyBarCard','yearlyMonthCard','yearlyDonutCard'];
+    const cEls=['catRankingCard','catTrendCard'];
+    wEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=insightsMode==='weekly'?'block':'none'});
+    mEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=insightsMode==='monthly'?'block':'none'});
+    yEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=insightsMode==='yearly'?'block':'none'});
+    cEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=insightsMode==='category'?'block':'none'});
     if(!histLoaded) {
-      document.getElementById('monthlySummary').innerHTML='<div class="chart-loading">Loading data…</div>';
+      const activeSummary=insightsMode==='weekly'?'weeklySummary':insightsMode==='yearly'?'yearlySummary':'monthlySummary';
+      const el=document.getElementById(activeSummary);
+      if(el)el.innerHTML='<div class="chart-loading">Loading data…</div>';
       onHistLoaded(()=>{
         fetchAccountBalances().then(()=>{ buildAccountBalances(); renderAccountBalanceCards(); });
         renderChartTab(insightsMode);
@@ -3308,17 +3386,22 @@ function hideToast(){
 function setIM(mode,el){
   insightsMode=mode;
   toggleActive('#insightsModeToggle .toggle-btn',el);
-  document.getElementById('monthlyControls').style.display=mode==='monthly'?'block':'none';
-  document.getElementById('yearlyControls').style.display=mode==='yearly'?'block':'none';
-  document.getElementById('categoryControls').style.display=mode==='category'?'block':'none';
+  const wCtrl=document.getElementById('weeklyControls');if(wCtrl)wCtrl.style.display=mode==='weekly'?'block':'none';
+  const mCtrl=document.getElementById('monthlyControls');if(mCtrl)mCtrl.style.display=mode==='monthly'?'block':'none';
+  const yCtrl=document.getElementById('yearlyControls');if(yCtrl)yCtrl.style.display=mode==='yearly'?'block':'none';
+  const cCtrl=document.getElementById('categoryControls');if(cCtrl)cCtrl.style.display=mode==='category'?'block':'none';
+  const wEls=['weeklySummary','weeklyBarCard','weeklyDonutCard'];
   const mEls=['monthlySummary','monthlyBarCard','monthlyDonutCard'];
   const yEls=['yearlySummary','yearlyBarCard','yearlyMonthCard','yearlyDonutCard'];
   const cEls=['catRankingCard','catTrendCard'];
-  mEls.forEach(id=>document.getElementById(id).style.display=mode==='monthly'?'block':'none');
-  yEls.forEach(id=>document.getElementById(id).style.display=mode==='yearly'?'block':'none');
-  cEls.forEach(id=>document.getElementById(id).style.display=mode==='category'?'block':'none');
+  wEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=mode==='weekly'?'block':'none'});
+  mEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=mode==='monthly'?'block':'none'});
+  yEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=mode==='yearly'?'block':'none'});
+  cEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=mode==='category'?'block':'none'});
   renderChartTab(mode);
 }
+function setWV(v,el){wView=v;wSelWeek=null;wSelCat=null;toggleActive('#weeklySourceToggle .toggle-btn',el);renderWeekly()}
+function setWR(r,el){wRange=r;wSelWeek=null;wSelCat=null;toggleActive('#weeklyRangeToggle .toggle-btn',el);renderWeekly()}
 function setMV(v,el){mView=v;mSelMonth=null;mSelCat=null;toggleActive('#monthlySourceToggle .toggle-btn',el);renderMonthly()}
 function setMR(r,el){mRange=r;mSelMonth=null;mSelCat=null;toggleActive('#monthlyRangeToggle .toggle-btn',el);renderMonthly()}
 function setYV(v,el){yView=v;ySelYear=null;ySelCat=null;toggleActive('#yearlySourceToggle .toggle-btn',el);renderYearly()}
@@ -3327,10 +3410,121 @@ function setCV(v,el){cView=v;cSelCat=null;toggleActive('#catSourceToggle .toggle
 function setCR(r,el){cRange=r;cSelCat=null;toggleActive('#catRangeToggle .toggle-btn',el);renderCategory()}
 
 function renderChartTab(tab){
-  if(tab==='monthly')renderMonthly();
+  if(tab==='weekly')renderWeekly();
+  else if(tab==='monthly')renderMonthly();
   else if(tab==='yearly')renderYearly();
   else renderCategory();
 }
+
+function getMondayOfDate(d) {
+  const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - day);
+  return date;
+}
+function formatWeekRange(mon, sun) {
+  if (mon.getFullYear() === sun.getFullYear()) {
+    if (mon.getMonth() === sun.getMonth()) {
+      return `${mon.getDate()}-${sun.getDate()} ${MO[mon.getMonth()]} ${mon.getFullYear()}`;
+    } else {
+      return `${mon.getDate()} ${MO[mon.getMonth()]} - ${sun.getDate()} ${MO[sun.getMonth()]} ${mon.getFullYear()}`;
+    }
+  } else {
+    return `${mon.getDate()} ${MO[mon.getMonth()]} ${mon.getFullYear()} - ${sun.getDate()} ${MO[sun.getMonth()]} ${sun.getFullYear()}`;
+  }
+}
+function getShortWeekLabelFromKey(k) {
+  return String(k || '').replace(/ \d{4}$/, '');
+}
+function getWeekKeyOfRow(r) {
+  if (!r || !r.y || r.m === undefined || !r.d) return '';
+  const date = new Date(r.y, r.m, r.d);
+  const mon = getMondayOfDate(date);
+  const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
+  return formatWeekRange(mon, sun);
+}
+function getWeeklyKeys() {
+  const now = new Date();
+  const curMon = getMondayOfDate(now);
+  const keys = [];
+  if (wRange === 'ytd') {
+    const startMon = getMondayOfDate(new Date(now.getFullYear(), 0, 1));
+    let iter = new Date(startMon);
+    while (iter <= curMon) {
+      const sun = new Date(iter.getFullYear(), iter.getMonth(), iter.getDate() + 6);
+      keys.push(formatWeekRange(iter, sun));
+      iter.setDate(iter.getDate() + 7);
+    }
+  } else {
+    const n = parseInt(wRange) || 4;
+    for (let i = n - 1; i >= 0; i--) {
+      const mon = new Date(curMon.getFullYear(), curMon.getMonth(), curMon.getDate() - i * 7);
+      const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
+      keys.push(formatWeekRange(mon, sun));
+    }
+  }
+  return keys;
+}
+
+function renderWeekly(){
+  const rows=getRows(wView),keys=getWeeklyKeys();
+  const {totals,catMap,rawRows}=aggregateExpenses(rows,keys,getWeekKeyOfRow);
+  const selKey=wSelWeek||keys[keys.length-1];
+  if(!wSelWeek)wSelWeek=selKey;
+  const maxT=Math.max(...keys.map(k=>totals[k]),1);
+  const curTotal=totals[selKey]||0;
+  const prevKey=keys[keys.indexOf(selKey)-1];
+  const prevTotal=prevKey?totals[prevKey]:0;
+  const avgTotal=keys.slice(0,-1).reduce((s,k)=>s+(totals[k]||0),0)/Math.max(keys.length-1,1);
+  const trend=prevTotal>0?((curTotal-prevTotal)/prevTotal*100):null;
+  const trendStr=trend!==null?`${trend>0?'+':''}${trend.toFixed(0)}%`:'—';
+  const trendColor=trend===null?'var(--text2)':trend>0?'var(--red)':'var(--accent)';
+
+  const sumEl=document.getElementById('weeklySummary');
+  if(sumEl)sumEl.innerHTML=`
+    <div class="summary-row">
+      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${VIEW_LABELS[wView]||'All'}</div></div>
+      <div class="summary-card"><div class="s-label">vs Last Week</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Avg ${fRpS(Math.round(avgTotal))}/wk</div></div>
+    </div>`;
+
+  const barCols=keys.map(k=>{
+    const t=totals[k]||0;
+    const shortLabel=getShortWeekLabelFromKey(k);
+    return barColHTML({
+      label:shortLabel,
+      amount:t>0?fRpS(t):'',
+      pct:maxT>0?(t/maxT*100):0,
+      selected:k===selKey?'selected':'',
+      onclick:`selectWeek('${escJsAttr(k)}')`
+    });
+  }).join('');
+  const barEl=document.getElementById('weeklyBarCard');
+  if(barEl)barEl.innerHTML=`<div class="chart-card"><div class="chart-card-title">Weekly Total — tap week for breakdown</div><div class="bar-chart-wrap"><div class="bar-chart">${barCols}</div></div></div>`;
+
+  const catData=catMap[selKey]||{},total=Object.values(catData).reduce((a,b)=>a+b,0),selRows=rawRows[selKey]||{};
+  const sorted=Object.entries(catData).sort((a,b)=>b[1]-a[1]);
+  if(!wSelCat||!catData[wSelCat])wSelCat=sorted.length?sorted[0][0]:null;
+  const donutEl=document.getElementById('weeklyDonutCard');
+  if(donutEl){
+    if(total>0){
+      const legendHTML=legendRowsHTML(sorted,total,wSelCat,'selectWeeklyCat');
+      let detailHTML='';
+      if(wSelCat&&selRows[wSelCat]){
+        const color=CAT_COLORS[wSelCat]||CAT_COLORS['Other'];
+        const txList=[...selRows[wSelCat]].sort((a,b)=>(b.exp||0)-(a.exp||0));
+        detailHTML=detailSectionHTML(`${esc(wSelCat)} · ${fRp(catData[wSelCat])}`,color,txList,r=>`${r.d} ${MO[r.m]}`);
+      }
+      donutEl.innerHTML=`<div class="chart-card">
+        <div class="chart-card-title">Breakdown ${selKey} — tap category for transactions</div>
+        <div class="donut-wrap"><div>${buildDonut(catData,100)}</div><div class="donut-legend">${legendHTML}</div></div>
+        ${detailHTML}</div>`;
+    } else {
+      donutEl.innerHTML=`<div class="chart-card"><div class="chart-card-title">Breakdown ${selKey}</div><div class="empty-state" style="padding:20px">No data</div></div>`;
+    }
+  }
+}
+function selectWeek(k){wSelWeek=k;wSelCat=null;renderWeekly()}
+function selectWeeklyCat(cat){wSelCat=cat;renderWeekly()}
 
 function getMonthlyKeys(){
   const now=new Date();

@@ -577,7 +577,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           </div>
         </div>
         <div class="form-group autocomplete-wrapper">
-          <label class="form-label">Payment Method</label>
+          <label class="form-label" id="inputPmLabel">Payment Method</label>
           <input type="text" class="form-input" id="inputPm" placeholder="Method..." autocomplete="off" maxlength="50"
             oninput="showAC('inputPm', getSmartPms())" onfocus="showAC('inputPm', getSmartPms())">
           <div class="autocomplete-list" id="ac-inputPm" style="display:none"></div>
@@ -1941,30 +1941,8 @@ async function deleteAccountAndData() {
 }
 
 // ── LOCAL DATA (historical) ───────────────────────────────────
-const HIST = {opex:[], invest:[], txCat:{}, txPm:{}, txAccount:{}, stockType:{}, cashBalance:0, jhtBase:null};
+const HIST = {opex:[], invest:[], txCat:{}, txPm:{}, txAccount:{}, stockType:{}, cashBalance:0};
 
-// ── JHT (Jaminan Hari Tua) ────────────────────────────────────
-function calcJHT() {
-  const base = HIST.jhtBase;
-  if (!base) return 0;
-  // base: { date: "2026-06-13", amount: 28302979, monthlyAddition: 940500 }
-  // Contributions added on 25th of each month. Count how many 25ths have occurred after baseDate.
-  const baseDate = new Date(base.date);
-  const today = new Date();
-  let increments = 0;
-  // Start from the 25th of the same month as baseDate
-  let check = new Date(baseDate.getFullYear(), baseDate.getMonth(), 25);
-  // If that 25th is on or before baseDate, move to next month's 25th
-  if (check <= baseDate) {
-    check = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 25);
-  }
-  // Count 25ths up to today
-  while (check <= today) {
-    increments++;
-    check = new Date(check.getFullYear(), check.getMonth() + 1, 25);
-  }
-  return base.amount + increments * base.monthlyAddition;
-}
 let histLoaded = false;
 let histLoadCallbacks = [];
 
@@ -2376,6 +2354,14 @@ function setInputMode(mode, el) {
   const btn = document.getElementById('submitOpexBtn');
   btn.className = `submit-btn ${mode}`;
   btn.textContent = mode === 'income' ? 'Save Income' : 'Save Transaction';
+  const pmLabel = document.getElementById('inputPmLabel');
+  if (pmLabel) {
+    pmLabel.textContent = mode === 'income' ? 'Destination Account' : 'Payment Method';
+  }
+  const pmInput = document.getElementById('inputPm');
+  if (pmInput) {
+    pmInput.placeholder = mode === 'income' ? 'Account...' : 'Method...';
+  }
   document.getElementById('inputCat').value = '';
   document.getElementById('inputPm').value = '';
 }
@@ -2433,6 +2419,9 @@ function getSmartCats() {
   return key ? txCat[key] : allCategories;
 }
 function getSmartPms() {
+  if (inputMode === 'income') {
+    return Array.from(new Set([...allAccounts, ...allPMs]));
+  }
   const txLow = (document.getElementById('inputTx').value || '').toLowerCase().trim();
   const txPm = HIST.txPm || {};
   const key = Object.keys(txPm).find(k => k.toLowerCase() === txLow) ||
@@ -2812,6 +2801,8 @@ function submitOpex() {
   txHistory.unshift(r);
   queue.push({...r, action:inputMode});
   saveLocal();updateStatus();
+  buildAccountBalances();
+  renderAccountBalanceCards();
   // Navigate back to Home immediately, with Saving toast
   switchTab('home', null);
   showToast('Saving transaction…', 'loading', 0);
@@ -2833,7 +2824,7 @@ function submitOpex() {
       cachedRows.push(optimisticRow);
       localStorage.setItem(cacheKey,JSON.stringify(cachedRows));
       // Force-refresh so the new row gets rowIndex from the sheet (makes it editable)
-      fetchCurrentMonth(true).then(rowCount=>{calInited=false;if(document.getElementById('page-home').classList.contains('active')){initCalendar();calRefreshOpenDayPanel();}if(rowCount===0)showToast('Sent to sheet — couldn\'t confirm readback','error',6000);});
+      fetchCurrentMonth(true).then(rowCount=>{calInited=false;if(document.getElementById('page-home').classList.contains('active')){initCalendar();calRefreshOpenDayPanel();}buildAccountBalances();renderAccountBalanceCards();if(rowCount===0)showToast('Sent to sheet — couldn\'t confirm readback','error',6000);});
     }
     else showToast(navigator.onLine ? 'Saved locally — sync pending' : 'Offline — will sync when connected','');
   });
@@ -3184,6 +3175,8 @@ async function updateTransaction() {
   _applyLocalEdit(origISO, origTx, origAmt, date, tx, amount, cat, pm, notes, isInc, rowIndex, id);
   closeInputOverlay();
   calInited = false; initCalendar();
+  buildAccountBalances();
+  renderAccountBalanceCards();
   showToast('Updating…', 'loading', 0);
 
   const payload = {
@@ -3202,6 +3195,8 @@ async function updateTransaction() {
       // in-flight fetch (see curMonthFetchSeq) is the sole data to merge against.
       await fetchCurrentMonth(true);
       calInited = false; initCalendar();
+      buildAccountBalances();
+      renderAccountBalanceCards();
       showToast('Updated ✓', 'success');
     } else {
       showToast('Updated locally ✓', 'success');
@@ -3234,6 +3229,8 @@ async function deleteSheetTransaction() {
   _applyLocalDelete(origISO, origTx, origAmt, rowIndex, id, origInc);
   closeInputOverlay();
   calInited = false; initCalendar();
+  buildAccountBalances();
+  renderAccountBalanceCards();
   showToast('Deleting…', 'loading', 0);
 
   const payload = {
@@ -3247,7 +3244,7 @@ async function deleteSheetTransaction() {
       showToast('Deleted ✓', 'success');
       // Force-refresh cache from sheet so the deleted row is gone from localStorage.
       // This prevents the stale cache from showing the deleted transaction on next startup.
-      fetchCurrentMonth(true).then(() => { calInited = false; if (document.getElementById('page-home').classList.contains('active')) initCalendar(); });
+      fetchCurrentMonth(true).then(() => { calInited = false; if (document.getElementById('page-home').classList.contains('active')) initCalendar(); buildAccountBalances(); renderAccountBalanceCards(); });
     } else {
       showToast('Deleted locally ✓', 'success');
     }
@@ -4165,8 +4162,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
   const totalInvestCost  = holdings.reduce((s,h)=>s+h.costBasis, 0);
   const totalInvestValue = holdings.reduce((s,h)=>s+h.currentValue, 0);
   const hasValue = totalInvestValue > 0;
-  const jhtBalance = calcJHT();
-  const totalNetWorth = (hasValue ? totalInvestValue : totalInvestCost) + cashBalance + jhtBalance;
+  const totalNetWorth = (hasValue ? totalInvestValue : totalInvestCost) + cashBalance;
   const pnl    = hasValue ? totalInvestValue - totalInvestCost : null;
   const pnlPct = pnl !== null && totalInvestCost > 0 ? (pnl/totalInvestCost*100) : null;
 
@@ -4194,21 +4190,16 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-bottom:10px">
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px">
       <div class="chart-card">
         <div class="chart-card-title" style="margin-bottom:4px;font-size:9px">Investments</div>
         <div class="val-usd-sm" style="margin-top:3px">${fUSD(hasValue?totalInvestValue:totalInvestCost,usdRate)}</div>
         <div class="val-idr-sm">${fRpS(Math.round(hasValue?totalInvestValue:totalInvestCost))}</div>
       </div>
       <div class="chart-card">
-        <div class="chart-card-title" style="margin-bottom:4px;font-size:9px">Cash (IDR)</div>
+        <div class="chart-card-title" style="margin-bottom:4px;font-size:9px">Accounts</div>
         <div class="val-idr-sm" style="margin-top:3px;font-size:14px;font-weight:600">${fRpS(Math.round(cashBalance))}</div>
         <div style="font-size:10px;color:var(--text2)">${fUSD(cashBalance,usdRate)}</div>
-      </div>
-      <div class="chart-card">
-        <div class="chart-card-title" style="margin-bottom:4px;font-size:9px">JHT</div>
-        <div class="val-usd-sm" style="margin-top:3px">${fUSD(jhtBalance,usdRate)}</div>
-        <div class="val-idr-sm">${fRpS(Math.round(jhtBalance))}</div>
       </div>
       <div class="chart-card" style="background:var(--blue-dim);border-color:var(--blue)">
         <div class="chart-card-title" style="margin-bottom:4px;font-size:9px;color:var(--blue)">FX Rate</div>
@@ -4217,14 +4208,14 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
       </div>
     </div>`;
 
-  const byType = {'Cash': {cost: cashBalance, value: cashBalance}, 'JHT': {cost: jhtBalance, value: jhtBalance}};
+  const byType = {'Accounts': {cost: cashBalance, value: cashBalance}};
   holdings.forEach(h=>{
     const t = h.type;
     if(!byType[t]) byType[t] = {cost:0, value:0};
     byType[t].cost  += h.costBasis;
     byType[t].value += h.currentValue;
   });
-  const TYPE_COLORS_HEX = {'US Stock':'#5b8ef0','Cash':'#888780','Reksa Dana':'#4ade80','Forex':'#f59e0b','JHT':'#e879f9'};
+  const TYPE_COLORS_HEX = {'US Stock':'#5b8ef0','Accounts':'#888780','Cash':'#888780','Reksa Dana':'#4ade80','Forex':'#f59e0b'};
   const grandTotal = Object.values(byType).reduce((s,d)=>s+d.cost, 0);
   const sortedTypes = Object.entries(byType).sort((a,b)=>b[1].cost - a[1].cost);
   const canvasId = 'nwDonutCanvas';

@@ -1530,15 +1530,14 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm) {
     }
   });
 
-  // 3. Invest: buying USD assets funded from this account
-  (HIST.invest || []).forEach(r => {
+  // 3. Local unsynced Invest transactions for IDR accounts
+  (investHistory || []).forEach(r => {
+    if (r.synced) return;
+    if (baseDate && r.date && r.date <= baseDate) return;
     const rAcct = String(r.account || '').toLowerCase().trim();
     if (!matchNames.includes(rAcct)) return;
-    if (ACCOUNT_CCY[r.stock] !== 'USD') return;
-    if (r.action !== 'Buy') return;
-    const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
-    if (baseDate && rowDate <= baseDate) return;
-    delta -= (Number(r.totalIdr) || 0);
+    if (r.action === 'Buy') delta -= (Number(r.totalIdr) || 0);
+    else if (r.action === 'Sell') delta += (Number(r.totalIdr) || 0);
   });
 
   return baseAmount + delta;
@@ -3319,6 +3318,8 @@ async function updateInvestTransaction() {
       localStorage.removeItem(curMonthCacheKey());
       await fetchCurrentMonth(true);
       if (document.getElementById('page-search').classList.contains('active')) renderAllTransactions();
+      buildAccountBalances();
+      renderAccountBalanceCards();
       showToast('Updated ✓', 'success');
     } else {
       showToast('Update failed', 'error');
@@ -3343,6 +3344,8 @@ async function deleteSheetInvestTransaction() {
       localStorage.removeItem(curMonthCacheKey());
       await fetchCurrentMonth(true);
       if (document.getElementById('page-search').classList.contains('active')) renderAllTransactions();
+      buildAccountBalances();
+      renderAccountBalanceCards();
       showToast('Deleted ✓', 'success');
     } else {
       showToast('Delete failed', 'error');
@@ -3367,6 +3370,8 @@ function submitInvest() {
   investHistory.unshift(r);
   queue.push({...r});
   saveLocal();updateStatus();
+  buildAccountBalances();
+  renderAccountBalanceCards();
   const investBtn = document.querySelector('#form-invest .submit-btn');
   if (investBtn) { investBtn.disabled = true; investBtn.textContent = 'Saving…'; }
   isSyncing = true;
@@ -3379,7 +3384,7 @@ function submitInvest() {
       saveLocal();updateStatus();showToast('Saved ✓','success');
       // Refresh HIST.opex so the Opex expense row created by the invest sync is included
       localStorage.removeItem(curMonthCacheKey());
-      fetchCurrentMonth(true);
+      fetchCurrentMonth(true).then(() => { buildAccountBalances(); renderAccountBalanceCards(); });
     }
     else showToast(navigator.onLine ? 'Saved locally — sync pending' : 'Offline — will sync when connected','');
   });

@@ -1562,37 +1562,44 @@ function buildAccountBalances() {
 
   CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).forEach(acct => {
     const ccy = (ACCOUNT_CCY[acct.name] || acct.ccy || 'IDR').toUpperCase();
-    if (ccy !== 'IDR') {
-      if (!investNetLots) return;
-      const keys = new Set([
-        acct.name,
-        acct.name.replace(/^(IDR|USD|CHF|EUR|SGD)\s+/i, '').trim(),
-        ccy,
-        `${ccy}IDR`,
-        `${ccy} ${acct.name}`,
-        `${acct.name} ${ccy}`
-      ]);
-      let netLot = 0;
-      keys.forEach(k => {
-        if (investNetLots.buyLots[k] != null || investNetLots.sellLots[k] != null) {
-          netLot += (investNetLots.buyLots[k] || 0) - (investNetLots.sellLots[k] || 0);
-        }
-      });
+    let rate = 1;
+    if (ccy === 'USD') rate = usdRate;
+    else if (ccy === 'CHF') rate = chfRate;
+    else if (fxRates[ccy]) rate = fxRates[ccy];
 
-      let rate = 1;
-      if (ccy === 'USD') rate = usdRate;
-      else if (ccy === 'CHF') rate = chfRate;
-      else if (fxRates[ccy]) rate = fxRates[ccy];
+    if (ccy !== 'IDR') {
+      let netLot = 0;
+      if (investNetLots) {
+        const keys = new Set([
+          acct.name,
+          acct.name.replace(/^(IDR|USD|CHF|EUR|SGD)\s+/i, '').trim(),
+          ccy,
+          `${ccy}IDR`,
+          `${ccy} ${acct.name}`,
+          `${acct.name} ${ccy}`
+        ]);
+        keys.forEach(k => {
+          if (investNetLots.buyLots[k] != null || investNetLots.sellLots[k] != null) {
+            netLot += (investNetLots.buyLots[k] || 0) - (investNetLots.sellLots[k] || 0);
+          }
+        });
+      }
 
       if (netLot > 0) {
         accountBalances[acct.name] = { amount: netLot * rate, nativeAmount: netLot, ccy };
+        return;
       }
+
+      const raw = rawAccountBalances[acct.name] || { amount: acct.balance || 0, date: acct.balanceDate || '2000-01-01' };
+      const currentNative = computeAccountCurrentBalance(raw.amount, raw.date, acct);
+      accountBalances[acct.name] = { amount: currentNative * rate, nativeAmount: currentNative, ccy };
       return;
     }
+
     // IDR accounts: use Config / Balances snapshot + Opex/Invest deltas
-    const raw = rawAccountBalances[acct.name] || { amount: 0, date: '2000-01-01' };
+    const raw = rawAccountBalances[acct.name] || { amount: acct.balance || 0, date: acct.balanceDate || '2000-01-01' };
     const current = computeAccountCurrentBalance(raw.amount, raw.date, acct);
-    accountBalances[acct.name] = { amount: current };
+    accountBalances[acct.name] = { amount: current, nativeAmount: current, ccy: 'IDR' };
   });
 }
 
@@ -1606,10 +1613,17 @@ function renderAccountBalanceCards() {
   }
   const totalCash = withBal.reduce((s, a) => s + (accountBalances[a.name]?.amount || 0), 0);
   const cards = withBal.map(a => {
-    const bal = accountBalances[a.name]?.amount || 0;
+    const balObj = accountBalances[a.name];
+    const bal = balObj?.amount || 0;
+    const ccy = (ACCOUNT_CCY[a.name] || a.ccy || 'IDR').toUpperCase();
+    let subText = '';
+    if (ccy !== 'IDR' && balObj?.nativeAmount != null) {
+      subText = `<div style="font-size:10px;color:var(--text2);margin-top:2px">${ccy} ${balObj.nativeAmount.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})}</div>`;
+    }
     return `<div class="acct-bal-card" onclick="goToHoldings()">
       <div class="acct-bal-name">${esc(a.name)}</div>
       <div class="acct-bal-amount">${fRp(Math.round(bal))}</div>
+      ${subText}
     </div>`;
   }).join('');
   el.innerHTML = `<div class="acct-bal-section">
@@ -4127,6 +4141,11 @@ async function renderNetWorth(){
     else if (stock==='JNJ')  currentValue = priceJNJ  > 0 ? netLot * priceJNJ  * usdRate : 0;
     else if (stock==='VYM')  currentValue = priceVYM  > 0 ? netLot * priceVYM  * usdRate : 0;
     else if (stock==='AAPL') currentValue = priceAAPL > 0 ? netLot * priceAAPL * usdRate : 0;
+    else if (parsePrice(stockPrices[stock]) > 0) {
+      currentValue = netLot * parsePrice(stockPrices[stock]) * (type === 'US Stock' ? usdRate : 1);
+    } else {
+      currentValue = costBasis;
+    }
 
     return {stock, type, netLot, costBasis, currentValue, avgCostPerUnit, avgNativePrice};
   }).filter(Boolean);
@@ -4147,9 +4166,10 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
     'Reksa Dana': holdings.filter(h=>h.type==='Reksa Dana'),
     'Forex':      holdings.filter(h=>h.type==='Forex'),
     'US Stock':   holdings.filter(h=>h.type==='US Stock'),
+    'JHT':        holdings.filter(h=>h.type==='JHT'),
   };
-  const colorMap = {'Reksa Dana':'var(--green)','Forex':'var(--blue)','US Stock':'var(--accent)'};
-  const bgMap    = {'Reksa Dana':'var(--green-dim)','Forex':'var(--blue-dim)','US Stock':'var(--accent-dim)'};
+  const colorMap = {'Reksa Dana':'var(--green)','Forex':'var(--blue)','US Stock':'var(--accent)','JHT':'#a855f7'};
+  const bgMap    = {'Reksa Dana':'var(--green-dim)','Forex':'var(--blue-dim)','US Stock':'var(--accent-dim)','JHT':'rgba(168,85,247,0.15)'};
 
   let html = '';
 
@@ -4297,7 +4317,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
         <div class="val-idr-sm">${fRpS(Math.round(hasValue?totalInvestValue:totalInvestCost))}</div>
       </div>
       <div class="chart-card">
-        <div class="chart-card-title" style="margin-bottom:4px;font-size:9px">Accounts</div>
+        <div class="chart-card-title" style="margin-bottom:4px;font-size:9px">Cash</div>
         <div class="val-idr-sm" style="margin-top:3px;font-size:14px;font-weight:600">${fRpS(Math.round(cashBalance))}</div>
         <div style="font-size:10px;color:var(--text2)">${fUSD(cashBalance,usdRate)}</div>
       </div>
@@ -4308,14 +4328,14 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
       </div>
     </div>`;
 
-  const byType = {'Accounts': {cost: cashBalance, value: cashBalance}};
+  const byType = {'Cash': {cost: cashBalance, value: cashBalance}};
   holdings.forEach(h=>{
-    const t = h.type;
+    const t = h.type || 'Other';
     if(!byType[t]) byType[t] = {cost:0, value:0};
     byType[t].cost  += h.costBasis;
     byType[t].value += h.currentValue;
   });
-  const TYPE_COLORS_HEX = {'US Stock':'#5b8ef0','Accounts':'#888780','Cash':'#888780','Reksa Dana':'#4ade80','Forex':'#f59e0b'};
+  const TYPE_COLORS_HEX = {'US Stock':'#5b8ef0','Cash':'#888780','Reksa Dana':'#4ade80','Forex':'#f59e0b','JHT':'#a855f7'};
   const grandTotal = Object.values(byType).reduce((s,d)=>s+d.cost, 0);
   const sortedTypes = Object.entries(byType).sort((a,b)=>b[1].cost - a[1].cost);
   const canvasId = 'nwDonutCanvas';
@@ -4325,8 +4345,8 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
     return `<div style="display:flex;align-items:center;gap:6px">
       <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></div>
       <div>
-        <div style="font-size:11px;font-weight:600;color:var(--blue);white-space:nowrap">${fUSD(data.cost,usdRate)}</div>
-        <div style="font-size:10px;font-weight:500;color:var(--text2);white-space:nowrap">${fRpS(Math.round(data.cost))}</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text);white-space:nowrap">${esc(type)}</div>
+        <div style="font-size:10px;font-weight:500;color:var(--blue);white-space:nowrap">${fUSD(data.cost,usdRate)} (${fRpS(Math.round(data.cost))})</div>
       </div>
     </div>`;
   }).join('');
@@ -4334,10 +4354,10 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
   html += `<div class="chart-card" style="margin-bottom:10px">
     <div class="chart-card-title">Allocation by type</div>
     <div style="display:flex;align-items:center;gap:8px">
-      <div style="position:relative;flex:0 0 auto;width:calc(100% - 88px);aspect-ratio:1">
+      <div style="position:relative;flex:0 0 auto;width:calc(100% - 95px);aspect-ratio:1">
         <canvas id="${canvasId}" role="img" aria-label="Portfolio allocation donut chart"></canvas>
       </div>
-      <div style="display:flex;flex-direction:column;gap:10px;flex:0 0 80px">${legendRows}</div>
+      <div style="display:flex;flex-direction:column;gap:10px;flex:0 0 88px">${legendRows}</div>
     </div>
     <div style="margin-top:10px;padding-top:8px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text2)">
       FX rates: USD/IDR ${Math.round(usdRate).toLocaleString('id-ID')} · CHF/IDR ${Math.round(chfRate).toLocaleString('id-ID')}
@@ -4376,28 +4396,25 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
           const midRadius = (arc.innerRadius + arc.outerRadius) / 2;
 
           // % inside ring — threshold in radians so it works on any canvas size
-          // 0.20 rad ≈ 11.5° which covers Forex at 4% (≈0.25 rad)
+          // 0.12 rad ≈ 7° which covers smaller slices down to ~2%
           const ix = arc.x + Math.cos(midAngle) * midRadius;
           const iy = arc.y + Math.sin(midAngle) * midRadius;
           const ringWidth = arc.outerRadius - arc.innerRadius;
           const arcSpan = Math.abs(arc.endAngle - arc.startAngle);
-          if (arcSpan > 0.20 && ringWidth > 10) {
+          if (arcSpan > 0.12 && ringWidth > 10) {
             ctx.save();
-            ctx.font = `bold ${Math.max(9, Math.min(11, ringWidth * 0.28))}px -apple-system, sans-serif`;
-            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.font = `bold ${Math.max(8, Math.min(11, ringWidth * 0.28))}px -apple-system, sans-serif`;
+            ctx.fillStyle = 'rgba(0,0,0,0.85)';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(pct + '%', ix, iy);
             ctx.restore();
           }
 
-          // Curved label outside ring — skip only if arc is really tiny (< 0.15 rad)
+          // Curved label outside ring — draw label for every slice
           const labelR = arc.outerRadius + 11;
-          const arcLen = Math.abs(arc.endAngle - arc.startAngle) * labelR;
           const fontSize = 9;
           const charWidth = fontSize * 0.58;
-          const textWidth = d.label.length * charWidth;
-          if (arcSpan < 0.15 || arcLen < textWidth * 0.7) return;
 
           // isBottom: verified against actual segment midAngles with real data
           // US Stock 342° → false, Reksa Dana 103° → true,

@@ -94,6 +94,7 @@ const DataStore = (() => {
   }
 
   async function bootstrap() {
+    if (typeof Auth !== 'undefined' && Auth.isGuest && Auth.isGuest()) return;
     if (spreadsheetId) {
       // If cached spreadsheet has 0 data rows in Opex, check if another sheet has data
       try {
@@ -287,7 +288,7 @@ const DataStore = (() => {
 
   async function requireReady() {
     await Auth.ready; // blocks until sign-in + bootstrap() have completed
-    if (!spreadsheetId) throw new Error('Spreadsheet not initialised — sign in first');
+    if (!spreadsheetId && !(typeof Auth !== 'undefined' && Auth.isGuest && Auth.isGuest())) throw new Error('Spreadsheet not initialised — sign in first');
   }
 
   // ── SHARED HELPERS ───────────────────────────────────────────────

@@ -44,6 +44,13 @@ signed-in user's own short-lived OAuth token.
   - Implemented smart FX deduplication (`isFxAccountMatch`) preventing duplicate account/holding entries for foreign currency accounts (`CIMB CHF`, `USD CIMB`) while preserving rich cost basis and lot size details.
   - Standardized theme colors and badge styling via `getTypeColor()` and `getHoldingTheme()` across both views.
   - Added live Market Price display from Google Sheets `Stock Prices` across US Stocks, Forex, and Reksa Dana with dual-currency equivalents.
+  - Fixed account duplication (e.g. `BCA IDR` vs legacy `IDR BCA`) by replacing hardcoded default account names, adding token-sorted deduplication across active accounts and fallback raw balances, and auto-cleaning legacy key variations in `syncConfigToRawAccountBalances`.
+  - Unified metrics calculation between `Overview` and `Holdings` so total Net Worth, Cash & Accounts, Investment totals, and Donut Chart allocations match 100%.
+
+### Session 6: Insights Transactions Subpage & Version Bump (v4.26)
+- **Transactions Subpage Renaming**: Renamed the "Credit Card Usage" toggle subpage under Insights to **Transactions**.
+- **Account Filter & Metric Labels**: Updated "Card Filter" label to **Account Filter** (with filter option **All Accounts**), "Total CC Usage" summary card to **Total Transactions**, and bottom transaction list header to **Transactions**.
+- **Application Version**: Bumped application version to **v4.26**.
 
 ## How it works
 

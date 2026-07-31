@@ -2595,6 +2595,9 @@ function dualVal(idrAmount, rate){
 function dualValSm(idrAmount, rate){
   return`<div class="val-usd-sm">${fUSD(idrAmount,rate)}</div><div class="val-idr-sm">${fRpS(Math.round(idrAmount))}</div>`;
 }
+function dualValSmFull(idrAmount, rate){
+  return`<div class="val-usd-sm">${fUSD(idrAmount,rate)}</div><div class="val-idr-sm">${fRp(Math.round(idrAmount))}</div>`;
+}
 function pnlDual(pnl, pnlPct, rate, color){
   const sign=pnl>=0?'+':'';
   const usdStr=fUSD(Math.abs(pnl),rate);
@@ -4024,6 +4027,7 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
   // Cash section
   const cashAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && acctBals[i.name] != null);
   if (cashAccounts.length) {
+    cashAccounts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     const totalCash = cashAccounts.reduce((s, a) => s + (acctBals[a.name]?.amount || 0), 0);
     html += `<div class="chart-card-title" style="margin-top:6px;margin-bottom:8px">Cash</div>`;
     cashAccounts.forEach(acct => {
@@ -4036,7 +4040,7 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px">
           <div>
             <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Balance</div>
-            ${dualValSm(bal, usdRate)}
+            ${dualValSmFull(bal, usdRate)}
           </div>
         </div>
       </div>`;
@@ -4045,7 +4049,7 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
       html += `<div class="holding-item" style="border-color:var(--border2);background:var(--bg3)">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div style="font-size:12px;font-weight:600;color:var(--text2)">Total Cash</div>
-          <div style="text-align:right">${dualValSm(totalCash, usdRate)}</div>
+          <div style="text-align:right">${dualValSmFull(totalCash, usdRate)}</div>
         </div>
       </div>`;
     }

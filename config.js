@@ -10,11 +10,9 @@
 //   5. Paste the generated Client ID below.
 const NOTA_PUBLIC_CONFIG = {
   GOOGLE_CLIENT_ID: '186138780479-6vuu77kjkm75qrc13a1srcdjflo18umg.apps.googleusercontent.com',
-  GOOGLE_SCOPE: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
-  getGoogleClientId() {
-    const custom = localStorage.getItem('nota_custom_client_id');
-    if (custom && custom.trim()) return custom.trim();
-    return this.GOOGLE_CLIENT_ID;
-  }
+  GOOGLE_SCOPE: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets'
 };
 
+if (typeof window !== 'undefined') {
+  window.NOTA_PUBLIC_CONFIG = NOTA_PUBLIC_CONFIG;
+}

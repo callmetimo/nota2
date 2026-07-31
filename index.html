@@ -4204,14 +4204,8 @@ async function renderNetWorth(){
   const holdings = Object.keys(buyLots).map(stock=>{
     const netLot = buyLots[stock] - (sellLots[stock]||0);
     if(netLot <= 0) return null;
-    let type = (STOCK_TYPE[stock] || '').trim();
-    if (!type || type === 'Other') {
-      const sUpper = stock.toUpperCase();
-      if (sUpper.includes('JHT')) type = 'JHT';
-      else if (stock.startsWith('USDIDR') || stock === 'CHFIDR') type = 'Forex';
-      else if (stock === 'Star Stable Income Fund') type = 'Reksa Dana';
-      else type = 'US Stock';
-    }
+    const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === stock);
+    let type = getAssetTypeForItem(stock, stockConfig?.assetType || STOCK_TYPE[stock], false);
     const buyRatio = buyLots[stock] > 0 ? netLot / buyLots[stock] : 0;
     const costBasis = buyTotalIdr[stock] * buyRatio;
     const avgCostPerUnit = buyLots[stock] > 0 ? buyTotalIdr[stock] / buyLots[stock] : 0;
@@ -4284,47 +4278,52 @@ function getAssetTypeForItem(name, explicitType, isAccount) {
   return 'Cash';
 }
 
-function renderHoldings(holdings, usdRate, chfRate, acctBals){
-  acctBals = acctBals || {};
-  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false);
-
+function getTypeColor(type) {
   const DYNAMIC_TYPE_COLORS = {
-    'US Stock': { color: '#5b8ef0', bg: 'rgba(91,142,240,0.15)' },
-    'Cash': { color: '#888780', bg: 'rgba(136,135,128,0.15)' },
-    'Reksa Dana': { color: 'var(--green)', bg: 'var(--green-dim)' },
-    'Forex': { color: 'var(--blue)', bg: 'var(--blue-dim)' },
-    'JHT': { color: '#a855f7', bg: 'rgba(168,85,247,0.15)' },
-    'Deposit': { color: '#06b6d4', bg: 'rgba(6,182,212,0.15)' },
-    'Gold': { color: '#eab308', bg: 'rgba(234,179,8,0.15)' },
-    'Crypto': { color: '#ec4899', bg: 'rgba(236,72,153,0.15)' },
-    'Bonds': { color: '#14b8a6', bg: 'rgba(20,184,166,0.15)' }
+    'US Stock': '#5b8ef0',
+    'Cash': '#888780',
+    'Reksa Dana': '#4ade80',
+    'Forex': '#f59e0b',
+    'JHT': '#a855f7',
+    'Deposit': '#06b6d4',
+    'Gold': '#eab308',
+    'Crypto': '#ec4899',
+    'Bonds': '#14b8a6'
   };
+  if (DYNAMIC_TYPE_COLORS[type]) return DYNAMIC_TYPE_COLORS[type];
   const FALLBACK_PALETTE = ['#f43f5e', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#3b82f6'];
-  function getHoldingTheme(type) {
-    if (DYNAMIC_TYPE_COLORS[type]) return DYNAMIC_TYPE_COLORS[type];
-    let hash = 0;
-    for (let i = 0; i < type.length; i++) hash = type.charCodeAt(i) + ((hash << 5) - hash);
-    const color = FALLBACK_PALETTE[Math.abs(hash) % FALLBACK_PALETTE.length];
-    return { color, bg: `${color}25` };
-  }
+  let hash = 0;
+  for (let i = 0; i < type.length; i++) hash = type.charCodeAt(i) + ((hash << 5) - hash);
+  return FALLBACK_PALETTE[Math.abs(hash) % FALLBACK_PALETTE.length];
+}
 
+function getHoldingTheme(type) {
+  const color = getTypeColor(type);
+  return { color, bg: `${color}25` };
+}
+
+function getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBalances) {
+  acctBals = acctBals || {};
+  rawAccountBalances = rawAccountBalances || {};
   const groups = {};
 
-  // 1. Accounts grouped by assetType allocation
+  // 1. Active Accounts grouped by assetType allocation
   activeAccounts.forEach(acct => {
     const balObj = acctBals[acct.name];
-    const bal = balObj?.amount || 0;
-    if (bal <= 0 && acctBals[acct.name] == null) return;
+    const amt = Number(balObj?.amount) || 0;
+    if (amt <= 0) return;
     const t = getAssetTypeForItem(acct.name, acct.assetType, true);
-    if (!groups[t]) groups[t] = [];
-    groups[t].push({
+    if (!groups[t]) groups[t] = { type: t, cost: 0, value: 0, items: [] };
+    groups[t].cost += amt;
+    groups[t].value += amt;
+    groups[t].items.push({
       itemKind: 'account',
       name: acct.name,
       acct,
-      bal,
+      bal: amt,
       balObj,
-      costBasis: bal,
-      currentValue: bal,
+      costBasis: amt,
+      currentValue: amt,
       ccy: acct.ccy || 'IDR'
     });
   });
@@ -4333,8 +4332,10 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
   holdings.forEach(h => {
     const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === h.stock);
     const t = getAssetTypeForItem(h.stock, stockConfig?.assetType || h.type, false);
-    if (!groups[t]) groups[t] = [];
-    groups[t].push({
+    if (!groups[t]) groups[t] = { type: t, cost: 0, value: 0, items: [] };
+    groups[t].cost += h.costBasis;
+    groups[t].value += h.currentValue;
+    groups[t].items.push({
       itemKind: 'stock',
       name: h.stock,
       holding: h,
@@ -4345,15 +4346,18 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
 
   // 3. Fallback rawAccountBalances grouped by assetType allocation
   Object.keys(rawAccountBalances).forEach(k => {
-    const amt = Number(rawAccountBalances[k]?.amount) || 0;
+    const rawObj = rawAccountBalances[k];
+    const amt = Number(rawObj?.amount) || 0;
     if (amt <= 0) return;
     const inAccts = activeAccounts.some(a => a.name.toLowerCase() === k.toLowerCase());
     const inHoldings = holdings.some(h => h.stock.toLowerCase() === k.toLowerCase());
     if (!inAccts && !inHoldings) {
       const cfg = CONFIG_ITEMS.find(i => i.name.toLowerCase() === k.toLowerCase());
-      const t = getAssetTypeForItem(k, cfg?.assetType, cfg ? cfg.kind !== 'stock' : true);
-      if (!groups[t]) groups[t] = [];
-      groups[t].push({
+      const kType = getAssetTypeForItem(k, cfg?.assetType, cfg ? cfg.kind !== 'stock' : true);
+      if (!groups[kType]) groups[kType] = { type: kType, cost: 0, value: 0, items: [] };
+      groups[kType].cost += amt;
+      groups[kType].value += amt;
+      groups[kType].items.push({
         itemKind: 'raw',
         name: k,
         bal: amt,
@@ -4364,17 +4368,26 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
     }
   });
 
+  return groups;
+}
+
+function renderHoldings(holdings, usdRate, chfRate, acctBals){
+  acctBals = acctBals || {};
+  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false);
+
+  const allocGroups = getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBalances);
+
   // Sort allocation type groups by total group value descending
-  const sortedTypes = Object.keys(groups).sort((a, b) => {
-    const valA = groups[a].reduce((s, i) => s + (i.currentValue > 0 ? i.currentValue : i.costBasis), 0);
-    const valB = groups[b].reduce((s, i) => s + (i.currentValue > 0 ? i.currentValue : i.costBasis), 0);
+  const sortedTypes = Object.entries(allocGroups).sort((a, b) => {
+    const valA = a[1].value > 0 ? a[1].value : a[1].cost;
+    const valB = b[1].value > 0 ? b[1].value : b[1].cost;
     return valB - valA;
   });
 
   let html = '';
 
-  sortedTypes.forEach(type => {
-    const items = groups[type];
+  sortedTypes.forEach(([type, group]) => {
+    const items = group.items;
     if (!items.length) return;
 
     items.sort((a, b) => {
@@ -4385,14 +4398,12 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
     });
 
     const theme = getHoldingTheme(type);
-    let groupCost = 0, groupValue = 0;
+    const groupCost = group.cost;
+    const groupValue = group.value;
 
     html += `<div class="chart-card-title" style="margin-top:14px;margin-bottom:8px;color:${theme.color};font-size:14px;font-weight:700">${esc(type)}</div>`;
 
     items.forEach(item => {
-      groupCost += item.costBasis;
-      groupValue += item.currentValue;
-
       if (item.itemKind === 'account') {
         const acct = item.acct;
         const bal = item.bal;
@@ -4436,11 +4447,11 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
         const hasValue = h.currentValue > 0;
         const pnl = hasValue ? h.currentValue - h.costBasis : null;
         const pnlPct = pnl !== null && h.costBasis > 0 ? (pnl / h.costBasis * 100) : null;
-        const lotStr = h.type === 'US Stock' ? `${h.netLot} shares` :
+        const lotStr = type === 'US Stock' ? `${h.netLot} shares` :
                        h.stock.startsWith('USDIDR') ? `${h.netLot.toFixed(2)} USD` :
                        h.stock === 'CHFIDR' ? `${h.netLot} CHF` :
                        `${h.netLot.toLocaleString('id-ID')} units`;
-        const avgStr = h.type === 'US Stock'
+        const avgStr = type === 'US Stock'
           ? `Avg $${Number(Math.round(h.avgNativePrice + 'e2') + 'e-2').toFixed(2)}`
           : h.stock.startsWith('USDIDR')
             ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/USD`
@@ -4549,65 +4560,10 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
       </div>
     </div>`;
 
-  const byType = {};
+  const allocGroups = getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBalances);
 
-  // 1. Accumulate Account balances into their configured assetType
-  activeAccounts.forEach(acct => {
-    const acctType = getAssetTypeForItem(acct.name, acct.assetType, true);
-    const amt = Number(acctBals[acct.name]?.amount) || 0;
-    if (amt > 0) {
-      if (!byType[acctType]) byType[acctType] = { cost: 0, value: 0 };
-      byType[acctType].cost += amt;
-      byType[acctType].value += amt;
-    }
-  });
-
-  // 2. Accumulate Stock / Investment holdings into their configured assetType
-  holdings.forEach(h => {
-    const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === h.stock);
-    const t = getAssetTypeForItem(h.stock, stockConfig?.assetType || h.type, false);
-    if (!byType[t]) byType[t] = { cost: 0, value: 0 };
-    byType[t].cost  += h.costBasis;
-    byType[t].value += h.currentValue;
-  });
-
-  // 3. Fallback: check rawAccountBalances for any non-zero account/item (e.g. JHT) not captured above
-  Object.keys(rawAccountBalances).forEach(k => {
-    const rawObj = rawAccountBalances[k];
-    const amt = Number(rawObj?.amount) || 0;
-    if (amt <= 0) return;
-    const inAccts = activeAccounts.some(a => a.name.toLowerCase() === k.toLowerCase());
-    const inHoldings = holdings.some(h => h.stock.toLowerCase() === k.toLowerCase());
-    if (!inAccts && !inHoldings) {
-      const cfg = CONFIG_ITEMS.find(i => i.name.toLowerCase() === k.toLowerCase());
-      const kType = getAssetTypeForItem(k, cfg?.assetType, cfg ? cfg.kind !== 'stock' : true);
-      if (!byType[kType]) byType[kType] = { cost: 0, value: 0 };
-      byType[kType].cost += amt;
-      byType[kType].value += amt;
-    }
-  });
-
-  const DYNAMIC_TYPE_COLORS = {
-    'US Stock': '#5b8ef0',
-    'Cash': '#888780',
-    'Reksa Dana': '#4ade80',
-    'Forex': '#f59e0b',
-    'JHT': '#a855f7',
-    'Deposit': '#06b6d4',
-    'Gold': '#eab308',
-    'Crypto': '#ec4899',
-    'Bonds': '#14b8a6'
-  };
-  const FALLBACK_PALETTE = ['#f43f5e', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#3b82f6'];
-  function getTypeColor(type) {
-    if (DYNAMIC_TYPE_COLORS[type]) return DYNAMIC_TYPE_COLORS[type];
-    let hash = 0;
-    for (let i = 0; i < type.length; i++) hash = type.charCodeAt(i) + ((hash << 5) - hash);
-    return FALLBACK_PALETTE[Math.abs(hash) % FALLBACK_PALETTE.length];
-  }
-
-  const grandTotal = Object.values(byType).reduce((s,d) => s + (d.value > 0 ? d.value : d.cost), 0);
-  const sortedTypes = Object.entries(byType).sort((a,b) => {
+  const grandTotal = Object.values(allocGroups).reduce((s, g) => s + (g.value > 0 ? g.value : g.cost), 0);
+  const sortedTypes = Object.entries(allocGroups).sort((a, b) => {
     const valA = a[1].value > 0 ? a[1].value : a[1].cost;
     const valB = b[1].value > 0 ? b[1].value : b[1].cost;
     return valB - valA;

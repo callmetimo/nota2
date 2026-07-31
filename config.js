@@ -9,7 +9,7 @@
 //      under "Authorized JavaScript origins".
 //   5. Paste the generated Client ID below.
 const NOTA_PUBLIC_CONFIG = {
-  GOOGLE_CLIENT_ID: '186138780479-6vuu77kjkm75qrc13a1srcdjflo18umg.apps.googleusercontent.com',
+  GOOGLE_CLIENT_ID: '765296352533-sho2avfm5gerct9k5001stsk6d4cr4cu.apps.googleusercontent.com',
   GOOGLE_SCOPE: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets'
 };
 

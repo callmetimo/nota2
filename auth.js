@@ -33,7 +33,7 @@
       this.el.querySelector('#notaAuthBody').innerHTML = `
         <p>Sign in with Google to create your own private Nota spreadsheet in your Google Drive.</p>
         <button id="notaSignInBtn" type="button" style="width:100%;margin-bottom:8px">Sign in with Google</button>
-        <p class="nota-auth-status" id="notaAuthStatus"></p>
+        <p class="nota-auth-status" id="notaAuthStatus" style="white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.4;"></p>
         <p class="nota-auth-links"><a href="privacy.html" target="_blank">Privacy</a> · <a href="terms.html" target="_blank">Terms</a></p>`;
       const btn = this.el.querySelector('#notaSignInBtn');
       if (btn) btn.onclick = () => signIn();
@@ -79,9 +79,11 @@
         if (resp.error) {
           console.error('[auth] GIS response error:', resp);
           if (resp.error === 'popup_closed_by_user') {
-            overlay.setStatus('Sign-in popup was closed. Click button to try again.');
+            overlay.setStatus('Sign-in popup was closed. Click "Sign in with Google" to try again.');
           } else if (resp.error === 'access_denied') {
             overlay.setStatus('Permission was not granted. Please sign in to continue.');
+          } else if (resp.error === 'origin_mismatch') {
+            overlay.setStatus('Error 400: origin_mismatch.\nYour Google OAuth Client is authorized for https://callmetimo.github.io. It will work when published on GitHub Pages.');
           } else {
             overlay.setStatus('Sign-in error: ' + (resp.error_description || resp.error));
           }
@@ -103,9 +105,11 @@
       error_callback: (err) => {
         console.warn('[auth] GIS error_callback:', err);
         if (err && (err.type === 'popup_closed' || err.message === 'popup_closed')) {
-          overlay.setStatus('Sign-in popup was closed. Click button to try again.');
+          overlay.setStatus('Sign-in popup was closed. Click "Sign in with Google" to try again.');
+        } else if (err && err.type === 'popup_failed_to_open') {
+          overlay.setStatus('Sign-in popup was blocked by browser. Please allow popups.');
         } else {
-          overlay.setStatus('Sign-in error: ' + (err.message || err.type || 'Popup closed or blocked'));
+          overlay.setStatus('Sign-in status: ' + (err.message || err.type || 'Popup closed or cancelled. Click button to retry.'));
         }
       }
     });

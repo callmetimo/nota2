@@ -48,45 +48,56 @@ const DataStore = (() => {
 
   // ── BOOTSTRAP ────────────────────────────────────────────────
   // Finds a spreadsheet in Google Drive for the signed-in user that contains Nota data.
-  // Checks all accessible spreadsheets and selects the one with the most transactions in Opex.
+  // Checks all accessible spreadsheets for the logged-in user and selects the one with the most transactions in Opex.
   async function findExistingSpreadsheet() {
     try {
-      const res = await SheetsClient.findFiles(
-        "trashed=false and mimeType='application/vnd.google-apps.spreadsheet'"
-      );
-      const files = (res.files || []).filter(f => !f.trashed);
-      if (!files.length) return null;
+      let files = [];
+      try {
+        const res = await SheetsClient.findFiles(
+          "trashed=false and mimeType='application/vnd.google-apps.spreadsheet'"
+        );
+        files = (res.files || []).filter(f => !f.trashed);
+      } catch (e) {
+        console.warn('[findExistingSpreadsheet] findFiles error', e);
+      }
+
+      const candidateIds = new Set(files.map(f => f.id));
+      if (spreadsheetId) candidateIds.add(spreadsheetId);
 
       let bestFile = null;
       let maxOpexRows = -1;
 
-      for (const file of files) {
+      for (const id of candidateIds) {
         try {
-          const meta = await SheetsClient.getSpreadsheetMeta(file.id);
+          const meta = await SheetsClient.getSpreadsheetMeta(id);
           const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
           if (opexSheet) {
-            const vals = await SheetsClient.getValues(file.id, 'Opex!A2:A100');
+            const vals = await SheetsClient.getValues(id, 'Opex!A2:A500');
             const dataRows = (vals.values || []).filter(r => r && r[0] && String(r[0]).trim() !== '');
             if (dataRows.length > maxOpexRows) {
               maxOpexRows = dataRows.length;
-              bestFile = file;
+              bestFile = { id, name: (meta.properties && meta.properties.title) || 'Nota Data' };
             }
           }
         } catch (e) {
-          console.warn('[findExistingSpreadsheet] Error inspecting file', file.id, e);
+          console.warn('[findExistingSpreadsheet] Error inspecting file', id, e);
         }
       }
 
-      if (bestFile && maxOpexRows > 0) return bestFile;
+      if (bestFile && maxOpexRows >= 0) return bestFile;
 
       const notaDataFiles = files.filter(f => f.name === 'Nota Data');
       if (notaDataFiles.length) {
-        notaDataFiles.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
+        notaDataFiles.sort((a, b) => new Date(a.createdTime || 0) - new Date(b.createdTime || 0));
         return notaDataFiles[0];
       }
 
-      files.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
-      return files[0];
+      if (files.length) {
+        files.sort((a, b) => new Date(a.createdTime || 0) - new Date(b.createdTime || 0));
+        return files[0];
+      }
+
+      return null;
     } catch (e) {
       console.warn('[findExistingSpreadsheet] search failed', e);
       return null;
@@ -95,42 +106,29 @@ const DataStore = (() => {
 
   async function bootstrap() {
     if (typeof Auth !== 'undefined' && Auth.isGuest && Auth.isGuest()) return;
-    if (spreadsheetId) {
-      // If cached spreadsheet has 0 data rows in Opex, check if another sheet has data
-      try {
-        const vals = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:A10');
-        const dataRows = (vals.values || []).filter(r => r && r[0] && String(r[0]).trim() !== '');
-        if (dataRows.length === 0) {
-          const better = await findExistingSpreadsheet();
-          if (better && better.id !== spreadsheetId) {
-            console.log('[bootstrap] Switching from empty cached sheet to sheet with data:', better.id);
-            spreadsheetId = better.id;
-            localStorage.setItem(LS_SS_ID, spreadsheetId);
-            const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
-            const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
-            const investSheet = (meta.sheets || []).find(s => s.properties.title === 'Invest');
-            opexGid = opexSheet ? opexSheet.properties.sheetId : null;
-            investGid = investSheet ? investSheet.properties.sheetId : null;
-            if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
-            if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
-          }
-        }
-      } catch (e) {
-        console.warn('[bootstrap] Error checking cached spreadsheet:', e);
-      }
 
-      if (!localStorage.getItem(LS_SPLIT_MIGRATED)) {
-        try {
-          const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+    // 1. If we have a cached spreadsheetId in localStorage, try loading it first
+    if (spreadsheetId) {
+      try {
+        const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+        if (meta && meta.sheets) {
+          console.log('[bootstrap] Loaded cached spreadsheet:', spreadsheetId);
+          const opexSheet = meta.sheets.find(s => s.properties.title === 'Opex');
+          const investSheet = meta.sheets.find(s => s.properties.title === 'Invest');
+          opexGid = opexSheet ? opexSheet.properties.sheetId : null;
+          investGid = investSheet ? investSheet.properties.sheetId : null;
+          if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
+          if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
           await migrateToSplitSheets(meta);
           localStorage.setItem(LS_SPLIT_MIGRATED, '1');
-        } catch (e) {
-          console.warn('[bootstrap] Migration error:', e);
+          return;
         }
+      } catch (e) {
+        console.warn('[bootstrap] Cached spreadsheet ID inaccessible, searching user drive...', e);
       }
-      return;
     }
 
+    // 2. Search user's Google Drive for existing spreadsheet
     const existing = await findExistingSpreadsheet();
     if (existing) {
       spreadsheetId = existing.id;
@@ -145,6 +143,17 @@ const DataStore = (() => {
       await migrateToSplitSheets(meta);
       localStorage.setItem(LS_SPLIT_MIGRATED, '1');
       return;
+    }
+
+    if (spreadsheetId) {
+      try {
+        const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+        await migrateToSplitSheets(meta);
+        localStorage.setItem(LS_SPLIT_MIGRATED, '1');
+        return;
+      } catch (e) {
+        console.warn('[bootstrap] Cached spreadsheet ID invalid:', e);
+      }
     }
 
     const created = await SheetsClient.create({
@@ -1086,8 +1095,11 @@ const DataStore = (() => {
     return result;
   }
 
-  async function setSpreadsheetId(newId) {
-    if (!newId) return;
+  async function setSpreadsheetId(rawId) {
+    if (!rawId) return;
+    let newId = String(rawId).trim();
+    const match = newId.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (match) newId = match[1];
     spreadsheetId = newId;
     localStorage.setItem(LS_SS_ID, spreadsheetId);
     try {
@@ -1098,6 +1110,8 @@ const DataStore = (() => {
       investGid = investSheet ? investSheet.properties.sheetId : null;
       if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
       if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
+      await migrateToSplitSheets(meta);
+      localStorage.setItem(LS_SPLIT_MIGRATED, '1');
     } catch (e) {
       console.warn('Error fetching meta for new spreadsheetId', e);
     }

@@ -38,10 +38,11 @@ signed-in user's own short-lived OAuth token.
 - **Configurable Account & Stock Asset Types**: Added **Asset Type** selection (`Cash`, `Reksa Dana`, `Forex`, `US Stock`, `JHT`, or `Custom...`) for Accounts and Stocks under Profile → Settings → Accounts / Stocks.
 - **Google Sheets Config Sync**: Synchronized account and stock asset type configurations with Column E (`assetType`) in the Google Sheets `Config` sheet.
 - **Stock Balance Inputs**: Enabled Balance and Balance Date settings for Stock items in the Config modal, allowing non-transactional asset holdings (e.g., JHT) to maintain a static balance.
-- **Net Worth Holdings Alignment**:
-  - Unified asset type categorization via `getAssetTypeForItem(name, explicitType, isAccount)` shared across both Overview and Holdings pages.
-  - Revised `renderHoldings()` to group all accounts, investments, and fallback snapshots under their respective Asset Type sections (e.g., `JHT`, `US Stock`, `Cash`, `Reksa Dana`, `Forex`, `Deposit`), matching the allocation categories and totals of Net Worth Overview.
-  - Added per-asset-type group cost basis, estimated value, and P&L totals in Holdings, sorting allocation sections descending by value to match the Net Worth Overview donut chart sequence.
+- **Net Worth Holdings & Overview Unified Allocation Engine**:
+  - Centralized portfolio allocation grouping in a single shared helper function `getNetWorthAllocations()` used by both `renderOverview()` and `renderHoldings()`.
+  - Fixed account asset type resolution so items like `Pluang Timo USD` are mapped directly to configured asset types (`Forex`) or inferred from currency/name patterns.
+  - Implemented smart FX deduplication (`isFxAccountMatch`) preventing duplicate account/holding entries for foreign currency accounts (`CIMB CHF`, `USD CIMB`) while preserving rich cost basis and lot size details.
+  - Standardized theme colors and badge styling via `getTypeColor()` and `getHoldingTheme()` across both views.
 
 ## How it works
 

@@ -10,6 +10,35 @@ directly via the Google Sheets API. There is no backend server and no Apps
 Script deployment — everything runs client-side in the browser using the
 signed-in user's own short-lived OAuth token.
 
+## Recent Updates & Feature Additions (AI Studio Sessions Recap)
+
+### Session 1: Multi-Tenant Architecture & Smart Autofill
+- **Client-Side Google Sheets Backend**: Replaced shared Apps Script backend with `auth.js`, `sheets-client.js`, and `data-store.js` using OAuth `drive.file` scope.
+- **Smart Autofill**: Auto-suggests **Category** & **Payment Method** (Expense/Income) and **Account** (Invest) based on rolling 30-day transaction history.
+- **Resilient Offline Sync**: Background transaction retry queue (`retryPendingQueue`) and foreground re-fetch handlers.
+
+### Session 2: Dual-Purpose Stock & Account Depletion Engine
+- **Forex / Multi-Currency Asset Depletion**: Automated balance tracking for accounts that hold cash/forex *and* fund stock purchases (e.g., `USDIDR Pluang Febri`).
+- **Shared Net Lot Calculation**: Implemented `computeInvestNetLots()` so Net Worth holdings and Financial Goals progress calculate exact remaining balances without drifting out of sync.
+
+### Session 3: Weekly Insights View
+- **Weekly Expense Analysis**: Added a **Weekly** mode filter on the Insights page, positioned to the left of **Monthly** (`Weekly`, `Monthly`, `Yearly`, `Category`).
+- **Monday–Sunday Calendar Cycle**: Groups expenses into Monday–Sunday weeks.
+- **Multi-Level Filters**:
+  - **Payment Source Filter**: `All`, `Flazz`, `eWallet`, `Bank`, `CC`.
+  - **Range Filter**: `4 Wk`, `8 Wk`, `12 Wk`, `YTD`.
+- **Interactive Visual Analytics**: Week-over-week spending comparison, average weekly benchmarks, interactive weekly bar chart, and category donut breakdown with transaction-level drill-down.
+
+### Session 4: Profile Navigation & Page Renaming
+- **Financial Goals**: Renamed "Goals" to **Financial Goals** in the Profile / More menu.
+- **Recurring Transactions**: Renamed "Recurring" to **Recurring Transactions** in the Profile / More menu.
+- **Consistent Headers**: Updated the page title header on the Recurring screen to **Recurring Transactions**.
+
+### Session 5: Custom Asset Type Configuration & Dynamic Net Worth Allocation
+- **Configurable Account & Stock Asset Types**: Added **Asset Type** selection (`Cash`, `Reksa Dana`, `Forex`, `US Stock`, `JHT`, or `Custom...`) for Accounts and Stocks under Profile → Settings → Accounts / Stocks.
+- **Google Sheets Config Sync**: Synchronized account and stock asset type configurations with Column E (`assetType`) in the Google Sheets `Config` sheet.
+- **Dynamic Net Worth Allocation Diagram**: Updated the 'Allocation by Type' donut chart on the Net Worth Overview screen to dynamically aggregate balances by user-configured asset types, removing hardcoded fallback slices ("Other") and dynamically mapping custom asset types with distinct colors.
+
 ## How it works
 
 - `auth.js` — Google Identity Services sign-in (OAuth `drive.file` scope:

@@ -905,8 +905,15 @@ const DataStore = (() => {
       .map((r, idx) => {
         let balVal = null;
         if (r[8] !== undefined && r[8] !== null && String(r[8]).trim() !== '') {
-          const rawNum = Number(String(r[8]).replace(/[^0-9.-]/g, ''));
-          if (!isNaN(rawNum)) balVal = rawNum;
+          if (typeof r[8] === 'number') {
+            balVal = isNaN(r[8]) ? null : r[8];
+          } else {
+            let str = String(r[8]).trim().replace(/^(Rp|USD|\$)\s*/i, '');
+            if (/^\d{1,3}(\.\d{3})+$/.test(str)) str = str.replace(/\./g, '');
+            else str = str.replace(/,/g, '');
+            const rawNum = Number(str);
+            if (!isNaN(rawNum)) balVal = rawNum;
+          }
         }
         return {
           kind: String(r[0] || '').trim(),
@@ -958,7 +965,18 @@ const DataStore = (() => {
     rows.forEach(row => {
       const account = String(row[0] || '').trim();
       const date    = String(row[1] || '').trim();
-      const amount  = Number(row[2]) || 0;
+      let amount = 0;
+      if (row[2] !== undefined && row[2] !== null && String(row[2]).trim() !== '') {
+        if (typeof row[2] === 'number') {
+          amount = isNaN(row[2]) ? 0 : row[2];
+        } else {
+          let str = String(row[2]).trim().replace(/^(Rp|USD|\$)\s*/i, '');
+          if (/^\d{1,3}(\.\d{3})+$/.test(str)) str = str.replace(/\./g, '');
+          else str = str.replace(/,/g, '');
+          const n = Number(str);
+          if (!isNaN(n)) amount = n;
+        }
+      }
       const txId    = String(row[3] || '').trim();
       if (!account || !date) return;
       const existing = latestByAccount[account];

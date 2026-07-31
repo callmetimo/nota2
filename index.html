@@ -1375,15 +1375,27 @@ try {
 
 let accountBalances = {}; // {accountName: {amount}} after applying transaction deltas
 
+function parseConfigBalance(val) {
+  if (val === undefined || val === null || val === '') return null;
+  if (typeof val === 'number') return isNaN(val) ? null : val;
+  let str = String(val).trim().replace(/^(Rp|USD|\$)\s*/i, '');
+  if (!str) return null;
+  if (/^\d{1,3}(\.\d{3})+$/.test(str)) str = str.replace(/\./g, '');
+  else str = str.replace(/,/g, '');
+  const n = Number(str);
+  return isNaN(n) ? null : n;
+}
+
 function syncConfigToRawAccountBalances() {
   if (!CONFIG_ITEMS || !CONFIG_ITEMS.length) return;
   const todayStr = new Date().toISOString().slice(0, 10);
   CONFIG_ITEMS.filter(i => (i.kind === 'account' || i.kind === 'stock') && !i.archived).forEach(acct => {
     if (acct.balance != null && acct.balance !== '') {
-      const cleanNum = typeof acct.balance === 'number' ? acct.balance : Number(String(acct.balance).replace(/[^\d.-]/g, ''));
-      if (!isNaN(cleanNum) && cleanNum !== 0) {
+      const cleanNum = parseConfigBalance(acct.balance);
+      if (cleanNum !== null && cleanNum !== 0) {
         const bDate = acct.balanceDate || todayStr;
-        if (!rawAccountBalances[acct.name] || (bDate >= (rawAccountBalances[acct.name].date || ''))) {
+        const cur = rawAccountBalances[acct.name];
+        if (!cur || !cur.amount || cur.amount === 0 || bDate >= (cur.date || '') || (cur.txId && cur.txId.startsWith('config_'))) {
           rawAccountBalances[acct.name] = {
             date: bDate,
             amount: cleanNum,
@@ -1579,6 +1591,18 @@ function buildAccountBalances() {
     else if (ccy === 'CHF') rate = chfRate;
     else if (fxRates[ccy]) rate = fxRates[ccy];
 
+    const raw = rawAccountBalances[acct.name];
+    let baseAmt = 0;
+    let baseDate = acct.balanceDate || new Date().toISOString().slice(0, 10);
+    if (raw && (raw.amount || raw.amount === 0)) {
+      baseAmt = Number(raw.amount) || 0;
+      if (raw.date) baseDate = raw.date;
+    }
+    if (!baseAmt) {
+      const cleanConfigBal = parseConfigBalance(acct.balance);
+      if (cleanConfigBal) baseAmt = cleanConfigBal;
+    }
+
     if (ccy !== 'IDR') {
       let netLot = 0;
       if (investNetLots) {
@@ -1602,15 +1626,13 @@ function buildAccountBalances() {
         return;
       }
 
-      const raw = rawAccountBalances[acct.name] || { amount: acct.balance || 0, date: acct.balanceDate || new Date().toISOString().slice(0, 10) };
-      const currentNative = computeAccountCurrentBalance(raw.amount, raw.date, acct);
+      const currentNative = computeAccountCurrentBalance(baseAmt, baseDate, acct);
       accountBalances[acct.name] = { amount: currentNative * rate, nativeAmount: currentNative, ccy };
       return;
     }
 
     // IDR accounts: use Config / Balances snapshot + Opex/Invest deltas
-    const raw = rawAccountBalances[acct.name] || { amount: acct.balance || 0, date: acct.balanceDate || new Date().toISOString().slice(0, 10) };
-    const current = computeAccountCurrentBalance(raw.amount, raw.date, acct);
+    const current = computeAccountCurrentBalance(baseAmt, baseDate, acct);
     accountBalances[acct.name] = { amount: current, nativeAmount: current, ccy: 'IDR' };
   });
 }
@@ -4223,14 +4245,13 @@ async function renderNetWorth(){
     if (rawBal == null && rawAccountBalances[sItem.name]) {
       rawBal = rawAccountBalances[sItem.name].amount;
     }
-    const balNum = rawBal != null ? Number(String(rawBal).replace(/[^\d.-]/g, '')) : 0;
-    if (!isNaN(balNum) && balNum > 0) {
+    const balNum = parseConfigBalance(rawBal);
+    if (balNum !== null && balNum > 0) {
       let type = (sItem.assetType || STOCK_TYPE[sItem.name] || '').trim();
-      if (!type || type === 'Other') {
-        const sUpper = sItem.name.toUpperCase();
-        if (sUpper.includes('JHT')) type = 'JHT';
-        else type = 'US Stock';
-      }
+      const sUpper = sItem.name.toUpperCase();
+      if (sUpper.includes('JHT')) type = 'JHT';
+      else if (!type || type === 'Other') type = 'US Stock';
+
       holdings.push({
         stock: sItem.name,
         type,
@@ -4439,34 +4460,54 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
 
   const byType = {};
 
-  // 1. Accumulate Account balances into their configured assetType (defaults to 'Cash')
+  // 1. Accumulate Account balances into their configured assetType
   activeAccounts.forEach(acct => {
     let acctType = (acct.assetType || '').trim();
-    if (!acctType || acctType === 'Other') {
-      const aUpper = acct.name.toUpperCase();
-      if (aUpper.includes('JHT')) acctType = 'JHT';
-      else acctType = 'Cash';
+    const aUpper = acct.name.toUpperCase();
+    if (aUpper.includes('JHT')) {
+      acctType = 'JHT';
+    } else if (!acctType || acctType === 'Other') {
+      acctType = 'Cash';
     }
     const amt = Number(acctBals[acct.name]?.amount) || 0;
-    if (!byType[acctType]) byType[acctType] = { cost: 0, value: 0 };
-    byType[acctType].cost += amt;
-    byType[acctType].value += amt;
+    if (amt > 0) {
+      if (!byType[acctType]) byType[acctType] = { cost: 0, value: 0 };
+      byType[acctType].cost += amt;
+      byType[acctType].value += amt;
+    }
   });
 
   // 2. Accumulate Stock / Investment holdings into their configured assetType
   holdings.forEach(h => {
     const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === h.stock);
     let t = (stockConfig?.assetType || h.type || '').trim();
-    if (!t) {
-      const sUpper = (h.stock || '').toUpperCase();
-      if (sUpper.includes('JHT')) t = 'JHT';
-      else if (h.stock.startsWith('USDIDR') || h.stock === 'CHFIDR') t = 'Forex';
+    const sUpper = (h.stock || '').toUpperCase();
+    if (sUpper.includes('JHT')) {
+      t = 'JHT';
+    } else if (!t || t === 'Other') {
+      if (h.stock.startsWith('USDIDR') || h.stock === 'CHFIDR') t = 'Forex';
       else if (h.stock === 'Star Stable Income Fund') t = 'Reksa Dana';
       else t = 'US Stock';
     }
     if (!byType[t]) byType[t] = { cost: 0, value: 0 };
     byType[t].cost  += h.costBasis;
     byType[t].value += h.currentValue;
+  });
+
+  // 3. Fallback: check rawAccountBalances for any non-zero account/item (e.g. JHT) not captured above
+  Object.keys(rawAccountBalances).forEach(k => {
+    const rawObj = rawAccountBalances[k];
+    const amt = Number(rawObj?.amount) || 0;
+    if (amt <= 0) return;
+    const inAccts = activeAccounts.some(a => a.name.toLowerCase() === k.toLowerCase());
+    const inHoldings = holdings.some(h => h.stock.toLowerCase() === k.toLowerCase());
+    if (!inAccts && !inHoldings) {
+      let kType = 'Cash';
+      if (k.toUpperCase().includes('JHT')) kType = 'JHT';
+      if (!byType[kType]) byType[kType] = { cost: 0, value: 0 };
+      byType[kType].cost += amt;
+      byType[kType].value += amt;
+    }
   });
 
   const DYNAMIC_TYPE_COLORS = {

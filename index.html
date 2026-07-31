@@ -1378,15 +1378,18 @@ let accountBalances = {}; // {accountName: {amount}} after applying transaction 
 function syncConfigToRawAccountBalances() {
   if (!CONFIG_ITEMS || !CONFIG_ITEMS.length) return;
   const todayStr = new Date().toISOString().slice(0, 10);
-  CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).forEach(acct => {
-    if (acct.balance != null && acct.balance !== '' && !isNaN(Number(acct.balance))) {
-      const bDate = acct.balanceDate || todayStr;
-      if (!rawAccountBalances[acct.name] || (bDate >= (rawAccountBalances[acct.name].date || ''))) {
-        rawAccountBalances[acct.name] = {
-          date: bDate,
-          amount: Number(acct.balance),
-          txId: 'config_' + acct.name
-        };
+  CONFIG_ITEMS.filter(i => (i.kind === 'account' || i.kind === 'stock') && !i.archived).forEach(acct => {
+    if (acct.balance != null && acct.balance !== '') {
+      const cleanNum = typeof acct.balance === 'number' ? acct.balance : Number(String(acct.balance).replace(/[^\d.-]/g, ''));
+      if (!isNaN(cleanNum) && cleanNum !== 0) {
+        const bDate = acct.balanceDate || todayStr;
+        if (!rawAccountBalances[acct.name] || (bDate >= (rawAccountBalances[acct.name].date || ''))) {
+          rawAccountBalances[acct.name] = {
+            date: bDate,
+            amount: cleanNum,
+            txId: 'config_' + acct.name
+          };
+        }
       }
     }
   });
@@ -1511,6 +1514,7 @@ function getAccountMatchNames(acctOrPm) {
 }
 
 function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm) {
+  baseAmount = Number(baseAmount) || 0;
   const matchNames = getAccountMatchNames(acctOrPm);
   if (!matchNames.length) return baseAmount;
   let delta = 0;
@@ -1800,8 +1804,8 @@ function _configFieldsForKind(kind) {
   document.getElementById('configItemAssetTypeGroup').style.display = (kind === 'stock' || kind === 'account') ? 'block' : 'none';
   document.getElementById('configItemCcyGroup').style.display = kind === 'account' ? 'block' : 'none';
   document.getElementById('configItemLinkedPMGroup').style.display = kind === 'account' ? 'block' : 'none';
-  if (document.getElementById('configItemBalanceGroup')) document.getElementById('configItemBalanceGroup').style.display = kind === 'account' ? 'block' : 'none';
-  if (document.getElementById('configItemBalanceDateGroup')) document.getElementById('configItemBalanceDateGroup').style.display = kind === 'account' ? 'block' : 'none';
+  if (document.getElementById('configItemBalanceGroup')) document.getElementById('configItemBalanceGroup').style.display = (kind === 'account' || kind === 'stock') ? 'block' : 'none';
+  if (document.getElementById('configItemBalanceDateGroup')) document.getElementById('configItemBalanceDateGroup').style.display = (kind === 'account' || kind === 'stock') ? 'block' : 'none';
   if (document.getElementById('configItemShowOnInsightsGroup')) document.getElementById('configItemShowOnInsightsGroup').style.display = kind === 'account' ? 'block' : 'none';
 }
 
@@ -1928,18 +1932,23 @@ async function saveConfigItem() {
     }
   }
   const linkedPM = kind === 'account' ? (document.getElementById('configItemLinkedPM').value || '') : '';
-  const balanceRaw = (kind === 'account' && document.getElementById('configItemBalance')) ? document.getElementById('configItemBalance').value : null;
-  const cleanBalanceStr = balanceRaw ? String(balanceRaw).replace(/,/g, '').trim() : '';
-  const balance = (cleanBalanceStr !== '' && !isNaN(Number(cleanBalanceStr))) ? Number(cleanBalanceStr) : null;
-  const balanceDate = (kind === 'account' && document.getElementById('configItemBalanceDate')) ? (document.getElementById('configItemBalanceDate').value || '') : '';
+  const balanceEl = document.getElementById('configItemBalance');
+  const balanceRaw = balanceEl ? balanceEl.value : null;
+  let balance = null;
+  if (balanceRaw !== null && String(balanceRaw).trim() !== '') {
+    const rawDigits = String(balanceRaw).replace(/[^\d.-]/g, '');
+    const num = Number(rawDigits);
+    if (!isNaN(num)) balance = num;
+  }
+  const balanceDate = (document.getElementById('configItemBalanceDate')) ? (document.getElementById('configItemBalanceDate').value || '') : '';
   const showOnInsights = kind === 'account' ? (document.getElementById('configItemShowOnInsightsCheckbox') ? document.getElementById('configItemShowOnInsightsCheckbox').checked : true) : true;
 
   if (existing) {
     existing.name = name; existing.color = color; existing.assetType = assetType; existing.ccy = ccy; existing.linkedPM = linkedPM;
-    if (kind === 'account') {
+    if (kind === 'account' || kind === 'stock') {
       existing.balance = balance;
       existing.balanceDate = balanceDate;
-      existing.showOnInsights = showOnInsights;
+      if (kind === 'account') existing.showOnInsights = showOnInsights;
     }
   } else {
     const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === kind).map(i => i.sortOrder));
@@ -1950,7 +1959,7 @@ async function saveConfigItem() {
     STOCK_TYPE[name] = assetType;
   }
 
-  if (kind === 'account' && balance !== null) {
+  if ((kind === 'account' || kind === 'stock') && balance !== null) {
     const effectiveDate = balanceDate || new Date().toISOString().slice(0, 10);
     rawAccountBalances[name] = { amount: balance, date: effectiveDate, txId: 'config_' + name };
   }
@@ -4204,6 +4213,36 @@ async function renderNetWorth(){
     return {stock, type, netLot, costBasis, currentValue, avgCostPerUnit, avgNativePrice};
   }).filter(Boolean);
 
+  // Also include stock items from CONFIG_ITEMS that have a balance/value configured but no Invest sheet transactions
+  const stockConfigItems = CONFIG_ITEMS.filter(i => i.kind === 'stock' && !i.archived);
+  stockConfigItems.forEach(sItem => {
+    const hasInvestLots = buyLots[sItem.name] && (buyLots[sItem.name] - (sellLots[sItem.name] || 0)) > 0;
+    if (hasInvestLots) return;
+
+    let rawBal = sItem.balance;
+    if (rawBal == null && rawAccountBalances[sItem.name]) {
+      rawBal = rawAccountBalances[sItem.name].amount;
+    }
+    const balNum = rawBal != null ? Number(String(rawBal).replace(/[^\d.-]/g, '')) : 0;
+    if (!isNaN(balNum) && balNum > 0) {
+      let type = (sItem.assetType || STOCK_TYPE[sItem.name] || '').trim();
+      if (!type || type === 'Other') {
+        const sUpper = sItem.name.toUpperCase();
+        if (sUpper.includes('JHT')) type = 'JHT';
+        else type = 'US Stock';
+      }
+      holdings.push({
+        stock: sItem.name,
+        type,
+        netLot: 1,
+        costBasis: balNum,
+        currentValue: balNum,
+        avgCostPerUnit: balNum,
+        avgNativePrice: balNum
+      });
+    }
+  });
+
   const cashBal = computeCashBalance();
   buildAccountBalances();
 
@@ -4402,8 +4441,13 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
 
   // 1. Accumulate Account balances into their configured assetType (defaults to 'Cash')
   activeAccounts.forEach(acct => {
-    const acctType = (acct.assetType || 'Cash').trim() || 'Cash';
-    const amt = acctBals[acct.name]?.amount || 0;
+    let acctType = (acct.assetType || '').trim();
+    if (!acctType || acctType === 'Other') {
+      const aUpper = acct.name.toUpperCase();
+      if (aUpper.includes('JHT')) acctType = 'JHT';
+      else acctType = 'Cash';
+    }
+    const amt = Number(acctBals[acct.name]?.amount) || 0;
     if (!byType[acctType]) byType[acctType] = { cost: 0, value: 0 };
     byType[acctType].cost += amt;
     byType[acctType].value += amt;

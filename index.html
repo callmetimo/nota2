@@ -654,13 +654,13 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group">
           <label class="form-label">Lot / Units</label>
-          <input type="text" class="form-input" id="inputLot" placeholder="0" inputmode="decimal" oninput="calcTotal()">
+          <input type="text" class="form-input" id="inputLot" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this); calcTotal()">
         </div>
         <div class="form-group">
           <label class="form-label">Price per Unit</label>
           <div class="amount-wrapper">
             <span class="amount-prefix" id="investPricePrefix">Rp</span>
-            <input type="text" class="form-input amount-input" id="inputPrice" placeholder="0" inputmode="decimal" oninput="calcTotal()">
+            <input type="text" class="form-input amount-input" id="inputPrice" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this); calcTotal()">
           </div>
         </div>
       </div>
@@ -678,7 +678,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <label class="form-label">Total (IDR)</label>
         <div class="amount-wrapper">
           <span class="amount-prefix">Rp</span>
-          <input type="text" class="form-input amount-input" id="inputTotal" placeholder="Auto-calculated" inputmode="decimal">
+          <input type="text" class="form-input amount-input" id="inputTotal" placeholder="Auto-calculated" inputmode="decimal" oninput="formatAmountInput(this); updateAvgPrices()">
         </div>
       </div>
       <button class="submit-btn invest" id="submitInvestBtn" onclick="submitInvest()">Save Investment</button>
@@ -748,88 +748,107 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
   <div style="padding:24px 0 14px;display:flex;align-items:center;justify-content:space-between">
     <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Insights</div>
   </div>
-  <div id="accountBalanceCards"></div>
-  <div class="chart-page-section">
-    <div class="insights-sticky">
-      <div class="toggle-row" id="insightsModeToggle">
-        <div class="toggle-btn" data-m="weekly" onclick="setIM('weekly',this)">Weekly</div>
-        <div class="toggle-btn active" data-m="monthly" onclick="setIM('monthly',this)">Monthly</div>
-        <div class="toggle-btn" data-m="yearly" onclick="setIM('yearly',this)">Yearly</div>
-        <div class="toggle-btn" data-m="category" onclick="setIM('category',this)">Category</div>
+
+  <div class="toggle-row" id="insightsSubPageToggle" style="margin-bottom:16px">
+    <div class="toggle-btn active" data-sub="accounts" onclick="setInsightsSubPage('accounts',this)">Accounts</div>
+    <div class="toggle-btn" data-sub="expense" onclick="setInsightsSubPage('expense',this)">Expense Insights</div>
+    <div class="toggle-btn" data-sub="cc" onclick="setInsightsSubPage('cc',this)">Transactions</div>
+  </div>
+
+  <!-- Subpage 1: Accounts -->
+  <div id="insightsSubAccounts">
+    <div id="accountBalanceCards"></div>
+  </div>
+
+  <!-- Subpage 2: Expense Insights -->
+  <div id="insightsSubExpense" style="display:none">
+    <div class="chart-page-section">
+      <div class="insights-sticky">
+        <div class="toggle-row" id="insightsModeToggle">
+          <div class="toggle-btn" data-m="weekly" onclick="setIM('weekly',this)">Weekly</div>
+          <div class="toggle-btn active" data-m="monthly" onclick="setIM('monthly',this)">Monthly</div>
+          <div class="toggle-btn" data-m="yearly" onclick="setIM('yearly',this)">Yearly</div>
+          <div class="toggle-btn" data-m="category" onclick="setIM('category',this)">Category</div>
+        </div>
+        <div id="weeklyControls" style="display:none">
+          <div class="toggle-row" id="weeklySourceToggle">
+            <div class="toggle-btn active" data-v="all" onclick="setWV('all',this)">All</div>
+            <div class="toggle-btn" data-v="flazz" onclick="setWV('flazz',this)">Flazz</div>
+            <div class="toggle-btn" data-v="ewallet" onclick="setWV('ewallet',this)">eWallet</div>
+            <div class="toggle-btn" data-v="bank" onclick="setWV('bank',this)">Bank</div>
+            <div class="toggle-btn" data-v="cc" onclick="setWV('cc',this)">CC</div>
+          </div>
+          <div class="toggle-row" id="weeklyRangeToggle">
+            <div class="toggle-btn active" data-r="4" onclick="setWR(4,this)">4 Wk</div>
+            <div class="toggle-btn" data-r="8" onclick="setWR(8,this)">8 Wk</div>
+            <div class="toggle-btn" data-r="12" onclick="setWR(12,this)">12 Wk</div>
+            <div class="toggle-btn" data-r="ytd" onclick="setWR('ytd',this)">YTD</div>
+          </div>
+        </div>
+        <div id="monthlyControls">
+          <div class="toggle-row" id="monthlySourceToggle">
+            <div class="toggle-btn active" data-v="all" onclick="setMV('all',this)">All</div>
+            <div class="toggle-btn" data-v="flazz" onclick="setMV('flazz',this)">Flazz</div>
+            <div class="toggle-btn" data-v="ewallet" onclick="setMV('ewallet',this)">eWallet</div>
+            <div class="toggle-btn" data-v="bank" onclick="setMV('bank',this)">Bank</div>
+            <div class="toggle-btn" data-v="cc" onclick="setMV('cc',this)">CC</div>
+          </div>
+          <div class="toggle-row" id="monthlyRangeToggle">
+            <div class="toggle-btn active" data-r="3" onclick="setMR(3,this)">3 Mo</div>
+            <div class="toggle-btn" data-r="6" onclick="setMR(6,this)">6 Mo</div>
+            <div class="toggle-btn" data-r="12" onclick="setMR(12,this)">12 Mo</div>
+            <div class="toggle-btn" data-r="ytd" onclick="setMR('ytd',this)">YTD</div>
+          </div>
+        </div>
+        <div id="yearlyControls" style="display:none">
+          <div class="toggle-row" id="yearlySourceToggle">
+            <div class="toggle-btn active" data-v="all" onclick="setYV('all',this)">All</div>
+            <div class="toggle-btn" data-v="flazz" onclick="setYV('flazz',this)">Flazz</div>
+            <div class="toggle-btn" data-v="ewallet" onclick="setYV('ewallet',this)">eWallet</div>
+            <div class="toggle-btn" data-v="bank" onclick="setYV('bank',this)">Bank</div>
+            <div class="toggle-btn" data-v="cc" onclick="setYV('cc',this)">CC</div>
+          </div>
+          <div class="toggle-row" id="yearlyRangeToggle">
+            <div class="toggle-btn active" data-r="3" onclick="setYR(3,this)">3 Yr</div>
+            <div class="toggle-btn" data-r="5" onclick="setYR(5,this)">5 Yr</div>
+            <div class="toggle-btn" data-r="all" onclick="setYR('all',this)">All Time</div>
+          </div>
+        </div>
+        <div id="categoryControls" style="display:none">
+          <div class="toggle-row" id="catSourceToggle">
+            <div class="toggle-btn active" data-v="all" onclick="setCV('all',this)">All</div>
+            <div class="toggle-btn" data-v="flazz" onclick="setCV('flazz',this)">Flazz</div>
+            <div class="toggle-btn" data-v="ewallet" onclick="setCV('ewallet',this)">eWallet</div>
+            <div class="toggle-btn" data-v="bank" onclick="setCV('bank',this)">Bank</div>
+            <div class="toggle-btn" data-v="cc" onclick="setCV('cc',this)">CC</div>
+          </div>
+          <div class="toggle-row" id="catRangeToggle">
+            <div class="toggle-btn active" data-r="3" onclick="setCR(3,this)">3 Mo</div>
+            <div class="toggle-btn" data-r="6" onclick="setCR(6,this)">6 Mo</div>
+            <div class="toggle-btn" data-r="12" onclick="setCR(12,this)">12 Mo</div>
+            <div class="toggle-btn" data-r="ytd" onclick="setCR('ytd',this)">YTD</div>
+          </div>
+        </div>
       </div>
-      <div id="weeklyControls" style="display:none">
-        <div class="toggle-row" id="weeklySourceToggle">
-          <div class="toggle-btn active" data-v="all" onclick="setWV('all',this)">All</div>
-          <div class="toggle-btn" data-v="flazz" onclick="setWV('flazz',this)">Flazz</div>
-          <div class="toggle-btn" data-v="ewallet" onclick="setWV('ewallet',this)">eWallet</div>
-          <div class="toggle-btn" data-v="bank" onclick="setWV('bank',this)">Bank</div>
-          <div class="toggle-btn" data-v="cc" onclick="setWV('cc',this)">CC</div>
-        </div>
-        <div class="toggle-row" id="weeklyRangeToggle">
-          <div class="toggle-btn active" data-r="4" onclick="setWR(4,this)">4 Wk</div>
-          <div class="toggle-btn" data-r="8" onclick="setWR(8,this)">8 Wk</div>
-          <div class="toggle-btn" data-r="12" onclick="setWR(12,this)">12 Wk</div>
-          <div class="toggle-btn" data-r="ytd" onclick="setWR('ytd',this)">YTD</div>
-        </div>
-      </div>
-      <div id="monthlyControls">
-        <div class="toggle-row" id="monthlySourceToggle">
-          <div class="toggle-btn active" data-v="all" onclick="setMV('all',this)">All</div>
-          <div class="toggle-btn" data-v="flazz" onclick="setMV('flazz',this)">Flazz</div>
-          <div class="toggle-btn" data-v="ewallet" onclick="setMV('ewallet',this)">eWallet</div>
-          <div class="toggle-btn" data-v="bank" onclick="setMV('bank',this)">Bank</div>
-          <div class="toggle-btn" data-v="cc" onclick="setMV('cc',this)">CC</div>
-        </div>
-        <div class="toggle-row" id="monthlyRangeToggle">
-          <div class="toggle-btn active" data-r="3" onclick="setMR(3,this)">3 Mo</div>
-          <div class="toggle-btn" data-r="6" onclick="setMR(6,this)">6 Mo</div>
-          <div class="toggle-btn" data-r="12" onclick="setMR(12,this)">12 Mo</div>
-          <div class="toggle-btn" data-r="ytd" onclick="setMR('ytd',this)">YTD</div>
-        </div>
-      </div>
-      <div id="yearlyControls" style="display:none">
-        <div class="toggle-row" id="yearlySourceToggle">
-          <div class="toggle-btn active" data-v="all" onclick="setYV('all',this)">All</div>
-          <div class="toggle-btn" data-v="flazz" onclick="setYV('flazz',this)">Flazz</div>
-          <div class="toggle-btn" data-v="ewallet" onclick="setYV('ewallet',this)">eWallet</div>
-          <div class="toggle-btn" data-v="bank" onclick="setYV('bank',this)">Bank</div>
-          <div class="toggle-btn" data-v="cc" onclick="setYV('cc',this)">CC</div>
-        </div>
-        <div class="toggle-row" id="yearlyRangeToggle">
-          <div class="toggle-btn active" data-r="3" onclick="setYR(3,this)">3 Yr</div>
-          <div class="toggle-btn" data-r="5" onclick="setYR(5,this)">5 Yr</div>
-          <div class="toggle-btn" data-r="all" onclick="setYR('all',this)">All Time</div>
-        </div>
-      </div>
-      <div id="categoryControls" style="display:none">
-        <div class="toggle-row" id="catSourceToggle">
-          <div class="toggle-btn active" data-v="all" onclick="setCV('all',this)">All</div>
-          <div class="toggle-btn" data-v="flazz" onclick="setCV('flazz',this)">Flazz</div>
-          <div class="toggle-btn" data-v="ewallet" onclick="setCV('ewallet',this)">eWallet</div>
-          <div class="toggle-btn" data-v="bank" onclick="setCV('bank',this)">Bank</div>
-          <div class="toggle-btn" data-v="cc" onclick="setCV('cc',this)">CC</div>
-        </div>
-        <div class="toggle-row" id="catRangeToggle">
-          <div class="toggle-btn active" data-r="3" onclick="setCR(3,this)">3 Mo</div>
-          <div class="toggle-btn" data-r="6" onclick="setCR(6,this)">6 Mo</div>
-          <div class="toggle-btn" data-r="12" onclick="setCR(12,this)">12 Mo</div>
-          <div class="toggle-btn" data-r="ytd" onclick="setCR('ytd',this)">YTD</div>
-        </div>
-      </div>
+      <div style="height:14px"></div>
+      <div id="weeklySummary" style="display:none"></div>
+      <div id="weeklyBarCard" style="display:none"></div>
+      <div id="weeklyDonutCard" style="display:none"></div>
+      <div id="monthlySummary"></div>
+      <div id="monthlyBarCard"></div>
+      <div id="monthlyDonutCard"></div>
+      <div id="yearlySummary" style="display:none"></div>
+      <div id="yearlyBarCard" style="display:none"></div>
+      <div id="yearlyMonthCard" style="display:none"></div>
+      <div id="yearlyDonutCard" style="display:none"></div>
+      <div id="catRankingCard" style="display:none"></div>
+      <div id="catTrendCard" style="display:none"></div>
     </div>
-    <div style="height:14px"></div>
-    <div id="weeklySummary" style="display:none"></div>
-    <div id="weeklyBarCard" style="display:none"></div>
-    <div id="weeklyDonutCard" style="display:none"></div>
-    <div id="monthlySummary"></div>
-    <div id="monthlyBarCard"></div>
-    <div id="monthlyDonutCard"></div>
-    <div id="yearlySummary" style="display:none"></div>
-    <div id="yearlyBarCard" style="display:none"></div>
-    <div id="yearlyMonthCard" style="display:none"></div>
-    <div id="yearlyDonutCard" style="display:none"></div>
-    <div id="catRankingCard" style="display:none"></div>
-    <div id="catTrendCard" style="display:none"></div>
+  </div>
+
+  <!-- Subpage 3: Transactions -->
+  <div id="insightsSubCC" style="display:none">
+    <div id="ccMonitorContainer"></div>
   </div>
 </div>
 
@@ -1019,7 +1038,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       </div>
       <div class="form-group" id="configItemBalanceGroup" style="display:none">
         <label class="form-label">Remaining Balance</label>
-        <input type="text" class="form-input" id="configItemBalance" placeholder="0" inputmode="decimal" oninput="formatDecimalAmountInput(this)">
+        <input type="text" class="form-input" id="configItemBalance" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
       </div>
       <div class="form-group" id="configItemBalanceDateGroup" style="display:none">
         <label class="form-label">Input Date / As of Date</label>
@@ -1046,7 +1065,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <input type="hidden" id="setBalanceAccount">
       <div class="form-group">
         <label class="form-label">Amount (IDR)</label>
-        <input type="text" class="form-input" id="setBalanceAmount" placeholder="0" inputmode="decimal" oninput="formatDecimalAmountInput(this)">
+        <input type="text" class="form-input" id="setBalanceAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
       </div>
       <div class="form-group">
         <label class="form-label">As of date</label>
@@ -1129,7 +1148,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group">
         <label class="form-label">Amount (Rp)</label>
-        <input type="text" class="form-input" id="recurringEditAmount" inputmode="decimal">
+        <input type="text" class="form-input" id="recurringEditAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
       </div>
       <div class="form-group">
         <label class="form-label">Payment Method</label>
@@ -1210,7 +1229,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <label class="form-label">Target Amount</label>
         <div class="amount-wrapper">
           <span class="amount-prefix">Rp</span>
-          <input type="number" class="form-input amount-input" id="goalTargetAmount" placeholder="0" inputmode="numeric" min="0">
+          <input type="text" class="form-input amount-input" id="goalTargetAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
         </div>
       </div>
       <div class="form-group">
@@ -1243,8 +1262,6 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 <script src="config.js"></script>
 <script src="sheets-client.js"></script>
 <script src="data-store.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="auth.js"></script>
 
 <script>
@@ -1254,7 +1271,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.25';
+const APP_VERSION = 'v4.26';
 const APP_BUILD = '2026-07-27d';
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -1342,7 +1359,7 @@ document.getElementById('appVersionLabel').textContent = APP_VERSION;
 const allCategories = ['Entertainment','Gas','Gifts','Groceries','Home Repair','Household','Income','Insurance','Meals','Medical','Self Care','Transport','Travel','Utilities'];
 const allPMs = ['BCA','CIMB Niaga','eWallet','Flazz'];
 const allStocks = ['USDIDR CIMB'];
-const allAccounts = ['IDR CIMB','USD CIMB','IDR BCA','IDR Maybank'];
+const allAccounts = ['BCA IDR','USD CIMB','CIMB IDR','Maybank IDR'];
 
 const CAT_COLORS = {
   'Transport':'#60a0f0','Meals':'#c8f060','Entertainment':'#ff6b6b','Groceries':'#ffaa44',
@@ -1389,6 +1406,19 @@ function parseConfigBalance(val) {
 function syncConfigToRawAccountBalances() {
   if (!CONFIG_ITEMS || !CONFIG_ITEMS.length) return;
   const todayStr = new Date().toISOString().slice(0, 10);
+
+  // Clean up legacy or word-reversed keys in rawAccountBalances that belong to configured items (e.g. IDR BCA -> BCA IDR)
+  const configuredNames = CONFIG_ITEMS.map(i => i.name).filter(Boolean);
+  Object.keys(rawAccountBalances).forEach(k => {
+    const kSorted = k.toLowerCase().split(/\s+/).sort().join(' ');
+    configuredNames.forEach(cName => {
+      const cSorted = cName.toLowerCase().split(/\s+/).sort().join(' ');
+      if (k !== cName && kSorted === cSorted) {
+        delete rawAccountBalances[k];
+      }
+    });
+  });
+
   CONFIG_ITEMS.filter(i => (i.kind === 'account' || i.kind === 'stock') && !i.archived).forEach(acct => {
     if (acct.balance != null && acct.balance !== '') {
       const cleanNum = parseConfigBalance(acct.balance);
@@ -1516,7 +1546,6 @@ function getAccountMatchNames(acctOrPm) {
     if (acctOrPm.trim()) names.add(acctOrPm.toLowerCase().trim());
   } else if (acctOrPm && typeof acctOrPm === 'object') {
     if (acctOrPm.name) names.add(acctOrPm.name.toLowerCase().trim());
-    if (acctOrPm.linkedPM) names.add(acctOrPm.linkedPM.toLowerCase().trim());
     if (acctOrPm.name) {
       const stripped = acctOrPm.name.replace(/^(IDR|USD)\s+/i, '').toLowerCase().trim();
       if (stripped) names.add(stripped);
@@ -1687,7 +1716,7 @@ function openSetBalanceFromConfigOverlay() {
   const raw = rawAccountBalances[accountName];
   const amtVal = (item && item.balance != null) ? item.balance : (raw ? raw.amount : '');
   const dateVal = (item && item.balanceDate) ? item.balanceDate : (raw ? raw.date : new Date().toISOString().slice(0, 10));
-  document.getElementById('setBalanceAmount').value = amtVal !== '' ? String(amtVal) : '';
+  document.getElementById('setBalanceAmount').value = amtVal !== '' ? formatGroupedAmt(amtVal) : '';
   document.getElementById('setBalanceDate').value = dateVal;
   closeConfigItemOverlay();
   document.getElementById('setBalanceOverlay').classList.add('open');
@@ -1700,7 +1729,7 @@ function closeSetBalanceOverlay() {
 async function saveAccountBalance() {
   const account = document.getElementById('setBalanceAccount').value.trim();
   const date    = document.getElementById('setBalanceDate').value;
-  const amount  = Number(document.getElementById('setBalanceAmount').value) || 0;
+  const amount  = parseAmt('setBalanceAmount');
   if (!account || !date) { showToast('Account and date required', 'error'); return; }
   const txId = 'bal_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   showToast('Saving…', 'loading');
@@ -1895,14 +1924,7 @@ function openConfigItemOverlay(kind, name) {
   if (document.getElementById('configItemBalance')) {
     const raw = item ? rawAccountBalances[item.name] : null;
     const amtVal = (item && item.balance != null) ? item.balance : (raw ? raw.amount : '');
-    if (amtVal !== '' && amtVal != null && !isNaN(Number(amtVal))) {
-      const num = Number(amtVal);
-      const parts = String(num).split('.');
-      const intFormatted = Number(parts[0]).toLocaleString('en-US');
-      document.getElementById('configItemBalance').value = parts.length > 1 ? `${intFormatted}.${parts[1]}` : intFormatted;
-    } else {
-      document.getElementById('configItemBalance').value = '';
-    }
+    document.getElementById('configItemBalance').value = formatGroupedAmt(amtVal);
   }
   if (document.getElementById('configItemBalanceDate')) {
     const raw = item ? rawAccountBalances[item.name] : null;
@@ -1958,9 +1980,7 @@ async function saveConfigItem() {
   const balanceRaw = balanceEl ? balanceEl.value : null;
   let balance = null;
   if (balanceRaw !== null && String(balanceRaw).trim() !== '') {
-    const rawDigits = String(balanceRaw).replace(/[^\d.-]/g, '');
-    const num = Number(rawDigits);
-    if (!isNaN(num)) balance = num;
+    balance = parseAmt('configItemBalance');
   }
   const balanceDate = (document.getElementById('configItemBalanceDate')) ? (document.getElementById('configItemBalanceDate').value || '') : '';
   const showOnInsights = kind === 'account' ? (document.getElementById('configItemShowOnInsightsCheckbox') ? document.getElementById('configItemShowOnInsightsCheckbox').checked : true) : true;
@@ -2661,7 +2681,7 @@ function calcTotal() {
       const rate = fxRates['USD'] || 16500;
       total = Math.round(total * rate);
     }
-    document.getElementById('inputTotal').value = Math.round(total);
+    document.getElementById('inputTotal').value = formatGroupedAmt(Math.round(total));
   }
   updateAvgPrices();
 }
@@ -2720,48 +2740,52 @@ function fRpS(n){
   return'Rp'+n;
 }
 
-function parseAmt(id){ return parseFloat(String(document.getElementById(id).value||'').replace(',','.')) || 0; }
-
-// Comma-grouped amount input (e.g. "7,000") — digits only, no decimal support needed for IDR.
-function parseGroupedAmt(id){ return parseInt(String(document.getElementById(id).value||'').replace(/[^\d]/g,''), 10) || 0; }
-function formatGroupedAmt(n){ return n || n===0 ? Number(n).toLocaleString('en-US') : ''; }
-function formatAmountInput(el){
-  const cursorFromEnd = el.value.length - el.selectionEnd;
-  const digits = el.value.replace(/[^\d]/g,'');
-  el.value = digits ? Number(digits).toLocaleString('en-US') : '';
-  const newPos = Math.max(0, el.value.length - cursorFromEnd);
-  el.setSelectionRange(newPos, newPos);
+function parseAmt(idOrEl) {
+  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  const val = el ? el.value : (typeof idOrEl === 'string' ? idOrEl : '');
+  if (!val) return 0;
+  const clean = String(val).replace(/,/g, '');
+  return parseFloat(clean) || 0;
 }
 
-function formatDecimalAmountInput(el) {
-  const rawVal = el.value;
+function parseGroupedAmt(idOrEl) {
+  return parseAmt(idOrEl);
+}
+
+function formatGroupedAmt(n) {
+  if (n === null || n === undefined || n === '') return '';
+  const num = Number(n);
+  if (isNaN(num)) return '';
+  const parts = String(n).split('.');
+  const intFormatted = Number(parts[0]).toLocaleString('en-US');
+  return parts.length > 1 ? `${intFormatted}.${parts[1]}` : intFormatted;
+}
+
+function formatAmountInput(el) {
+  if (!el) return;
+  let rawVal = el.value;
   if (!rawVal) return;
 
   const cursorFromEnd = rawVal.length - (el.selectionEnd || 0);
 
-  let intStr = '';
-  let decStr = '';
+  // Handle comma as decimal separator if user typed comma and no dot exists
+  if (rawVal.includes(',') && !rawVal.includes('.')) {
+    const lastCommaIdx = rawVal.lastIndexOf(',');
+    const afterComma = rawVal.substring(lastCommaIdx + 1);
+    if (rawVal.endsWith(',') || afterComma.length !== 3 || rawVal.indexOf(',') === lastCommaIdx) {
+      rawVal = rawVal.substring(0, lastCommaIdx) + '.' + afterComma;
+    }
+  }
+
   let hasDecimal = false;
+  let intStr = rawVal;
+  let decStr = '';
 
   if (rawVal.includes('.')) {
     hasDecimal = true;
     const parts = rawVal.split('.');
     intStr = parts[0];
     decStr = parts.slice(1).join('');
-  } else if (rawVal.includes(',')) {
-    const lastCommaIdx = rawVal.lastIndexOf(',');
-    const afterComma = rawVal.substring(lastCommaIdx + 1);
-    if (rawVal.endsWith(',') || afterComma.length !== 3 || rawVal.indexOf(',') === lastCommaIdx) {
-      hasDecimal = true;
-      intStr = rawVal.substring(0, lastCommaIdx);
-      decStr = afterComma;
-    } else {
-      intStr = rawVal;
-      decStr = '';
-    }
-  } else {
-    intStr = rawVal;
-    decStr = '';
   }
 
   const cleanIntDigits = intStr.replace(/\D/g, '');
@@ -2769,8 +2793,8 @@ function formatDecimalAmountInput(el) {
 
   let formattedInt = '';
   if (cleanIntDigits) {
-    const trimmedInt = cleanIntDigits.replace(/^0+/, '') || '0';
-    formattedInt = Number(trimmedInt).toLocaleString('en-US');
+    const trimmedInt = cleanIntDigits.replace(/^0+(?=\d)/, '');
+    formattedInt = trimmedInt.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   } else if (hasDecimal) {
     formattedInt = '0';
   }
@@ -2786,6 +2810,10 @@ function formatDecimalAmountInput(el) {
     const newPos = Math.max(0, formatted.length - cursorFromEnd);
     el.setSelectionRange(newPos, newPos);
   }
+}
+
+function formatDecimalAmountInput(el) {
+  formatAmountInput(el);
 }
 
 function fUSD(idrAmount, rate){
@@ -2846,12 +2874,10 @@ function switchTab(tab, el) {
       const el=document.getElementById(activeSummary);
       if(el)el.innerHTML='<div class="chart-loading">Loading data…</div>';
       onHistLoaded(()=>{
-        fetchAccountBalances().then(()=>{ buildAccountBalances(); renderAccountBalanceCards(); });
-        renderChartTab(insightsMode);
+        fetchAccountBalances().then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
       });
     } else {
-      fetchAccountBalances().then(()=>{ buildAccountBalances(); renderAccountBalanceCards(); });
-      renderChartTab(insightsMode);
+      fetchAccountBalances().then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
     }
   }
   if(tab==='networth'){
@@ -3471,9 +3497,9 @@ function openEditInvestOverlay(row) {
   document.getElementById('inputDateTextI').textContent = isoDisp(dateIso);
   document.getElementById('inputStock').value   = row.stock   || '';
   document.getElementById('inputAccount').value = row.account || '';
-  document.getElementById('inputLot').value     = row.lot     || '';
-  document.getElementById('inputPrice').value   = row.price   || '';
-  document.getElementById('inputTotal').value   = row.totalIdr || '';
+  document.getElementById('inputLot').value     = row.lot ? formatGroupedAmt(row.lot) : '';
+  document.getElementById('inputPrice').value   = row.price ? formatGroupedAmt(row.price) : '';
+  document.getElementById('inputTotal').value   = row.totalIdr ? formatGroupedAmt(row.totalIdr) : '';
 
   document.getElementById('submitInvestBtn').textContent = 'Update Investment';
   document.getElementById('deleteInvestBtn').style.display = 'block';
@@ -3669,6 +3695,252 @@ function hideToast(){
 }
 
 // ── INSIGHTS ──────────────────────────────────────────────────
+let insightsSubPage = 'accounts';
+let ccMonitorDate = new Date();
+let ccMonitorPmFilter = 'all';
+
+function setInsightsSubPage(sub, el) {
+  insightsSubPage = sub || 'accounts';
+  const toggle = document.getElementById('insightsSubPageToggle');
+  if (toggle) {
+    toggle.querySelectorAll('.toggle-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.sub === insightsSubPage);
+    });
+  }
+
+  const subAccounts = document.getElementById('insightsSubAccounts');
+  const subExpense = document.getElementById('insightsSubExpense');
+  const subCC = document.getElementById('insightsSubCC');
+
+  if (subAccounts) subAccounts.style.display = (insightsSubPage === 'accounts' ? 'block' : 'none');
+  if (subExpense) subExpense.style.display = (insightsSubPage === 'expense' ? 'block' : 'none');
+  if (subCC) subCC.style.display = (insightsSubPage === 'cc' ? 'block' : 'none');
+
+  if (insightsSubPage === 'accounts') {
+    renderAccountBalanceCards();
+  } else if (insightsSubPage === 'expense') {
+    renderChartTab(insightsMode);
+  } else if (insightsSubPage === 'cc') {
+    renderCCMonitor();
+  }
+}
+
+function changeCCMonth(delta) {
+  ccMonitorDate.setMonth(ccMonitorDate.getMonth() + delta);
+  renderCCMonitor();
+}
+
+function onCCPmChange(val) {
+  ccMonitorPmFilter = val;
+  renderCCMonitor();
+}
+
+function renderCCMonitor() {
+  const container = document.getElementById('ccMonitorContainer');
+  if (!container) return;
+
+  const curY = ccMonitorDate.getFullYear();
+  const curM = ccMonitorDate.getMonth() + 1; // 1-12
+  const monthNameStr = new Date(curY, curM - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+  // 1. Credit Card PM detection
+  const ccPmSet = new Set();
+  (CONFIG_ITEMS || []).forEach(item => {
+    if (item.kind === 'account' && item.linkedPM) {
+      ccPmSet.add(item.linkedPM.trim());
+    }
+    if (item.kind === 'pm' && item.name && item.name.toLowerCase().includes('cc')) {
+      ccPmSet.add(item.name.trim());
+    }
+  });
+  (allPMs || []).forEach(pm => {
+    if (pm.toLowerCase().includes('cc')) {
+      ccPmSet.add(pm.trim());
+    }
+  });
+  if (ccPmSet.size === 0) ccPmSet.add('CC BCA');
+  const ccPmList = Array.from(ccPmSet);
+
+  const targetPms = (ccMonitorPmFilter === 'all')
+    ? ccPmList.map(p => p.toLowerCase())
+    : [ccMonitorPmFilter.toLowerCase()];
+
+  function isMatchPM(pmVal) {
+    if (!pmVal) return false;
+    const low = String(pmVal).toLowerCase().trim();
+    return targetPms.some(t => low.includes(t) || t.includes(low));
+  }
+
+  // 2. Fetch current month expenses
+  const currentTxns = [];
+  (HIST.opex || []).forEach(r => {
+    if (r.y === curY && r.m === (curM - 1) && (r.exp || 0) > 0 && isMatchPM(r.pm)) {
+      currentTxns.push({
+        date: `${curY}-${String(curM).padStart(2, '0')}-${String(r.d).padStart(2, '0')}`,
+        day: r.d,
+        desc: r.tx || r.notes || 'Expense',
+        category: r.cat || 'Other',
+        pm: r.pm || 'CC',
+        amount: Number(r.exp) || 0,
+        notes: r.notes || ''
+      });
+    }
+  });
+
+  const isCurrentCalMonth = (curY === new Date().getFullYear() && curM === (new Date().getMonth() + 1));
+  (txHistory || []).forEach(r => {
+    if (r.type !== 'expense' || !r.amount) return;
+    if (isCurrentCalMonth && r.synced) return;
+    if (!r.date) return;
+    const parts = r.date.split('-');
+    if (+parts[0] === curY && +parts[1] === curM && isMatchPM(r.pm)) {
+      currentTxns.push({
+        date: r.date,
+        day: parseInt(parts[2], 10),
+        desc: r.desc || r.notes || 'Expense',
+        category: r.category || 'Other',
+        pm: r.pm || 'CC',
+        amount: Number(r.amount) || 0,
+        notes: r.notes || ''
+      });
+    }
+  });
+
+  // Previous month total for comparison
+  let prevY = curY;
+  let prevM = curM - 1;
+  if (prevM < 1) { prevM = 12; prevY--; }
+  let prevTotal = 0;
+  (HIST.opex || []).forEach(r => {
+    if (r.y === prevY && r.m === (prevM - 1) && (r.exp || 0) > 0 && isMatchPM(r.pm)) {
+      prevTotal += Number(r.exp) || 0;
+    }
+  });
+
+  currentTxns.sort((a, b) => b.day - a.day || b.amount - a.amount);
+  const currentTotal = currentTxns.reduce((s, t) => s + t.amount, 0);
+  const txCount = currentTxns.length;
+  const avgTx = txCount > 0 ? Math.round(currentTotal / txCount) : 0;
+
+  let compDiffHtml = '';
+  if (prevTotal > 0) {
+    const diffPct = Math.round(((currentTotal - prevTotal) / prevTotal) * 100);
+    const sign = diffPct > 0 ? '+' : '';
+    const color = diffPct > 0 ? 'var(--red)' : 'var(--accent)';
+    compDiffHtml = `<span style="color:${color};font-weight:600">${sign}${diffPct}%</span> vs prev month`;
+  } else {
+    compDiffHtml = 'No prev month comparison';
+  }
+
+  const catMap = {};
+  currentTxns.forEach(t => {
+    catMap[t.category] = (catMap[t.category] || 0) + t.amount;
+  });
+  const catList = Object.entries(catMap)
+    .map(([cat, amt]) => ({ cat, amt, pct: currentTotal > 0 ? (amt / currentTotal * 100) : 0 }))
+    .sort((a, b) => b.amt - a.amt);
+
+  let html = `
+    <!-- Header Controls -->
+    <div class="chart-card" style="margin-bottom:12px;padding:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <button class="toggle-btn" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="changeCCMonth(-1)">‹ Prev</button>
+        <div style="font-size:15px;font-weight:700;color:var(--text)">${monthNameStr}</div>
+        <button class="toggle-btn" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="changeCCMonth(1)">Next ›</button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:12px;color:var(--text2);white-space:nowrap">Account Filter:</span>
+        <select class="form-input" style="padding:6px 10px;font-size:12px;border-radius:var(--radius-sm)" onchange="onCCPmChange(this.value)">
+          <option value="all"${ccMonitorPmFilter==='all'?' selected':''}>All Accounts</option>
+          ${ccPmList.map(pm => `<option value="${esc(pm)}"${ccMonitorPmFilter===pm?' selected':''}>${esc(pm)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <!-- Summary Stats -->
+    <div class="summary-row" style="grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div class="summary-card">
+        <div class="s-label">Total Transactions</div>
+        <div class="s-value" style="color:var(--text);font-size:19px">${fRpS(currentTotal)}</div>
+        <div class="s-sub">${compDiffHtml}</div>
+      </div>
+      <div class="summary-card">
+        <div class="s-label">Transactions</div>
+        <div class="s-value" style="color:var(--text);font-size:19px">${txCount} <span style="font-size:12px;font-weight:normal;color:var(--text2)">txns</span></div>
+        <div class="s-sub">Avg ${fRpS(avgTx)} / txn</div>
+      </div>
+    </div>
+
+    <!-- Category Breakdown -->
+    ${catList.length > 0 ? `
+      <div class="chart-card" style="margin-bottom:12px">
+        <div class="chart-card-title">Category Breakdown</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${catList.map(item => {
+            const catColor = CAT_COLORS[item.cat] || 'var(--accent)';
+            return `
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                  <span style="font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
+                    <span style="width:8px;height:8px;border-radius:50%;background:${catColor}"></span>
+                    ${esc(item.cat)}
+                  </span>
+                  <span style="color:var(--text2)">${fRpS(item.amt)} (${item.pct.toFixed(1)}%)</span>
+                </div>
+                <div style="width:100%;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden">
+                  <div style="width:${Math.min(100, Math.max(2, item.pct))}%;height:100%;background:${catColor};border-radius:3px"></div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- Transaction List -->
+    <div class="chart-card">
+      <div class="chart-card-title">Transactions (${txCount})</div>
+      ${currentTxns.length === 0 ? `
+        <div style="text-align:center;padding:24px 0;color:var(--text2);font-size:13px">
+          No transactions recorded for ${monthNameStr}
+        </div>
+      ` : `
+        <div style="display:flex;flex-direction:column;gap:0">
+          ${currentTxns.map(t => {
+            const catColor = CAT_COLORS[t.category] || 'var(--text2)';
+            return `
+              <div class="detail-item" style="padding:10px 0">
+                <div style="flex:1;min-width:0;padding-right:8px">
+                  <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                    ${esc(t.desc)}
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+                    <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg3);color:${catColor};font-weight:600">
+                      ${esc(t.category)}
+                    </span>
+                    <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg3);color:var(--text2)">
+                      ${esc(t.pm)}
+                    </span>
+                    <span style="font-size:11px;color:var(--text2)">
+                      ${monthNameStr.split(' ')[0]} ${t.day}
+                    </span>
+                  </div>
+                </div>
+                <div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap">
+                  ${fRpS(t.amount)}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `}
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
 function setIM(mode,el){
   insightsMode=mode;
   toggleActive('#insightsModeToggle .toggle-btn',el);
@@ -4417,9 +4689,23 @@ function getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBa
     const amt = Number(rawObj?.amount) || 0;
     if (amt <= 0) return;
 
-    const inAccts = activeAccounts.some(a => a.name.toLowerCase() === k.toLowerCase());
+    const kSorted = k.toLowerCase().split(/\s+/).sort().join(' ');
+
+    const inAccts = activeAccounts.some(a => {
+      const aLower = a.name.toLowerCase();
+      const aSorted = aLower.split(/\s+/).sort().join(' ');
+      return aLower === k.toLowerCase() || aSorted === kSorted;
+    });
+
     const inHoldings = holdings.some(h => isFxAccountMatch(k, null, h.stock));
-    if (!inAccts && !inHoldings) {
+
+    const isConfiguredOrArchived = CONFIG_ITEMS.some(i => {
+      const iLower = (i.name || '').toLowerCase();
+      const iSorted = iLower.split(/\s+/).sort().join(' ');
+      return iLower === k.toLowerCase() || iSorted === kSorted;
+    });
+
+    if (!inAccts && !inHoldings && !isConfiguredOrArchived) {
       const cfg = CONFIG_ITEMS.find(i => i.name.toLowerCase() === k.toLowerCase());
       const kType = getAssetTypeForItem(k, cfg?.assetType, cfg ? cfg.kind !== 'stock' : true);
       if (!groups[kType]) groups[kType] = { type: kType, cost: 0, value: 0, items: [] };
@@ -4611,15 +4897,29 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
 function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
   acctBals = acctBals || {};
   const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false);
-  const totalAccountsVal = activeAccounts.reduce((s, a) => s + (acctBals[a.name]?.amount || 0), 0);
-  cashBalance = activeAccounts.length > 0 ? totalAccountsVal : cashBalance;
 
-  const totalInvestCost  = holdings.reduce((s,h)=>s+h.costBasis, 0);
-  const totalInvestValue = holdings.reduce((s,h)=>s+h.currentValue, 0);
+  const allocGroups = getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBalances);
+
+  // Derive top metrics directly from allocGroups so Overview top cards and Holdings total sum match 100%!
+  let totalInvestCost = 0;
+  let totalInvestValue = 0;
+  let cashBalanceVal = 0;
+
+  Object.values(allocGroups).forEach(g => {
+    g.items.forEach(item => {
+      if (item.itemKind === 'stock') {
+        totalInvestCost += item.costBasis || 0;
+        totalInvestValue += item.currentValue || 0;
+      } else {
+        cashBalanceVal += item.currentValue || item.bal || 0;
+      }
+    });
+  });
+
   const hasValue = totalInvestValue > 0;
-  const totalNetWorth = (hasValue ? totalInvestValue : totalInvestCost) + cashBalance;
-  const pnl    = hasValue ? totalInvestValue - totalInvestCost : null;
-  const pnlPct = pnl !== null && totalInvestCost > 0 ? (pnl/totalInvestCost*100) : null;
+  const totalNetWorth = (hasValue ? totalInvestValue : totalInvestCost) + cashBalanceVal;
+  const pnl = hasValue ? totalInvestValue - totalInvestCost : null;
+  const pnlPct = pnl !== null && totalInvestCost > 0 ? (pnl / totalInvestCost * 100) : null;
 
   function fRpFull(n){ return 'Rp ' + Math.round(n).toLocaleString('id-ID'); }
 
@@ -4653,8 +4953,8 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
       </div>
       <div class="chart-card">
         <div class="chart-card-title" style="margin-bottom:4px;font-size:9px">Cash & Accounts</div>
-        <div class="val-idr-sm" style="margin-top:3px;font-size:14px;font-weight:600">${fRpS(Math.round(cashBalance))}</div>
-        <div style="font-size:10px;color:var(--text2)">${fUSD(cashBalance,usdRate)}</div>
+        <div class="val-idr-sm" style="margin-top:3px;font-size:14px;font-weight:600">${fRpS(Math.round(cashBalanceVal))}</div>
+        <div style="font-size:10px;color:var(--text2)">${fUSD(cashBalanceVal,usdRate)}</div>
       </div>
       <div class="chart-card" style="background:var(--blue-dim);border-color:var(--blue)">
         <div class="chart-card-title" style="margin-bottom:4px;font-size:9px;color:var(--blue)">FX Rate</div>
@@ -4662,8 +4962,6 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
         <div style="font-size:12px;font-weight:500;color:var(--blue)">= Rp ${Math.round(usdRate).toLocaleString('id-ID')}</div>
       </div>
     </div>`;
-
-  const allocGroups = getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBalances);
 
   const grandTotal = Object.values(allocGroups).reduce((s, g) => s + (g.value > 0 ? g.value : g.cost), 0);
   const sortedTypes = Object.entries(allocGroups).sort((a, b) => {
@@ -6651,7 +6949,7 @@ function openGoalsOverlay(mode, goalId) {
   const endDate = goal ? (goal.endDate || '') : '';
   document.getElementById('goalEndDateRaw').value = endDate;
   document.getElementById('goalEndDateText').textContent = endDate ? isoDisp(endDate) : 'Select date';
-  document.getElementById('goalTargetAmount').value = goal ? goal.targetAmount : '';
+  document.getElementById('goalTargetAmount').value = goal ? formatGroupedAmt(goal.targetAmount) : '';
 
   const selectedSources = goal ? (goal.sources || []) : [];
   const assets = getGoalAssetList();
@@ -6679,7 +6977,7 @@ async function saveGoal() {
   const name = document.getElementById('goalName').value.trim();
   const startDate = document.getElementById('goalStartDateRaw').value;
   const endDate = document.getElementById('goalEndDateRaw').value;
-  const targetAmount = parseInt(document.getElementById('goalTargetAmount').value) || 0;
+  const targetAmount = parseAmt('goalTargetAmount');
   const sources = Array.from(document.querySelectorAll('#goalSourceFundList input[type=checkbox]:checked')).map(cb => cb.value);
   if (!name || !targetAmount) return;
   const saveBtn = document.querySelector('#goalsOverlay .submit-btn');
@@ -7340,7 +7638,7 @@ function openRecurringEdit(id) {
   _applyRecurringEditType(r.type);
   document.getElementById('recurringEditTx').value     = r.tx;
   document.getElementById('recurringEditCat').value    = r.cat;
-  document.getElementById('recurringEditAmount').value = r.amount;
+  document.getElementById('recurringEditAmount').value = formatGroupedAmt(r.amount);
   document.getElementById('recurringEditPm').value     = r.pm;
   document.getElementById('recurringEditNotes').value  = r.notes || '';
   document.getElementById('recurringEditDay').value    = r.dayOfMonth;

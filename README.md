@@ -43,6 +43,7 @@ signed-in user's own short-lived OAuth token.
   - Fixed account asset type resolution so items like `Pluang Timo USD` are mapped directly to configured asset types (`Forex`) or inferred from currency/name patterns.
   - Implemented smart FX deduplication (`isFxAccountMatch`) preventing duplicate account/holding entries for foreign currency accounts (`CIMB CHF`, `USD CIMB`) while preserving rich cost basis and lot size details.
   - Standardized theme colors and badge styling via `getTypeColor()` and `getHoldingTheme()` across both views.
+  - Added live Market Price display from Google Sheets `Stock Prices` across US Stocks, Forex, and Reksa Dana with dual-currency equivalents.
 
 ## How it works
 

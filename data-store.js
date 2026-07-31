@@ -39,7 +39,7 @@ const DataStore = (() => {
     ...['USDIDR CIMB']
       .map((name, i) => ({ kind: 'stock', name, color: '', ccy: '', assetType: STOCK_TYPE_DEFAULTS[name] || '', archived: false, sortOrder: i })),
     ...['IDR CIMB','USD CIMB','IDR BCA','IDR Maybank']
-      .map((name, i) => ({ kind: 'account', name, color: '', ccy: ACCOUNT_CCY_DEFAULTS[name] || '', assetType: '', archived: false, sortOrder: i })),
+      .map((name, i) => ({ kind: 'account', name, color: '', ccy: ACCOUNT_CCY_DEFAULTS[name] || '', assetType: '', showOnInsights: true, archived: false, sortOrder: i })),
   ];
 
   let spreadsheetId = localStorage.getItem(LS_SS_ID) || null;
@@ -47,30 +47,85 @@ const DataStore = (() => {
   let investGid = localStorage.getItem(LS_INVEST_GID) ? Number(localStorage.getItem(LS_INVEST_GID)) : null;
 
   // ── BOOTSTRAP ────────────────────────────────────────────────
-  // Finds a "Nota Data" spreadsheet this app already created for the signed-in
-  // user, if one exists — drive.file scope lets the app see files it created
-  // in a *previous* session even after localStorage (which is all that used to
-  // be checked here) gets cleared, e.g. iOS Safari/PWA evicting site storage.
-  // Without this, every localStorage loss silently created a fresh duplicate.
+  // Finds a spreadsheet in Google Drive for the signed-in user that contains Nota data.
+  // Checks all accessible spreadsheets and selects the one with the most transactions in Opex.
   async function findExistingSpreadsheet() {
-    const res = await SheetsClient.findFiles(
-      "name='Nota Data' and trashed=false and mimeType='application/vnd.google-apps.spreadsheet'"
-    );
-    const files = (res.files || []).filter(f => !f.trashed);
-    if (!files.length) return null;
-    files.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
-    return files[0]; // oldest = the original, in case duplicates already exist
+    try {
+      const res = await SheetsClient.findFiles(
+        "trashed=false and mimeType='application/vnd.google-apps.spreadsheet'"
+      );
+      const files = (res.files || []).filter(f => !f.trashed);
+      if (!files.length) return null;
+
+      let bestFile = null;
+      let maxOpexRows = -1;
+
+      for (const file of files) {
+        try {
+          const meta = await SheetsClient.getSpreadsheetMeta(file.id);
+          const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
+          if (opexSheet) {
+            const vals = await SheetsClient.getValues(file.id, 'Opex!A2:A100');
+            const dataRows = (vals.values || []).filter(r => r && r[0] && String(r[0]).trim() !== '');
+            if (dataRows.length > maxOpexRows) {
+              maxOpexRows = dataRows.length;
+              bestFile = file;
+            }
+          }
+        } catch (e) {
+          console.warn('[findExistingSpreadsheet] Error inspecting file', file.id, e);
+        }
+      }
+
+      if (bestFile && maxOpexRows > 0) return bestFile;
+
+      const notaDataFiles = files.filter(f => f.name === 'Nota Data');
+      if (notaDataFiles.length) {
+        notaDataFiles.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
+        return notaDataFiles[0];
+      }
+
+      files.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
+      return files[0];
+    } catch (e) {
+      console.warn('[findExistingSpreadsheet] search failed', e);
+      return null;
+    }
   }
 
   async function bootstrap() {
     if (spreadsheetId) {
-      // Already set up on this browser in a prior session — still worth a one-time
-      // check for the sheet-split migration, since that shipped after many users
-      // already had spreadsheetId cached (which used to skip this whole function).
+      // If cached spreadsheet has 0 data rows in Opex, check if another sheet has data
+      try {
+        const vals = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:A10');
+        const dataRows = (vals.values || []).filter(r => r && r[0] && String(r[0]).trim() !== '');
+        if (dataRows.length === 0) {
+          const better = await findExistingSpreadsheet();
+          if (better && better.id !== spreadsheetId) {
+            console.log('[bootstrap] Switching from empty cached sheet to sheet with data:', better.id);
+            spreadsheetId = better.id;
+            localStorage.setItem(LS_SS_ID, spreadsheetId);
+            const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+            const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
+            const investSheet = (meta.sheets || []).find(s => s.properties.title === 'Invest');
+            opexGid = opexSheet ? opexSheet.properties.sheetId : null;
+            investGid = investSheet ? investSheet.properties.sheetId : null;
+            if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
+            if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
+          }
+        }
+      } catch (e) {
+        console.warn('[bootstrap] Error checking cached spreadsheet:', e);
+      }
+
       if (!localStorage.getItem(LS_SPLIT_MIGRATED)) {
-        const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
-        await migrateToSplitSheets(meta);
-        localStorage.setItem(LS_SPLIT_MIGRATED, '1');
+        try {
+          const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+          await migrateToSplitSheets(meta);
+          localStorage.setItem(LS_SPLIT_MIGRATED, '1');
+        } catch (e) {
+          console.warn('[bootstrap] Migration error:', e);
+        }
       }
       return;
     }
@@ -128,15 +183,16 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
       'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
     ]]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:J1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate',
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:K1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights',
     ]]);
     const configRows = CONFIG_DEFAULTS.map(it => [
       it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
       (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
       String(it.balanceDate || '').slice(0, 10),
+      it.showOnInsights === false ? 'FALSE' : 'TRUE',
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
     await SheetsClient.updateValues(spreadsheetId, `${BALANCES_SHEET}!A1:D1`, [[
       'Account', 'Date', 'Amount', 'TxID',
     ]]);
@@ -234,22 +290,92 @@ const DataStore = (() => {
     if (!spreadsheetId) throw new Error('Spreadsheet not initialised — sign in first');
   }
 
-  // ── SHARED HELPERS (ported from appsscript_v40.js) ───────────
+  // ── SHARED HELPERS ───────────────────────────────────────────────
   function isDeletedFlag(v) { return String(v).trim().toLowerCase() === 'deleted'; }
 
-  function normalizeMonthKey(val) {
-    const s = String(val).trim();
-    const old = s.match(/^([A-Za-z]{3})\s+(\d{4})$/);
-    if (old) {
-      const idx = MONTHS.findIndex(mo => mo.toLowerCase() === old[1].toLowerCase());
-      if (idx >= 0) return (idx + 1) + '/1/' + old[2];
-    }
-    return s;
-  }
+  function parseDateInfo(dateVal, monthVal) {
+    const dStr = String(dateVal || '').trim();
+    const mStr = String(monthVal || '').trim();
 
-  function parseDayFromCell(v) {
-    const m = String(v).match(/^(\d+)/);
-    return m ? parseInt(m[1]) : 0;
+    let year = null, month = null, day = null;
+
+    if (dStr) {
+      // ISO: "2026-07-25" or "2026/07/25"
+      let match = dStr.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (match) {
+        year = parseInt(match[1], 10);
+        month = parseInt(match[2], 10);
+        day = parseInt(match[3], 10);
+      } else {
+        // Textual: "25 Jul 26", "25 Jul 2026", "25 July 2026", "25-Jul-2026"
+        match = dStr.match(/^(\d{1,2})[\s\/-]+([A-Za-z]{3,9})[\s\/-]+(\d{2,4})/);
+        if (match) {
+          day = parseInt(match[1], 10);
+          const monStr = match[2].slice(0, 3).toLowerCase();
+          const mIdx = MONTHS.findIndex(mo => mo.toLowerCase() === monStr);
+          if (mIdx >= 0) month = mIdx + 1;
+          const yRaw = match[3];
+          year = yRaw.length === 2 ? parseInt('20' + yRaw, 10) : parseInt(yRaw, 10);
+        } else {
+          // Numeric: "25/07/2026", "07/25/2026", "25.07.2026"
+          match = dStr.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);
+          if (match) {
+            const p1 = parseInt(match[1], 10);
+            const p2 = parseInt(match[2], 10);
+            const yRaw = match[3];
+            year = yRaw.length === 2 ? parseInt('20' + yRaw, 10) : parseInt(yRaw, 10);
+            if (p1 > 12) {
+              day = p1;
+              month = p2;
+            } else if (p2 > 12) {
+              month = p1;
+              day = p2;
+            } else {
+              day = p1;
+              month = p2;
+            }
+          } else {
+            // Day number only: "25"
+            match = dStr.match(/^(\d{1,2})$/);
+            if (match) {
+              day = parseInt(match[1], 10);
+            }
+          }
+        }
+      }
+    }
+
+    if ((!month || !year) && mStr) {
+      let match = mStr.match(/^([A-Za-z]{3,9})[\s\/-]+(\d{2,4})/);
+      if (match) {
+        const monStr = match[1].slice(0, 3).toLowerCase();
+        const mIdx = MONTHS.findIndex(mo => mo.toLowerCase() === monStr);
+        if (mIdx >= 0) month = mIdx + 1;
+        const yRaw = match[2];
+        year = yRaw.length === 2 ? parseInt('20' + yRaw, 10) : parseInt(yRaw, 10);
+      } else {
+        match = mStr.match(/^(\d{4})[-/](\d{1,2})/);
+        if (match) {
+          year = parseInt(match[1], 10);
+          month = parseInt(match[2], 10);
+        } else {
+          match = mStr.match(/^(\d{1,2})[-/](\d{1,2})?[-/]?(\d{2,4})/);
+          if (match) {
+            month = parseInt(match[1], 10);
+            const yRaw = match[3] || match[2];
+            if (yRaw) {
+              year = yRaw.length === 2 ? parseInt('20' + yRaw, 10) : parseInt(yRaw, 10);
+            }
+          }
+        }
+      }
+    }
+
+    if (!day || !month || !year || month < 1 || month > 12 || day < 1 || day > 31 || year < 2000 || year > 2100) {
+      return null;
+    }
+
+    return { year, month, day };
   }
 
   function formatDateStr(dateInput) {
@@ -398,14 +524,15 @@ const DataStore = (() => {
   async function handleGetMonth(y, m) {
     const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:K');
     const data = res.values || [];
-    const targetMk = m + '/1/' + y;
+    const targetY = Number(y);
+    const targetM = Number(m); // 1-12
     const rows = [];
     data.forEach((row, idx) => {
-      if (normalizeMonthKey(row[1]) !== targetMk) return;
       if (isDeletedFlag(row[8])) return;
-      const day = parseDayFromCell(row[0]);
-      if (!day) return;
-      const r = { d: day, cat: String(row[2] || '').trim(), tx: String(row[3] || '').trim(), pm: String(row[4] || '').trim(), rowIndex: idx + 2 };
+      const parsed = parseDateInfo(row[0], row[1]);
+      if (!parsed) return;
+      if (parsed.year !== targetY || parsed.month !== targetM) return;
+      const r = { d: parsed.day, cat: String(row[2] || '').trim(), tx: String(row[3] || '').trim(), pm: String(row[4] || '').trim(), rowIndex: idx + 2 };
       const inc = Number(row[5]) || 0, exp = Number(row[6]) || 0, notes = String(row[7] || '').trim();
       if (inc) r.inc = inc;
       if (exp) r.exp = exp;
@@ -431,22 +558,17 @@ const DataStore = (() => {
 
   // Returns every non-deleted Opex row across all months, shaped to match HIST.opex
   // ({y, m (0-indexed), d, mk, cat, tx, pm, inc?, exp?, notes?, future?, id?, rowIndex}).
-  // Nota Public has no data.json bulk-history snapshot (unlike the original Nota app),
-  // so the frontend calls this once at startup to populate full history directly from
-  // the Sheet instead of relying on a static file that doesn't exist here.
   async function handleGetAllOpex() {
     const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:K');
     const data = res.values || [];
     const rows = [];
     data.forEach((row, idx) => {
       if (isDeletedFlag(row[8])) return;
-      const day = parseDayFromCell(row[0]);
-      if (!day) return;
-      const mk = normalizeMonthKey(row[1]); // "M/1/YYYY"
-      const mm = mk.match(/^(\d{1,2})\/1\/(\d{4})$/);
-      if (!mm) return;
-      const mIdx = Number(mm[1]) - 1;
-      const y = Number(mm[2]);
+      const parsed = parseDateInfo(row[0], row[1]);
+      if (!parsed) return;
+      const mIdx = parsed.month - 1; // 0-indexed month
+      const y = parsed.year;
+      const day = parsed.day;
       const r = {
         y, m: mIdx, d: day, mk: `${MONTHS[mIdx]} ${y}`,
         cat: String(row[2] || '').trim(), tx: String(row[3] || '').trim(), pm: String(row[4] || '').trim(),
@@ -730,14 +852,27 @@ const DataStore = (() => {
   // ── CONFIG (Categories / PMs / Assets / Accounts — "Config" tab) ──
   async function ensureConfigSheetExists() {
     const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
-    const exists = (meta.sheets || []).some(s => s.properties.title === CONFIG_SHEET);
-    if (!exists) {
+    const configSheet = (meta.sheets || []).find(s => s.properties.title === CONFIG_SHEET);
+    if (!configSheet) {
       await SheetsClient.batchUpdate(spreadsheetId, [{ addSheet: { properties: { title: CONFIG_SHEET } } }]);
+    } else {
+      const colCount = configSheet.properties.gridProperties?.columnCount || 0;
+      if (colCount < 11) {
+        await SheetsClient.batchUpdate(spreadsheetId, [{
+          updateSheetProperties: {
+            properties: {
+              sheetId: configSheet.properties.sheetId,
+              gridProperties: { columnCount: 15 }
+            },
+            fields: 'gridProperties.columnCount'
+          }
+        }]);
+      }
     }
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:J1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate',
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:K1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights',
     ]]);
-    return !exists;
+    return !configSheet;
   }
 
   async function handleGetConfig() {
@@ -747,11 +882,12 @@ const DataStore = (() => {
         it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
         (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
         String(it.balanceDate || '').slice(0, 10),
+        it.showOnInsights === false ? 'FALSE' : 'TRUE',
       ]);
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K${CONFIG_DATA_ROW + rows.length - 1}`, rows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
-    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K`);
     const rows = res.values || [];
     if (rows.length === 0) {
       // Header exists but no data rows — seed now.
@@ -759,8 +895,9 @@ const DataStore = (() => {
         it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
         (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
         String(it.balanceDate || '').slice(0, 10),
+        it.showOnInsights === false ? 'FALSE' : 'TRUE',
       ]);
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
     const items = rows
@@ -782,6 +919,7 @@ const DataStore = (() => {
           linkedPM: String(r[7] || '').trim(),
           balance: balVal,
           balanceDate: String(r[9] || '').trim(),
+          showOnInsights: (r[10] !== undefined && r[10] !== null && String(r[10]).trim() !== '') ? (String(r[10]).trim().toUpperCase() !== 'FALSE' && r[10] !== false) : true,
         };
       })
       .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -793,7 +931,7 @@ const DataStore = (() => {
     if (action !== 'saveAll') return { status: 'error', message: 'Unknown action' };
     if (!Array.isArray(items)) return { status: 'error', message: 'items must be an array' };
     await ensureConfigSheetExists();
-    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J`);
+    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K`);
     if (items.length === 0) return { status: 'ok', count: 0 };
     const rows = items.map((it, idx) => [
       String(it.kind || '').slice(0, 20),
@@ -806,8 +944,9 @@ const DataStore = (() => {
       String(it.linkedPM || '').slice(0, 50),
       (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
       String(it.balanceDate || '').slice(0, 10),
+      it.showOnInsights === false ? 'FALSE' : 'TRUE',
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K${CONFIG_DATA_ROW + rows.length - 1}`, rows);
     return { status: 'ok', count: rows.length };
   }
 
@@ -840,30 +979,31 @@ const DataStore = (() => {
       String(txId || '').slice(0, 50),
     ]]);
 
-    // Update Column I & J in Config sheet for matching account
+    // Update Column I, J & K in Config sheet for matching account
     try {
       await ensureConfigSheetExists();
-      const configRes = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:J`);
+      const configRes = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K`);
       const configRows = configRes.values || [];
       let found = false;
       for (let i = 0; i < configRows.length; i++) {
         const row = configRows[i];
         if (String(row[0] || '').trim() === 'account' && String(row[1] || '').trim().toLowerCase() === String(account).trim().toLowerCase()) {
-          while (row.length < 10) row.push('');
+          while (row.length < 11) row.push('');
           row[8] = Number(amount) || 0;
           row[9] = String(date).slice(0, 10);
+          if (row[10] === '' || row[10] === undefined) row[10] = 'TRUE';
           const rowNum = CONFIG_DATA_ROW + i;
-          await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${rowNum}:J${rowNum}`, [row]);
+          await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${rowNum}:K${rowNum}`, [row]);
           found = true;
           break;
         }
       }
       if (!found) {
-        const newRow = ['account', String(account).trim(), '', '', '', 'FALSE', configRows.length, '', Number(amount) || 0, String(date).slice(0, 10)];
-        await SheetsClient.appendValues(spreadsheetId, `${CONFIG_SHEET}!A:J`, [newRow]);
+        const newRow = ['account', String(account).trim(), '', '', '', 'FALSE', configRows.length, '', Number(amount) || 0, String(date).slice(0, 10), 'TRUE'];
+        await SheetsClient.appendValues(spreadsheetId, `${CONFIG_SHEET}!A:K`, [newRow]);
       }
     } catch (e) {
-      console.warn('[handleSaveBalance] Could not update Config sheet columns I/J:', e);
+      console.warn('[handleSaveBalance] Could not update Config sheet columns I/J/K:', e);
     }
 
     return { status: 'ok' };
@@ -899,7 +1039,52 @@ const DataStore = (() => {
     return { status: 'error', message: 'Unknown type' };
   }
 
+  async function listAvailableSpreadsheets() {
+    const res = await SheetsClient.findFiles(
+      "trashed=false and mimeType='application/vnd.google-apps.spreadsheet'"
+    );
+    const files = (res.files || []).filter(f => !f.trashed);
+    const result = [];
+    for (const f of files) {
+      let opexCount = 0;
+      let investCount = 0;
+      try {
+        const meta = await SheetsClient.getSpreadsheetMeta(f.id);
+        const hasOpex = (meta.sheets || []).some(s => s.properties.title === 'Opex');
+        if (hasOpex) {
+          const [opexRes, investRes] = await Promise.all([
+            SheetsClient.getValues(f.id, 'Opex!A2:A'),
+            SheetsClient.getValues(f.id, 'Invest!A2:A'),
+          ]);
+          opexCount = (opexRes.values || []).filter(r => r && r[0]).length;
+          investCount = (investRes.values || []).filter(r => r && r[0]).length;
+        }
+      } catch (e) {
+        console.warn('Error checking file in listAvailableSpreadsheets', f.id, e);
+      }
+      result.push({ id: f.id, name: f.name, opexCount, investCount, createdTime: f.createdTime, isCurrent: f.id === spreadsheetId });
+    }
+    return result;
+  }
+
+  async function setSpreadsheetId(newId) {
+    if (!newId) return;
+    spreadsheetId = newId;
+    localStorage.setItem(LS_SS_ID, spreadsheetId);
+    try {
+      const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+      const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
+      const investSheet = (meta.sheets || []).find(s => s.properties.title === 'Invest');
+      opexGid = opexSheet ? opexSheet.properties.sheetId : null;
+      investGid = investSheet ? investSheet.properties.sheetId : null;
+      if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
+      if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
+    } catch (e) {
+      console.warn('Error fetching meta for new spreadsheetId', e);
+    }
+  }
+
   function getSpreadsheetId() { return spreadsheetId; }
 
-  return { bootstrap, handleRequest, getSpreadsheetId, installLivePriceFormulas };
+  return { bootstrap, handleRequest, getSpreadsheetId, installLivePriceFormulas, listAvailableSpreadsheets, setSpreadsheetId };
 })();

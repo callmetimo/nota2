@@ -938,7 +938,7 @@ const DataStore = (() => {
       String(it.name || '').slice(0, 100),
       String(it.color || '').slice(0, 20),
       String(it.ccy || '').slice(0, 10),
-      String(it.assetType || '').slice(0, 20),
+      String(it.assetType || '').slice(0, 50),
       it.archived ? 'TRUE' : 'FALSE',
       Number.isFinite(it.sortOrder) ? it.sortOrder : idx,
       String(it.linkedPM || '').slice(0, 50),

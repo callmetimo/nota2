@@ -982,12 +982,17 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       </div>
       <div class="form-group" id="configItemAssetTypeGroup" style="display:none">
         <label class="form-label">Asset Type</label>
-        <select class="form-input" id="configItemAssetType">
-          <option value="Reksa Dana">Reksa Dana</option>
-          <option value="Forex">Forex</option>
-          <option value="US Stock">US Stock</option>
-          <option value="JHT">JHT</option>
-        </select>
+        <div style="display:flex;gap:8px">
+          <select class="form-input" id="configItemAssetType" style="flex:1" onchange="_onConfigAssetTypeChange()">
+            <option value="Cash">Cash</option>
+            <option value="Reksa Dana">Reksa Dana</option>
+            <option value="Forex">Forex</option>
+            <option value="US Stock">US Stock</option>
+            <option value="JHT">JHT</option>
+            <option value="CUSTOM">Custom...</option>
+          </select>
+          <input type="text" class="form-input" id="configItemAssetTypeCustom" placeholder="e.g. Deposit, Gold" style="flex:1;display:none" maxlength="30">
+        </div>
       </div>
       <div class="form-group" id="configItemCcyGroup" style="display:none">
         <label class="form-label">Currency</label>
@@ -1733,13 +1738,14 @@ function renderSettingsLists() {
   const rowHtml = it => {
     let metaStr = '';
     let accountCheckHtml = '';
-    if (kind === 'stock') metaStr = it.assetType || '';
+    if (kind === 'stock') metaStr = it.assetType || 'US Stock';
     else if (kind === 'account') {
       const ccyCode = it.ccy || 'IDR';
+      const typeStr = it.assetType || 'Cash';
       if (it.balance != null && it.balanceDate && !isNaN(Number(it.balance))) {
         const formattedBal = Number(it.balance).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-        metaStr = `${ccyCode} ${formattedBal} (${it.balanceDate})`;
-      } else metaStr = ccyCode;
+        metaStr = `${typeStr} · ${ccyCode} ${formattedBal} (${it.balanceDate})`;
+      } else metaStr = `${typeStr} · ${ccyCode}`;
 
       if (!it.archived) {
         const isChecked = it.showOnInsights !== false;
@@ -1789,7 +1795,7 @@ async function toggleAccountShowOnInsights(accountName, checked) {
 
 function _configFieldsForKind(kind) {
   document.getElementById('configItemColorGroup').style.display = kind === 'category' ? 'block' : 'none';
-  document.getElementById('configItemAssetTypeGroup').style.display = kind === 'stock' ? 'block' : 'none';
+  document.getElementById('configItemAssetTypeGroup').style.display = (kind === 'stock' || kind === 'account') ? 'block' : 'none';
   document.getElementById('configItemCcyGroup').style.display = kind === 'account' ? 'block' : 'none';
   document.getElementById('configItemLinkedPMGroup').style.display = kind === 'account' ? 'block' : 'none';
   if (document.getElementById('configItemBalanceGroup')) document.getElementById('configItemBalanceGroup').style.display = kind === 'account' ? 'block' : 'none';
@@ -1808,6 +1814,17 @@ function _onConfigCcyChange() {
   }
 }
 
+function _onConfigAssetTypeChange() {
+  const sel = document.getElementById('configItemAssetType').value;
+  const customEl = document.getElementById('configItemAssetTypeCustom');
+  if (sel === 'CUSTOM') {
+    customEl.style.display = 'block';
+    customEl.focus();
+  } else {
+    customEl.style.display = 'none';
+  }
+}
+
 function openConfigItemOverlay(kind, name) {
   const item = name ? CONFIG_ITEMS.find(i => i.kind === kind && i.name === name) : null;
   document.getElementById('configItemKind').value = kind;
@@ -1815,7 +1832,20 @@ function openConfigItemOverlay(kind, name) {
   document.getElementById('configItemOverlayTitle').textContent = item ? `Edit ${CONFIG_KIND_LABELS[kind].replace(/s$/, '')}` : `New ${CONFIG_KIND_LABELS[kind].replace(/s$/, '')}`;
   document.getElementById('configItemName').value = item ? item.name : '';
   document.getElementById('configItemColor').value = (item && item.color) || '#c8f060';
-  document.getElementById('configItemAssetType').value = (item && item.assetType) || 'Reksa Dana';
+
+  const typeVal = item && item.assetType ? item.assetType : (kind === 'account' ? 'Cash' : 'US Stock');
+  const typeSel = document.getElementById('configItemAssetType');
+  const typeCustom = document.getElementById('configItemAssetTypeCustom');
+  const typePresets = ['Cash', 'Reksa Dana', 'Forex', 'US Stock', 'JHT'];
+  if (typePresets.includes(typeVal)) {
+    typeSel.value = typeVal;
+    typeCustom.style.display = 'none';
+    typeCustom.value = '';
+  } else {
+    typeSel.value = 'CUSTOM';
+    typeCustom.style.display = 'block';
+    typeCustom.value = typeVal;
+  }
 
   const ccyVal = (item && item.ccy) ? item.ccy.toUpperCase() : 'IDR';
   const ccySel = document.getElementById('configItemCcy');
@@ -1875,7 +1905,16 @@ async function saveConfigItem() {
 
   const existing = origName ? CONFIG_ITEMS.find(i => i.kind === kind && i.name === origName) : null;
   const color = kind === 'category' ? document.getElementById('configItemColor').value : '';
-  const assetType = kind === 'stock' ? document.getElementById('configItemAssetType').value : '';
+  
+  let assetType = '';
+  if (kind === 'stock' || kind === 'account') {
+    const selVal = document.getElementById('configItemAssetType').value;
+    if (selVal === 'CUSTOM') {
+      assetType = (document.getElementById('configItemAssetTypeCustom').value || '').trim() || (kind === 'account' ? 'Cash' : 'US Stock');
+    } else {
+      assetType = selVal;
+    }
+  }
 
   let ccy = '';
   if (kind === 'account') {
@@ -1903,6 +1942,10 @@ async function saveConfigItem() {
   } else {
     const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === kind).map(i => i.sortOrder));
     CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, balance, balanceDate, showOnInsights, archived: false, sortOrder: maxOrder + 1 });
+  }
+
+  if (kind === 'stock' && assetType) {
+    STOCK_TYPE[name] = assetType;
   }
 
   if (kind === 'account' && balance !== null && balanceDate) {
@@ -4170,29 +4213,36 @@ async function renderNetWorth(){
 
 function renderHoldings(holdings, usdRate, chfRate, acctBals){
   acctBals = acctBals || {};
-  const groups = {
-    'Reksa Dana': holdings.filter(h=>h.type==='Reksa Dana'),
-    'Forex':      holdings.filter(h=>h.type==='Forex'),
-    'US Stock':   holdings.filter(h=>h.type==='US Stock'),
-    'JHT':        holdings.filter(h=>h.type==='JHT'),
+  const DYNAMIC_TYPE_COLORS = {
+    'US Stock': { color: 'var(--accent)', bg: 'var(--accent-dim)' },
+    'Cash': { color: 'var(--text2)', bg: 'var(--bg3)' },
+    'Reksa Dana': { color: 'var(--green)', bg: 'var(--green-dim)' },
+    'Forex': { color: 'var(--blue)', bg: 'var(--blue-dim)' },
+    'JHT': { color: '#a855f7', bg: 'rgba(168,85,247,0.15)' }
   };
-  const colorMap = {'Reksa Dana':'var(--green)','Forex':'var(--blue)','US Stock':'var(--accent)','JHT':'#a855f7'};
-  const bgMap    = {'Reksa Dana':'var(--green-dim)','Forex':'var(--blue-dim)','US Stock':'var(--accent-dim)','JHT':'rgba(168,85,247,0.15)'};
+  function getHoldingTheme(type) {
+    if (DYNAMIC_TYPE_COLORS[type]) return DYNAMIC_TYPE_COLORS[type];
+    return { color: '#38bdf8', bg: 'rgba(56,189,248,0.15)' };
+  }
 
   let html = '';
 
-  // Cash section
-  const cashAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && acctBals[i.name] != null);
-  if (cashAccounts.length) {
-    cashAccounts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-    const totalCash = cashAccounts.reduce((s, a) => s + (acctBals[a.name]?.amount || 0), 0);
-    html += `<div class="chart-card-title" style="margin-top:6px;margin-bottom:8px">Cash</div>`;
-    cashAccounts.forEach(acct => {
+  // Accounts section
+  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && acctBals[i.name] != null);
+  if (activeAccounts.length) {
+    activeAccounts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    const totalCash = activeAccounts.reduce((s, a) => s + (acctBals[a.name]?.amount || 0), 0);
+    html += `<div class="chart-card-title" style="margin-top:6px;margin-bottom:8px">Accounts</div>`;
+    activeAccounts.forEach(acct => {
       const bal = acctBals[acct.name]?.amount || 0;
+      const typeBadge = (acct.assetType || 'Cash').trim() || 'Cash';
       html += `<div class="holding-item">
         <div class="holding-header">
           <div class="holding-name">${esc(acct.name)}</div>
-          <span class="holding-badge" style="background:var(--bg3);color:var(--text2)">${acct.ccy === 'USD' ? 'USD' : 'IDR'}</span>
+          <div style="display:flex;gap:4px;align-items:center">
+            <span class="holding-badge" style="background:var(--bg3);color:var(--text2)">${esc(typeBadge)}</span>
+            <span class="holding-badge" style="background:var(--bg3);color:var(--text2)">${acct.ccy === 'USD' ? 'USD' : 'IDR'}</span>
+          </div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px">
           <div>
@@ -4202,22 +4252,32 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
         </div>
       </div>`;
     });
-    if (cashAccounts.length > 1) {
+    if (activeAccounts.length > 1) {
       html += `<div class="holding-item" style="border-color:var(--border2);background:var(--bg3)">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div style="font-size:12px;font-weight:600;color:var(--text2)">Total Cash</div>
+          <div style="font-size:12px;font-weight:600;color:var(--text2)">Total Accounts</div>
           <div style="text-align:right">${dualValSmFull(totalCash, usdRate)}</div>
         </div>
       </div>`;
     }
   }
-  Object.entries(groups).forEach(([type, items])=>{
-    if(!items.length) return;
-    if(type==='Forex'||type==='US Stock') items.sort((a,b)=>b.currentValue-a.currentValue);
-    const color = colorMap[type], bg = bgMap[type];
-    let groupCost=0, groupValue=0;
-    html += `<div class="chart-card-title" style="margin-top:14px;margin-bottom:8px;color:${color}">${type}</div>`;
-    items.forEach(h=>{
+
+  // Dynamic grouping for investment holdings
+  const groups = {};
+  holdings.forEach(h => {
+    const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === h.stock);
+    const t = (stockConfig?.assetType || h.type || 'US Stock').trim() || 'US Stock';
+    if (!groups[t]) groups[t] = [];
+    groups[t].push(h);
+  });
+
+  Object.entries(groups).forEach(([type, items]) => {
+    if (!items.length) return;
+    if (type === 'Forex' || type === 'US Stock') items.sort((a, b) => b.currentValue - a.currentValue);
+    const theme = getHoldingTheme(type);
+    let groupCost = 0, groupValue = 0;
+    html += `<div class="chart-card-title" style="margin-top:14px;margin-bottom:8px;color:${theme.color}">${esc(type)}</div>`;
+    items.forEach(h => {
       groupCost  += h.costBasis;
       groupValue += h.currentValue;
       const hasValue = h.currentValue > 0;
@@ -4237,8 +4297,8 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
 
       html += `<div class="holding-item">
         <div class="holding-header">
-          <div class="holding-name" style="color:${color}">${h.stock}</div>
-          <span class="holding-badge" style="background:${bg};color:${color}">${lotStr}</span>
+          <div class="holding-name" style="color:${theme.color}">${esc(h.stock)}</div>
+          <span class="holding-badge" style="background:${theme.bg};color:${theme.color}">${lotStr}</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px">
           <div>
@@ -4256,21 +4316,21 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
         </div>
       </div>`;
     });
-    if(items.length > 1 || type==='US Stock'){
+    if (items.length > 1 || type === 'US Stock') {
       const gPnl    = groupValue > 0 ? groupValue - groupCost : null;
       const gPnlPct = gPnl !== null && groupCost > 0 ? (gPnl / groupCost * 100) : null;
-      html += `<div class="holding-item" style="border-color:${color};background:${bg}">
+      html += `<div class="holding-item" style="border-color:${theme.color};background:${theme.bg}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
-            <div style="font-size:12px;font-weight:600;color:${color};margin-bottom:4px">Total ${type}</div>
+            <div style="font-size:12px;font-weight:600;color:${theme.color};margin-bottom:4px">Total ${esc(type)}</div>
             <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Cost basis</div>
-            <div style="font-size:13px;font-weight:600;color:${color}">${fUSD(groupCost,usdRate)}</div>
-            <div style="font-size:13px;font-weight:600;color:${color};opacity:0.7">${fRpS(Math.round(groupCost))}</div>
+            <div style="font-size:13px;font-weight:600;color:${theme.color}">${fUSD(groupCost,usdRate)}</div>
+            <div style="font-size:13px;font-weight:600;color:${theme.color};opacity:0.7">${fRpS(Math.round(groupCost))}</div>
           </div>
           ${gPnl!==null ? `<div style="text-align:right">
             <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Est. value</div>
-            <div style="font-size:13px;font-weight:600;color:${color}">${fUSD(groupValue,usdRate)}</div>
-            <div style="font-size:13px;font-weight:600;color:${color};opacity:0.7">${fRpS(Math.round(groupValue))}</div>
+            <div style="font-size:13px;font-weight:600;color:${theme.color}">${fUSD(groupValue,usdRate)}</div>
+            <div style="font-size:13px;font-weight:600;color:${theme.color};opacity:0.7">${fRpS(Math.round(groupValue))}</div>
             ${pnlDual(gPnl, gPnlPct, usdRate, gPnl>=0?'var(--green)':'var(--red)')}
           </div>` : ''}
         </div>
@@ -4282,11 +4342,10 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
 
 function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
   acctBals = acctBals || {};
-  const acctBalsKeys = Object.keys(acctBals);
-  const displayCash = acctBalsKeys.length > 0
-    ? acctBalsKeys.reduce((s, k) => s + (acctBals[k]?.amount || 0), 0)
-    : cashBalance;
-  cashBalance = displayCash;
+  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false);
+  const totalAccountsVal = activeAccounts.reduce((s, a) => s + (acctBals[a.name]?.amount || 0), 0);
+  cashBalance = activeAccounts.length > 0 ? totalAccountsVal : cashBalance;
+
   const totalInvestCost  = holdings.reduce((s,h)=>s+h.costBasis, 0);
   const totalInvestValue = holdings.reduce((s,h)=>s+h.currentValue, 0);
   const hasValue = totalInvestValue > 0;
@@ -4325,7 +4384,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
         <div class="val-idr-sm">${fRpS(Math.round(hasValue?totalInvestValue:totalInvestCost))}</div>
       </div>
       <div class="chart-card">
-        <div class="chart-card-title" style="margin-bottom:4px;font-size:9px">Cash</div>
+        <div class="chart-card-title" style="margin-bottom:4px;font-size:9px">Cash & Accounts</div>
         <div class="val-idr-sm" style="margin-top:3px;font-size:14px;font-weight:600">${fRpS(Math.round(cashBalance))}</div>
         <div style="font-size:10px;color:var(--text2)">${fUSD(cashBalance,usdRate)}</div>
       </div>
@@ -4336,27 +4395,58 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
       </div>
     </div>`;
 
-  const byType = {'Cash': {cost: cashBalance, value: cashBalance}};
-  holdings.forEach(h=>{
-    let t = h.type;
-    if (!t || t === 'Other' || (t !== 'US Stock' && t !== 'Reksa Dana' && t !== 'Forex' && t !== 'JHT')) {
+  const byType = {};
+
+  // 1. Accumulate Account balances into their configured assetType (defaults to 'Cash')
+  activeAccounts.forEach(acct => {
+    const acctType = (acct.assetType || 'Cash').trim() || 'Cash';
+    const amt = acctBals[acct.name]?.amount || 0;
+    if (!byType[acctType]) byType[acctType] = { cost: 0, value: 0 };
+    byType[acctType].cost += amt;
+    byType[acctType].value += amt;
+  });
+
+  // 2. Accumulate Stock / Investment holdings into their configured assetType
+  holdings.forEach(h => {
+    const stockConfig = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === h.stock);
+    let t = (stockConfig?.assetType || h.type || '').trim();
+    if (!t) {
       const sUpper = (h.stock || '').toUpperCase();
       if (sUpper.includes('JHT')) t = 'JHT';
       else if (h.stock.startsWith('USDIDR') || h.stock === 'CHFIDR') t = 'Forex';
       else if (h.stock === 'Star Stable Income Fund') t = 'Reksa Dana';
       else t = 'US Stock';
     }
-    if(!byType[t]) byType[t] = {cost:0, value:0};
+    if (!byType[t]) byType[t] = { cost: 0, value: 0 };
     byType[t].cost  += h.costBasis;
     byType[t].value += h.currentValue;
   });
-  const TYPE_COLORS_HEX = {'US Stock':'#5b8ef0','Cash':'#888780','Reksa Dana':'#4ade80','Forex':'#f59e0b','JHT':'#a855f7'};
+
+  const DYNAMIC_TYPE_COLORS = {
+    'US Stock': '#5b8ef0',
+    'Cash': '#888780',
+    'Reksa Dana': '#4ade80',
+    'Forex': '#f59e0b',
+    'JHT': '#a855f7',
+    'Deposit': '#06b6d4',
+    'Gold': '#eab308',
+    'Crypto': '#ec4899',
+    'Bonds': '#14b8a6'
+  };
+  const FALLBACK_PALETTE = ['#f43f5e', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#3b82f6'];
+  function getTypeColor(type) {
+    if (DYNAMIC_TYPE_COLORS[type]) return DYNAMIC_TYPE_COLORS[type];
+    let hash = 0;
+    for (let i = 0; i < type.length; i++) hash = type.charCodeAt(i) + ((hash << 5) - hash);
+    return FALLBACK_PALETTE[Math.abs(hash) % FALLBACK_PALETTE.length];
+  }
+
   const grandTotal = Object.values(byType).reduce((s,d)=>s+d.cost, 0);
   const sortedTypes = Object.entries(byType).sort((a,b)=>b[1].cost - a[1].cost);
   const canvasId = 'nwDonutCanvas';
 
   const legendRows = sortedTypes.map(([type, data])=>{
-    const color = TYPE_COLORS_HEX[type]||'#888780';
+    const color = getTypeColor(type);
     return `<div style="display:flex;align-items:center;gap:6px">
       <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></div>
       <div>
@@ -4393,7 +4483,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
     const chartData = sortedTypes.map(([type, data]) => ({
       label: type,
       value: data.cost,
-      color: TYPE_COLORS_HEX[type] || '#888780'
+      color: getTypeColor(type)
     }));
     const total = grandTotal;
 

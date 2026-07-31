@@ -1714,8 +1714,10 @@ function renderSettingsLists() {
     if (kind === 'stock') metaStr = it.assetType || '';
     else if (kind === 'account') {
       const ccyCode = it.ccy || 'IDR';
-      if (it.balance != null && it.balanceDate) metaStr = `${ccyCode} ${fRp(it.balance)} (${it.balanceDate})`;
-      else metaStr = ccyCode;
+      if (it.balance != null && it.balanceDate && !isNaN(Number(it.balance))) {
+        const formattedBal = Number(it.balance).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+        metaStr = `${ccyCode} ${formattedBal} (${it.balanceDate})`;
+      } else metaStr = ccyCode;
     }
     return `<div class="config-row" onclick="openConfigItemOverlay('${kind}', ${jsAttr(it.name)})">
       <div class="config-row-name">
@@ -2607,42 +2609,52 @@ function formatAmountInput(el){
 function formatDecimalAmountInput(el) {
   const rawVal = el.value;
   if (!rawVal) return;
+
   const cursorFromEnd = rawVal.length - (el.selectionEnd || 0);
 
-  let cleaned = '';
-  let hasDot = false;
-  for (let i = 0; i < rawVal.length; i++) {
-    const ch = rawVal[i];
-    if (ch >= '0' && ch <= '9') {
-      cleaned += ch;
-    } else if (ch === '.' && !hasDot) {
-      cleaned += '.';
-      hasDot = true;
+  let intStr = '';
+  let decStr = '';
+  let hasDecimal = false;
+
+  if (rawVal.includes('.')) {
+    hasDecimal = true;
+    const parts = rawVal.split('.');
+    intStr = parts[0];
+    decStr = parts.slice(1).join('');
+  } else if (rawVal.includes(',')) {
+    const lastCommaIdx = rawVal.lastIndexOf(',');
+    const afterComma = rawVal.substring(lastCommaIdx + 1);
+    if (rawVal.endsWith(',') || afterComma.length !== 3 || rawVal.indexOf(',') === lastCommaIdx) {
+      hasDecimal = true;
+      intStr = rawVal.substring(0, lastCommaIdx);
+      decStr = afterComma;
+    } else {
+      intStr = rawVal;
+      decStr = '';
     }
+  } else {
+    intStr = rawVal;
+    decStr = '';
   }
 
-  const parts = cleaned.split('.');
-  let intPart = parts[0];
-  let decPart = parts.length > 1 ? parts[1] : null;
+  const cleanIntDigits = intStr.replace(/\D/g, '');
+  const cleanDecDigits = decStr.replace(/\D/g, '');
 
   let formattedInt = '';
-  if (intPart) {
-    if (/^0+$/.test(intPart)) {
-      formattedInt = '0';
-    } else {
-      const cleanInt = intPart.replace(/^0+/, '') || '0';
-      formattedInt = Number(cleanInt).toLocaleString('en-US');
-    }
-  } else if (hasDot) {
+  if (cleanIntDigits) {
+    const trimmedInt = cleanIntDigits.replace(/^0+/, '') || '0';
+    formattedInt = Number(trimmedInt).toLocaleString('en-US');
+  } else if (hasDecimal) {
     formattedInt = '0';
   }
 
   let formatted = formattedInt;
-  if (hasDot) {
-    formatted += '.' + (decPart !== null ? decPart : '');
+  if (hasDecimal) {
+    formatted += '.' + cleanDecDigits;
   }
 
   el.value = formatted;
+
   if (el.selectionEnd != null) {
     const newPos = Math.max(0, formatted.length - cursorFromEnd);
     el.setSelectionRange(newPos, newPos);

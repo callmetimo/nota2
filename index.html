@@ -1019,6 +1019,12 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <label class="form-label">Input Date / As of Date</label>
         <input type="date" class="form-input" id="configItemBalanceDate">
       </div>
+      <div class="form-group" id="configItemShowOnInsightsGroup" style="display:none;margin-top:10px">
+        <label style="padding:6px 0;cursor:pointer;display:flex;align-items:center;gap:10px">
+          <input type="checkbox" id="configItemShowOnInsightsCheckbox" checked style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
+          <span style="font-size:14px;color:var(--text);font-weight:500">Show on Insights</span>
+        </label>
+      </div>
       <button class="submit-btn expense" onclick="saveConfigItem()">Save</button>
       <button class="btn-delete" style="width:100%;margin-top:8px" id="configItemArchiveBtn" onclick="toggleArchiveCurrentConfigItem()">Delete</button>
     </div>
@@ -1593,9 +1599,9 @@ function buildAccountBalances() {
 function renderAccountBalanceCards() {
   const el = document.getElementById('accountBalanceCards');
   if (!el) return;
-  const withBal = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && accountBalances[i.name] != null);
+  const withBal = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false && accountBalances[i.name] != null);
   if (!withBal.length) {
-    el.innerHTML = `<div class="acct-bal-section"><div class="acct-bal-empty">No balances set — open <span onclick="switchTabFromMore('settings')">Settings → Accounts</span> to add one.</div></div>`;
+    el.innerHTML = `<div class="acct-bal-section"><div class="acct-bal-empty">No accounts selected — open <span onclick="switchTabFromMore('settings')">Settings → Accounts</span> to configure.</div></div>`;
     return;
   }
   const totalCash = withBal.reduce((s, a) => s + (accountBalances[a.name]?.amount || 0), 0);
@@ -1750,6 +1756,7 @@ function _configFieldsForKind(kind) {
   document.getElementById('configItemLinkedPMGroup').style.display = kind === 'account' ? 'block' : 'none';
   if (document.getElementById('configItemBalanceGroup')) document.getElementById('configItemBalanceGroup').style.display = kind === 'account' ? 'block' : 'none';
   if (document.getElementById('configItemBalanceDateGroup')) document.getElementById('configItemBalanceDateGroup').style.display = kind === 'account' ? 'block' : 'none';
+  if (document.getElementById('configItemShowOnInsightsGroup')) document.getElementById('configItemShowOnInsightsGroup').style.display = kind === 'account' ? 'block' : 'none';
 }
 
 function _onConfigCcyChange() {
@@ -1806,6 +1813,9 @@ function openConfigItemOverlay(kind, name) {
     const dateVal = (item && item.balanceDate) ? item.balanceDate : (raw ? raw.date : new Date().toISOString().slice(0, 10));
     document.getElementById('configItemBalanceDate').value = dateVal;
   }
+  if (document.getElementById('configItemShowOnInsightsCheckbox')) {
+    document.getElementById('configItemShowOnInsightsCheckbox').checked = item ? (item.showOnInsights !== false) : true;
+  }
   document.getElementById('configItemArchiveBtn').style.display = item ? 'block' : 'none';
   document.getElementById('configItemArchiveBtn').textContent = item && item.archived ? 'Restore' : 'Delete';
   _configFieldsForKind(kind);
@@ -1843,16 +1853,18 @@ async function saveConfigItem() {
   const cleanBalanceStr = balanceRaw ? String(balanceRaw).replace(/,/g, '').trim() : '';
   const balance = (cleanBalanceStr !== '' && !isNaN(Number(cleanBalanceStr))) ? Number(cleanBalanceStr) : null;
   const balanceDate = (kind === 'account' && document.getElementById('configItemBalanceDate')) ? (document.getElementById('configItemBalanceDate').value || '') : '';
+  const showOnInsights = kind === 'account' ? (document.getElementById('configItemShowOnInsightsCheckbox') ? document.getElementById('configItemShowOnInsightsCheckbox').checked : true) : true;
 
   if (existing) {
     existing.name = name; existing.color = color; existing.assetType = assetType; existing.ccy = ccy; existing.linkedPM = linkedPM;
     if (kind === 'account') {
       existing.balance = balance;
       existing.balanceDate = balanceDate;
+      existing.showOnInsights = showOnInsights;
     }
   } else {
     const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === kind).map(i => i.sortOrder));
-    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, balance, balanceDate, archived: false, sortOrder: maxOrder + 1 });
+    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, balance, balanceDate, showOnInsights, archived: false, sortOrder: maxOrder + 1 });
   }
 
   if (kind === 'account' && balance !== null && balanceDate) {

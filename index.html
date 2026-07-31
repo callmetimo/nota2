@@ -1377,11 +1377,13 @@ let accountBalances = {}; // {accountName: {amount}} after applying transaction 
 
 function syncConfigToRawAccountBalances() {
   if (!CONFIG_ITEMS || !CONFIG_ITEMS.length) return;
+  const todayStr = new Date().toISOString().slice(0, 10);
   CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).forEach(acct => {
-    if (acct.balance != null && acct.balance !== '' && acct.balanceDate) {
-      if (!rawAccountBalances[acct.name] || (acct.balanceDate >= (rawAccountBalances[acct.name].date || ''))) {
+    if (acct.balance != null && acct.balance !== '' && !isNaN(Number(acct.balance))) {
+      const bDate = acct.balanceDate || todayStr;
+      if (!rawAccountBalances[acct.name] || (bDate >= (rawAccountBalances[acct.name].date || ''))) {
         rawAccountBalances[acct.name] = {
-          date: acct.balanceDate,
+          date: bDate,
           amount: Number(acct.balance),
           txId: 'config_' + acct.name
         };
@@ -1596,14 +1598,14 @@ function buildAccountBalances() {
         return;
       }
 
-      const raw = rawAccountBalances[acct.name] || { amount: acct.balance || 0, date: acct.balanceDate || '2000-01-01' };
+      const raw = rawAccountBalances[acct.name] || { amount: acct.balance || 0, date: acct.balanceDate || new Date().toISOString().slice(0, 10) };
       const currentNative = computeAccountCurrentBalance(raw.amount, raw.date, acct);
       accountBalances[acct.name] = { amount: currentNative * rate, nativeAmount: currentNative, ccy };
       return;
     }
 
     // IDR accounts: use Config / Balances snapshot + Opex/Invest deltas
-    const raw = rawAccountBalances[acct.name] || { amount: acct.balance || 0, date: acct.balanceDate || '2000-01-01' };
+    const raw = rawAccountBalances[acct.name] || { amount: acct.balance || 0, date: acct.balanceDate || new Date().toISOString().slice(0, 10) };
     const current = computeAccountCurrentBalance(raw.amount, raw.date, acct);
     accountBalances[acct.name] = { amount: current, nativeAmount: current, ccy: 'IDR' };
   });
@@ -1948,8 +1950,9 @@ async function saveConfigItem() {
     STOCK_TYPE[name] = assetType;
   }
 
-  if (kind === 'account' && balance !== null && balanceDate) {
-    rawAccountBalances[name] = { amount: balance, date: balanceDate, txId: 'config_' + name };
+  if (kind === 'account' && balance !== null) {
+    const effectiveDate = balanceDate || new Date().toISOString().slice(0, 10);
+    rawAccountBalances[name] = { amount: balance, date: effectiveDate, txId: 'config_' + name };
   }
   syncConfigToRawAccountBalances();
   try { localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS)); } catch(e) {}
@@ -4170,8 +4173,8 @@ async function renderNetWorth(){
   const holdings = Object.keys(buyLots).map(stock=>{
     const netLot = buyLots[stock] - (sellLots[stock]||0);
     if(netLot <= 0) return null;
-    let type = STOCK_TYPE[stock]||'';
-    if (!type || type === 'Other' || (type !== 'US Stock' && type !== 'Reksa Dana' && type !== 'Forex' && type !== 'JHT')) {
+    let type = (STOCK_TYPE[stock] || '').trim();
+    if (!type || type === 'Other') {
       const sUpper = stock.toUpperCase();
       if (sUpper.includes('JHT')) type = 'JHT';
       else if (stock.startsWith('USDIDR') || stock === 'CHFIDR') type = 'Forex';
@@ -4441,17 +4444,22 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
     return FALLBACK_PALETTE[Math.abs(hash) % FALLBACK_PALETTE.length];
   }
 
-  const grandTotal = Object.values(byType).reduce((s,d)=>s+d.cost, 0);
-  const sortedTypes = Object.entries(byType).sort((a,b)=>b[1].cost - a[1].cost);
+  const grandTotal = Object.values(byType).reduce((s,d) => s + (d.value > 0 ? d.value : d.cost), 0);
+  const sortedTypes = Object.entries(byType).sort((a,b) => {
+    const valA = a[1].value > 0 ? a[1].value : a[1].cost;
+    const valB = b[1].value > 0 ? b[1].value : b[1].cost;
+    return valB - valA;
+  });
   const canvasId = 'nwDonutCanvas';
 
-  const legendRows = sortedTypes.map(([type, data])=>{
+  const legendRows = sortedTypes.map(([type, data]) => {
     const color = getTypeColor(type);
+    const amt = data.value > 0 ? data.value : data.cost;
     return `<div style="display:flex;align-items:center;gap:6px">
       <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></div>
       <div>
         <div style="font-size:11px;font-weight:600;color:var(--text);white-space:nowrap">${esc(type)}</div>
-        <div style="font-size:10px;font-weight:500;color:var(--blue);white-space:nowrap">${fUSD(data.cost,usdRate)} (${fRpS(Math.round(data.cost))})</div>
+        <div style="font-size:10px;font-weight:500;color:var(--blue);white-space:nowrap">${fUSD(amt,usdRate)} (${fRpS(Math.round(amt))})</div>
       </div>
     </div>`;
   }).join('');
@@ -4482,7 +4490,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
 
     const chartData = sortedTypes.map(([type, data]) => ({
       label: type,
-      value: data.cost,
+      value: data.value > 0 ? data.value : data.cost,
       color: getTypeColor(type)
     }));
     const total = grandTotal;

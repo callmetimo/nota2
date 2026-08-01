@@ -1050,6 +1050,13 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           <span style="font-size:14px;color:var(--text);font-weight:500">Show on Insights</span>
         </label>
       </div>
+      <div class="form-group" id="configItemCreditCardGroup" style="display:none;margin-top:10px">
+        <label style="padding:6px 0;cursor:pointer;display:flex;align-items:center;gap:10px">
+          <input type="checkbox" id="configItemCreditCardCheckbox" style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
+          <span style="font-size:14px;color:var(--text);font-weight:500">Credit card (deferred billing)</span>
+        </label>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px;padding-left:28px">Charges won't count as expenses until the bill is paid via a bank payment method.</div>
+      </div>
       <button class="submit-btn expense" onclick="saveConfigItem()">Save</button>
       <button class="btn-delete" style="width:100%;margin-top:8px" id="configItemArchiveBtn" onclick="toggleArchiveCurrentConfigItem()">Delete</button>
     </div>
@@ -1540,6 +1547,12 @@ async function fetchAccountBalances() {
   } catch(e) { /* offline — keep whatever we have */ }
 }
 
+function isCreditCardPM(pmName) {
+  if (!pmName) return false;
+  const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && i.name === pmName);
+  return !!(item && item.creditCard);
+}
+
 function getAccountMatchNames(acctOrPm) {
   const names = new Set();
   if (typeof acctOrPm === 'string') {
@@ -1795,7 +1808,13 @@ function renderSettingsLists() {
   const rowHtml = it => {
     let metaStr = '';
     let accountCheckHtml = '';
-    if (kind === 'stock') metaStr = it.assetType || 'US Stock';
+    if (kind === 'pm' && !it.archived) {
+      const isCc = !!it.creditCard;
+      accountCheckHtml = `<label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);cursor:pointer;margin-left:8px" onclick="event.stopPropagation()" title="Credit card (deferred billing)">
+        <input type="checkbox" ${isCc ? 'checked' : ''} style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer" onchange="togglePMCreditCard('${escJsAttr(it.name)}', this.checked)">
+        <span>Credit card</span>
+      </label>`;
+    } else if (kind === 'stock') metaStr = it.assetType || 'US Stock';
     else if (kind === 'account') {
       const ccyCode = it.ccy || 'IDR';
       const typeStr = it.assetType || 'Cash';
@@ -1839,6 +1858,15 @@ function renderSettingsLists() {
   container.innerHTML = toggleHtml + listHtml;
 }
 
+async function togglePMCreditCard(pmName, checked) {
+  const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && i.name === pmName);
+  if (!item) return;
+  item.creditCard = checked;
+  try { localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS)); } catch(e) {}
+  renderSettingsLists();
+  await saveConfigToServer();
+}
+
 async function toggleAccountShowOnInsights(accountName, checked) {
   const item = CONFIG_ITEMS.find(i => i.kind === 'account' && i.name === accountName);
   if (!item) return;
@@ -1858,6 +1886,7 @@ function _configFieldsForKind(kind) {
   if (document.getElementById('configItemBalanceGroup')) document.getElementById('configItemBalanceGroup').style.display = (kind === 'account' || kind === 'stock') ? 'block' : 'none';
   if (document.getElementById('configItemBalanceDateGroup')) document.getElementById('configItemBalanceDateGroup').style.display = (kind === 'account' || kind === 'stock') ? 'block' : 'none';
   if (document.getElementById('configItemShowOnInsightsGroup')) document.getElementById('configItemShowOnInsightsGroup').style.display = kind === 'account' ? 'block' : 'none';
+  if (document.getElementById('configItemCreditCardGroup')) document.getElementById('configItemCreditCardGroup').style.display = kind === 'pm' ? 'block' : 'none';
 }
 
 function _onConfigCcyChange() {
@@ -1934,6 +1963,9 @@ function openConfigItemOverlay(kind, name) {
   if (document.getElementById('configItemShowOnInsightsCheckbox')) {
     document.getElementById('configItemShowOnInsightsCheckbox').checked = item ? (item.showOnInsights !== false) : true;
   }
+  if (document.getElementById('configItemCreditCardCheckbox')) {
+    document.getElementById('configItemCreditCardCheckbox').checked = !!(item && item.creditCard);
+  }
   document.getElementById('configItemArchiveBtn').style.display = item ? 'block' : 'none';
   document.getElementById('configItemArchiveBtn').textContent = item && item.archived ? 'Restore' : 'Delete';
   _configFieldsForKind(kind);
@@ -1984,6 +2016,7 @@ async function saveConfigItem() {
   }
   const balanceDate = (document.getElementById('configItemBalanceDate')) ? (document.getElementById('configItemBalanceDate').value || '') : '';
   const showOnInsights = kind === 'account' ? (document.getElementById('configItemShowOnInsightsCheckbox') ? document.getElementById('configItemShowOnInsightsCheckbox').checked : true) : true;
+  const creditCard = kind === 'pm' ? (document.getElementById('configItemCreditCardCheckbox') ? document.getElementById('configItemCreditCardCheckbox').checked : false) : false;
 
   if (existing) {
     existing.name = name; existing.color = color; existing.assetType = assetType; existing.ccy = ccy; existing.linkedPM = linkedPM;
@@ -1992,9 +2025,10 @@ async function saveConfigItem() {
       existing.balanceDate = balanceDate;
       if (kind === 'account') existing.showOnInsights = showOnInsights;
     }
+    if (kind === 'pm') existing.creditCard = creditCard;
   } else {
     const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === kind).map(i => i.sortOrder));
-    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, balance, balanceDate, showOnInsights, archived: false, sortOrder: maxOrder + 1 });
+    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, balance, balanceDate, showOnInsights, creditCard, archived: false, sortOrder: maxOrder + 1 });
   }
 
   if (kind === 'stock' && assetType) {
@@ -2452,11 +2486,11 @@ function getAllOpexRows() {
 
 function getRows(view) {
   const hist = getAllOpexRows().filter(r => r.exp && r.cat !== 'Investment' && r.cat !== 'Transfer');
-  if (view === 'all') return hist;
-  if (view === 'flazz') return hist.filter(r => r.pm === 'Flazz');
+  if (view === 'all')     return hist.filter(r => !isCreditCardPM(r.pm));
+  if (view === 'flazz')   return hist.filter(r => r.pm === 'Flazz');
   if (view === 'ewallet') return hist.filter(r => r.pm === 'eWallet');
-  if (view === 'bank') return hist.filter(r => r.pm !== 'CC BCA' && r.pm !== 'CC Niaga' && r.pm !== 'eWallet' && r.pm !== 'Flazz');
-  if (view === 'cc') return hist.filter(r => r.pm === 'CC BCA' || r.pm === 'CC Niaga');
+  if (view === 'bank')    return hist.filter(r => !isCreditCardPM(r.pm) && r.pm !== 'eWallet' && r.pm !== 'Flazz');
+  if (view === 'cc')      return hist.filter(r => isCreditCardPM(r.pm));
   return [];
 }
 
@@ -5532,7 +5566,7 @@ function calGetMonthData(year, month) {
   });
 
   let total = opex
-    .filter(r => r.y === year && r.m === month - 1 && r.cat !== 'Income' && r.cat !== 'Investment' && r.cat !== 'Transfer')
+    .filter(r => r.y === year && r.m === month - 1 && r.cat !== 'Income' && r.cat !== 'Investment' && r.cat !== 'Transfer' && !isCreditCardPM(r.pm))
     .reduce((s, r) => s + (r.exp || 0), 0);
 
   const localIncome = (txHistory || [])
@@ -5688,7 +5722,7 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
       const cellY    = isCur ? year : (cell.next ? nextYear : prevYear);
       const cellM    = isCur ? month : (cell.next ? nextMonth : prevMonth);
       const txs      = getTxByDayFor(cellY, cellM)[cell.day] || [];
-      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer').reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer' && !isCreditCardPM(r.pm || '')).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
       const hasData  = txs.length > 0;
       const allProjected = hasData && txs.every(r => r.projected);
       const hasFuture = hasData && txs.some(r => r.future && isFuture);
@@ -5770,7 +5804,7 @@ function calGetRemainingWeeksHTML(year, month, today) {
       const isCur = (dy === year && dm === month);
       const isFuture = d > today;
       const txs = getTxByDayFor(dy, dm)[dd] || [];
-      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer').reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer' && !isCreditCardPM(r.pm || '')).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
       const hasData = txs.length > 0;
 
       let cls = 'cal-day' + (isCur ? (isFuture && hasData ? ' future' : (hasData ? ' has-data' : '')) : ' other-month');
@@ -5823,7 +5857,7 @@ function calGetCurrentWeekHTML(year, month, today) {
     const isToday  = (dy === today.getFullYear() && dm === today.getMonth() + 1 && dd === todayD);
     const isFuture = d > today;
     const txs      = getTxByDayFor(dy, dm)[dd] || [];
-    const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income').reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+    const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && !isCreditCardPM(r.pm || '')).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
     const hasData  = txs.length > 0;
 
     let cls = 'cal-day';

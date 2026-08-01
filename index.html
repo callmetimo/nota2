@@ -4761,7 +4761,7 @@ function getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBa
 
 function renderHoldings(holdings, usdRate, chfRate, acctBals){
   acctBals = acctBals || {};
-  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false);
+  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived);
 
   const allocGroups = getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBalances);
 
@@ -4930,7 +4930,7 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
 
 function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
   acctBals = acctBals || {};
-  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived && i.showOnInsights !== false);
+  const activeAccounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived);
 
   const allocGroups = getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBalances);
 

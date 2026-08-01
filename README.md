@@ -59,6 +59,11 @@ signed-in user's own short-lived OAuth token.
 - **No hardcoding**: replaced every hardcoded `r.pm !== 'CC BCA'` / `r.pm === 'CC BCA'` check (in `getRows()`, `calGetMonthData()`'s monthly total, and the Home Calendar's per-day totals) with a single `isCreditCardPM(pmName)` helper that reads the flag from `CONFIG_ITEMS`. Any payment method the user creates — not just "CC BCA" — can be marked as a credit card and the exclusion applies automatically everywhere expense totals are calculated (Home Calendar, Expense Insights "All"/"Bank" views). The Insights "CC" view still shows credit-card transactions for tracking, regardless of the billing method chosen.
 - Balance calculation (`computeAccountCurrentBalance`) was already unaffected either way — it matches transactions by PM name, so a credit card PM never touches a bank account's balance directly; only a bill payment recorded against the bank PM does.
 
+### Session 8: Fix Accounts Missing from Net Worth Holdings/Overview
+- **Bug**: Accounts with "Show on Insights" unchecked (e.g. `CIMB IDR`, `JHT`) silently disappeared from both the Net Worth **Holdings** and **Overview** pages, not just the home page's Insights cards.
+- **Root cause**: `renderHoldings()` and `renderOverview()` both filtered their account list with `showOnInsights !== false` — a flag meant only to control the home page's Insights account-balance cards (`renderAccountBalanceCards`). Once excluded there, the account was also blocked from `getNetWorthAllocations()`'s raw-balance fallback, since that fallback skips anything already present in `CONFIG_ITEMS`, leaving no path for the account to reappear.
+- **Fix**: Removed the `showOnInsights` condition from both `renderHoldings()` and `renderOverview()`'s account filters so Net Worth always reflects every non-archived configured account, independent of the Insights-tab display preference. `renderAccountBalanceCards` keeps using `showOnInsights` as before.
+
 ## How it works
 
 - `auth.js` — Google Identity Services sign-in (OAuth `drive.file` scope:

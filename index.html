@@ -4649,17 +4649,23 @@ function isFxAccountMatch(acctName, ccy, stockName) {
   // 1. Exact match (case-insensitive)
   if (aLower === sLower) return true;
 
-  // 2. Normalized token match (e.g., "USD CIMB" <-> "USDIDR CIMB")
-  const normA = aLower.replace(/^(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)\s+/i, '')
-                      .replace(/\s+(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)$/i, '')
-                      .replace(/\s+/g, ' ').trim();
+  // 2. Normalized token match (e.g., "USD CIMB" <-> "USDIDR CIMB") — only applies to
+  // foreign-currency accounts. A plain IDR cash account (ccy IDR/blank) is never an
+  // FX-holding's funding account, so it must not be matched here even if stripping
+  // the trailing "IDR" token happens to collide with another instrument's name.
+  const ccyUpper = (ccy || '').toUpperCase();
+  if (ccyUpper && ccyUpper !== 'IDR') {
+    const normA = aLower.replace(/^(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)\s+/i, '')
+                        .replace(/\s+(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)$/i, '')
+                        .replace(/\s+/g, ' ').trim();
 
-  const normS = sLower.replace(/^(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)\s+/i, '')
-                      .replace(/\s+(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)$/i, '')
-                      .replace(/\s+/g, ' ').trim();
+    const normS = sLower.replace(/^(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)\s+/i, '')
+                        .replace(/\s+(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)$/i, '')
+                        .replace(/\s+/g, ' ').trim();
 
-  if (normA && normS && normA === normS) {
-    return true;
+    if (normA && normS && normA === normS) {
+      return true;
+    }
   }
 
   // 3. Match generic FX pair names like "USDIDR" / "CHFIDR" with currency accounts
@@ -4731,7 +4737,8 @@ function getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBa
       return aLower === k.toLowerCase() || aSorted === kSorted;
     });
 
-    const inHoldings = holdings.some(h => isFxAccountMatch(k, null, h.stock));
+    const kCfg = CONFIG_ITEMS.find(i => i.name && i.name.toLowerCase() === k.toLowerCase());
+    const inHoldings = holdings.some(h => isFxAccountMatch(k, kCfg?.ccy || ACCOUNT_CCY[k], h.stock));
 
     const isConfiguredOrArchived = CONFIG_ITEMS.some(i => {
       const iLower = (i.name || '').toLowerCase();

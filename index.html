@@ -2802,14 +2802,9 @@ function formatAmountInput(el) {
 
   const cursorFromEnd = rawVal.length - (el.selectionEnd || 0);
 
-  // Handle comma as decimal separator if user typed comma and no dot exists
-  if (rawVal.includes(',') && !rawVal.includes('.')) {
-    const lastCommaIdx = rawVal.lastIndexOf(',');
-    const afterComma = rawVal.substring(lastCommaIdx + 1);
-    if (rawVal.endsWith(',') || afterComma.length !== 3 || rawVal.indexOf(',') === lastCommaIdx) {
-      rawVal = rawVal.substring(0, lastCommaIdx) + '.' + afterComma;
-    }
-  }
+  // Commas are only ever thousands-grouping separators inserted by this function;
+  // "." is the sole decimal separator (typed explicitly on the keypad). Strip commas.
+  rawVal = rawVal.replace(/,/g, '');
 
   let hasDecimal = false;
   let intStr = rawVal;

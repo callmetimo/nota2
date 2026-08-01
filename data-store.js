@@ -183,16 +183,17 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
       'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
     ]]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:K1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights',
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:L1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights', 'creditCard',
     ]]);
     const configRows = CONFIG_DEFAULTS.map(it => [
       it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
       (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
       String(it.balanceDate || '').slice(0, 10),
       it.showOnInsights === false ? 'FALSE' : 'TRUE',
+      it.creditCard ? 'TRUE' : 'FALSE',
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
     await SheetsClient.updateValues(spreadsheetId, `${BALANCES_SHEET}!A1:D1`, [[
       'Account', 'Date', 'Amount', 'TxID',
     ]]);
@@ -869,8 +870,8 @@ const DataStore = (() => {
         }]);
       }
     }
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:K1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights',
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:L1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights', 'creditCard',
     ]]);
     return !configSheet;
   }
@@ -883,11 +884,12 @@ const DataStore = (() => {
         (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
         String(it.balanceDate || '').slice(0, 10),
         it.showOnInsights === false ? 'FALSE' : 'TRUE',
+        it.creditCard ? 'TRUE' : 'FALSE',
       ]);
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + rows.length - 1}`, rows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
-    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L`);
     const rows = res.values || [];
     if (rows.length === 0) {
       // Header exists but no data rows — seed now.
@@ -896,8 +898,9 @@ const DataStore = (() => {
         (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
         String(it.balanceDate || '').slice(0, 10),
         it.showOnInsights === false ? 'FALSE' : 'TRUE',
+        it.creditCard ? 'TRUE' : 'FALSE',
       ]);
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
     const items = rows
@@ -927,6 +930,7 @@ const DataStore = (() => {
           balance: balVal,
           balanceDate: String(r[9] || '').trim(),
           showOnInsights: (r[10] !== undefined && r[10] !== null && String(r[10]).trim() !== '') ? (String(r[10]).trim().toUpperCase() !== 'FALSE' && r[10] !== false) : true,
+          creditCard: String(r[11] || '').trim().toUpperCase() === 'TRUE',
         };
       })
       .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -938,7 +942,7 @@ const DataStore = (() => {
     if (action !== 'saveAll') return { status: 'error', message: 'Unknown action' };
     if (!Array.isArray(items)) return { status: 'error', message: 'items must be an array' };
     await ensureConfigSheetExists();
-    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K`);
+    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L`);
     if (items.length === 0) return { status: 'ok', count: 0 };
     const rows = items.map((it, idx) => [
       String(it.kind || '').slice(0, 20),
@@ -952,8 +956,9 @@ const DataStore = (() => {
       (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
       String(it.balanceDate || '').slice(0, 10),
       it.showOnInsights === false ? 'FALSE' : 'TRUE',
+      it.creditCard ? 'TRUE' : 'FALSE',
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + rows.length - 1}`, rows);
     return { status: 'ok', count: rows.length };
   }
 

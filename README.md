@@ -58,6 +58,7 @@ signed-in user's own short-lived OAuth token.
   - **Unchecked (default, Method 2 — real-time)**: charges count as an expense immediately, same as cash/bank/e-wallet.
 - **No hardcoding**: replaced every hardcoded `r.pm !== 'CC BCA'` / `r.pm === 'CC BCA'` check (in `getRows()`, `calGetMonthData()`'s monthly total, and the Home Calendar's per-day totals) with a single `isCreditCardPM(pmName)` helper that reads the flag from `CONFIG_ITEMS`. Any payment method the user creates — not just "CC BCA" — can be marked as a credit card and the exclusion applies automatically everywhere expense totals are calculated (Home Calendar, Expense Insights "All"/"Bank" views). The Insights "CC" view still shows credit-card transactions for tracking, regardless of the billing method chosen.
 - Balance calculation (`computeAccountCurrentBalance`) was already unaffected either way — it matches transactions by PM name, so a credit card PM never touches a bank account's balance directly; only a bill payment recorded against the bank PM does.
+- **Data persistence**: The flag is persisted to Google Sheets `Config` sheet Column L (see Session 9 for implementation).
 
 ### Session 8: Fix Accounts Missing from Net Worth Holdings/Overview
 - **Bug**: Accounts with "Show on Insights" unchecked (e.g. `CIMB IDR`, `JHT`) silently disappeared from both the Net Worth **Holdings** and **Overview** pages, not just the home page's Insights cards.
@@ -70,6 +71,25 @@ signed-in user's own short-lived OAuth token.
   - `data-store.js`: extended the header row (`A1:K1` → `A1:L1`, adding `'creditCard'`), the seed/bootstrap row builders, `handleGetConfig()`'s read mapping (`r[11]` → `creditCard: boolean`), and `handleConfig()`'s `saveAll` write mapping — all four Config sheet read/write sites now round-trip column L.
   - No `index.html` changes were needed — it already stored/read `creditCard` on `CONFIG_ITEMS` entries and called `saveConfigToServer()` on every toggle; the flag just wasn't surviving the backend round-trip.
 - Column L was previously unused (grid already reserved up to column O via `gridProperties.columnCount: 15`), so no sheet resize was required.
+
+## Config Persistence Pattern (Best Practice)
+
+When adding new user-configurable features (checkboxes, toggles, flags, settings), always persist them to the Google Sheets `Config` sheet using an empty column, not hardcoded in `index.html` or stored only in memory/localStorage.
+
+**Why:** The Google Sheet is the app's authoritative database — it survives page reloads, browser restarts, and multi-device access. In-memory/localStorage storage reverts, creating confusing UX where settings mysteriously revert on navigation. Hardcoding doesn't scale to user-customization.
+
+**How:** Use the `creditCard` flag (Session 9, Column L) as a template:
+1. Pick an unused column in `Config` (grid already reserves space to column O).
+2. Add the column to the header row in `data-store.js:ensureConfigSheetExists()` (`A1:K1` → `A1:L1`, add header string).
+3. Include the field in all **four** Config sheet read/write sites in `data-store.js`:
+   - Header row write (line ~872, `A1:L1`)
+   - Seed/bootstrap builders (lines ~882, ~895, both CONFIG_DEFAULTS map, add `it.fieldName ? 'TRUE' : 'FALSE'`)
+   - Read mapping in `handleGetConfig()` (line ~890 read range `A...L`, line ~918-930 item object add `fieldName: String(r[N] || '').trim().toUpperCase() === 'TRUE'`)
+   - Write mapping in `handleConfig()`'s `saveAll` (line ~940 clearValues `A...L`, line ~943-956 write rows add `it.fieldName ? 'TRUE' : 'FALSE'`, line ~956 updateValues `A...L`)
+4. On the frontend (`index.html`), store the value on `CONFIG_ITEMS` entries and call `saveConfigToServer()` when the user changes it — no special sync code needed if `saveConfigToServer()` is already being called (which it is for overlay Save buttons and inline checkboxes).
+5. Document the column and feature in README.md under the session entry.
+
+Existing users: sheet values default to empty on first load (treated as `false`/unchecked), no migration needed. Once the user toggles a setting, it writes to the sheet.
 
 ## How it works
 

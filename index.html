@@ -2457,6 +2457,13 @@ function _reconcileUnsyncedWithSheet(rows, y, m) {
 
 let insightsMode = 'monthly';
 let nwMode = 'holdings';
+let holdingsGroupFilter = null;
+
+function setHoldingsGroupFilter(type, el) {
+  holdingsGroupFilter = type;
+  toggleActive('.holdings-group-btn', el);
+  renderNetWorth();
+}
 let wView='all', wRange=4, wSelWeek=null, wSelCat=null;
 let mView='all', mRange=3, mSelMonth=null, mSelCat=null;
 let yView='all', yRange=3, ySelYear=null, ySelCat=null;
@@ -4768,15 +4775,51 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
   const allocGroups = getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBalances);
 
   // Sort allocation type groups by total group value descending
-  const sortedTypes = Object.entries(allocGroups).sort((a, b) => {
-    const valA = a[1].value > 0 ? a[1].value : a[1].cost;
-    const valB = b[1].value > 0 ? b[1].value : b[1].cost;
-    return valB - valA;
-  });
+  const sortedTypes = Object.entries(allocGroups)
+    .filter(([, group]) => group.items.length)
+    .sort((a, b) => {
+      const valA = a[1].value > 0 ? a[1].value : a[1].cost;
+      const valB = b[1].value > 0 ? b[1].value : b[1].cost;
+      return valB - valA;
+    });
 
-  let html = '';
+  if (!sortedTypes.length) {
+    document.getElementById('nwContent').innerHTML = '<div class="empty-state">No holdings found</div>';
+    return;
+  }
+
+  if (!holdingsGroupFilter || !sortedTypes.some(([type]) => type === holdingsGroupFilter)) {
+    holdingsGroupFilter = sortedTypes[0][0];
+  }
+
+  const grandCost = sortedTypes.reduce((s, [, g]) => s + g.cost, 0);
+  const grandValue = sortedTypes.reduce((s, [, g]) => s + (g.value > 0 ? g.value : g.cost), 0);
+
+  let html = `<div class="holding-item" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:4px">Total net worth</div>
+        <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Cost basis</div>
+        <div style="font-size:13px;font-weight:600">${fUSD(grandCost, usdRate)}</div>
+        <div style="font-size:13px;font-weight:600;opacity:0.7">${fRpS(Math.round(grandCost))}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10px;color:var(--text2);margin-bottom:3px">Est. value</div>
+        <div style="font-size:13px;font-weight:600">${fUSD(grandValue, usdRate)}</div>
+        <div style="font-size:13px;font-weight:600;opacity:0.7">${fRpS(Math.round(grandValue))}</div>
+      </div>
+    </div>
+  </div>`;
+
+  html += '<div class="toggle-row">';
+  sortedTypes.forEach(([type]) => {
+    const active = type === holdingsGroupFilter ? ' active' : '';
+    html += `<div class="toggle-btn holdings-group-btn${active}" data-type="${esc(type)}" onclick="setHoldingsGroupFilter('${esc(type).replace(/'/g, "\\'")}', this)">${esc(type)}</div>`;
+  });
+  html += '</div>';
 
   sortedTypes.forEach(([type, group]) => {
+    if (type !== holdingsGroupFilter) return;
     const items = group.items;
     if (!items.length) return;
 

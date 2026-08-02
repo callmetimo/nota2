@@ -4478,16 +4478,30 @@ function computeInvestNetLots(allInvest) {
     }
   });
 
+  const forexStockKeys = Object.keys(buyLots).filter(s => {
+    const cfg = CONFIG_ITEMS.find(i => i.name && i.name.toLowerCase() === s.toLowerCase());
+    return getAssetTypeForItem(s, cfg?.assetType || STOCK_TYPE[s], false) === 'Forex';
+  });
+
   allInvest.forEach(r => {
     if (r.action !== 'Buy') return;
     if (!r.account) return;
-    const acctCcy = (ACCOUNT_CCY[r.account] || '').toUpperCase();
-    if (!acctCcy || acctCcy === 'IDR') return;
     const fxSpent = (r.lot || 0) * (r.price || 0);
-    if (fxSpent > 0) {
-      if (!(r.account in sellLots)) { buyLots[r.account] = buyLots[r.account] || 0; sellLots[r.account] = 0; }
-      sellLots[r.account] += fxSpent;
+    if (fxSpent <= 0) return;
+
+    const acctCcy = (ACCOUNT_CCY[r.account] || '').toUpperCase();
+    // Direct match: the Invest sheet's Account text names a Config account verbatim.
+    let targetKey = (acctCcy && acctCcy !== 'IDR') ? r.account : null;
+    // Fallback: no Config account is named exactly this (e.g. Invest says "Pluang USD"
+    // but Config's account row is just "Pluang") — fuzzy-match it against known forex
+    // holdings instead of silently dropping the depletion.
+    if (!targetKey) {
+      targetKey = forexStockKeys.find(s => isFxAccountMatch(r.account, ACCOUNT_CCY[s] || 'USD', s));
     }
+    if (!targetKey) return;
+
+    if (!(targetKey in sellLots)) { buyLots[targetKey] = buyLots[targetKey] || 0; sellLots[targetKey] = 0; }
+    sellLots[targetKey] += fxSpent;
   });
 
   return { buyLots, sellLots, buyTotalIdr, buyPriceWeighted };

@@ -1265,7 +1265,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .nota-auth-links{font-size:12px;opacity:0.6}
 .nota-auth-links a{color:inherit}
 </style>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://accounts.google.com/gsi/client" defer></script>
 <script src="config.js"></script>
 <script src="sheets-client.js"></script>
 <script src="data-store.js"></script>
@@ -6808,8 +6808,26 @@ window.addEventListener('DOMContentLoaded', async () => {
     hideToast();
     calInited = false;
     if (isHome()) initCalendar();
-    // If Apps Script was cold and timed out above, re-render when it eventually finishes
-    _monthFetch.then(() => { patchCurMonthCache(); calInited = false; if (isHome()) initCalendar(); });
+    // If Apps Script was cold and timed out above, re-render when it eventually finishes.
+    // If it instead failed outright (transient network/auth hiccup on cold launch),
+    // retry a couple times with backoff instead of leaving the calendar empty until
+    // the user happens to revisit the Home tab (which re-triggers fetchCurrentMonth).
+    _monthFetch
+      .then(() => { patchCurMonthCache(); calInited = false; if (isHome()) initCalendar(); })
+      .catch(async (err) => {
+        console.warn('[home] initial month fetch failed, retrying', err);
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+          try {
+            await fetchCurrentMonth(true);
+            patchCurMonthCache();
+            calInited = false;
+            if (isHome()) initCalendar();
+            return;
+          } catch (e) { /* try next attempt */ }
+        }
+        console.error('[home] month fetch retries exhausted');
+      });
   }
 
   // Retry any locally-queued transactions that failed to sync previously

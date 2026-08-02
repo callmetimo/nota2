@@ -64,11 +64,32 @@ const Auth = (() => {
     return tokenClient;
   }
 
+  // The GIS <script> tag loads async, so it can still be mid-download when
+  // DOMContentLoaded fires and Auth.start()/signIn() first touch `google.*`,
+  // especially on a slow cold-launch connection. Poll until it's attached
+  // instead of assuming script order.
+  function waitForGis(timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+      if (window.google?.accounts?.oauth2) { resolve(); return; }
+      const start = Date.now();
+      const iv = setInterval(() => {
+        if (window.google?.accounts?.oauth2) {
+          clearInterval(iv);
+          resolve();
+        } else if (Date.now() - start > timeoutMs) {
+          clearInterval(iv);
+          reject(new Error('Google sign-in script failed to load'));
+        }
+      }, 100);
+    });
+  }
+
   // If the browser blocks the (possibly invisible) popup GIS opens even for
   // prompt:'none'/no-gesture calls, it can log an error and never invoke the
   // token client's callback at all — leaving the caller's promise hanging
   // forever. A bounded timeout is the only way to guarantee this resolves.
-  function requestToken(promptMode, timeoutMs = 6000) {
+  async function requestToken(promptMode, timeoutMs = 6000) {
+    await waitForGis();
     return new Promise((resolve, reject) => {
       let settled = false;
       const timer = setTimeout(() => {

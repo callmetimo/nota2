@@ -2577,7 +2577,7 @@ function showAC(fid, list) {
   const inp=document.getElementById(fid),dd=document.getElementById('ac-'+fid);
   if(!dd)return;
   const v=inp.value.toLowerCase();
-  const f=v?list.filter(i=>i.toLowerCase().includes(v)):[];
+  const f=v?list.filter(i=>i.toLowerCase().includes(v)):list;
   if(!f.length){dd.style.display='none';return}
   dd.innerHTML=f.map(i=>{
     const safe=esc(i);

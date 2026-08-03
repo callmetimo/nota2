@@ -7,12 +7,26 @@ const SheetsClient = (() => {
   const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
   const DRIVE_BASE = 'https://www.googleapis.com/drive/v3/files';
 
-  async function authedFetch(url, opts = {}) {
+  // A stalled connection to the Sheets/Drive API otherwise hangs this fetch forever —
+  // no response, no error — which in turn hangs every await chain built on top of it
+  // (loadHistData, requireReady, etc.) with nothing left to catch or retry.
+  async function authedFetch(url, opts = {}, timeoutMs = 15000) {
     const token = await Auth.getAccessToken();
-    const res = await fetch(url, {
-      ...opts,
-      headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}` },
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(url, {
+        ...opts,
+        headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error('Sheets API request timed out');
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       throw new Error(`Sheets API ${res.status}: ${body.slice(0, 300)}`);

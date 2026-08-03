@@ -413,6 +413,12 @@ const DataStore = (() => {
 
   function cellToDateStr(val) { return String(val || '').trim(); }
 
+  // Invest!A has a mix of formats across its history: legacy rows entered as
+  // "DD/MM/YYYY" and rows written by this app via formatDateStr() as "DD Mon YY".
+  // Comparing either of those directly against an ISO "YYYY-MM-DD" `since` cutoff
+  // with plain string `<` is meaningless (e.g. "07/05/2025" < "2000-01-01" is TRUE
+  // because '0' < '2' lexically) and was silently dropping most rows from
+  // handleGetInvest — normalize to ISO first so the comparison is actually valid.
   function parseAnyDateToISO(val) {
     const s = String(val || '').trim();
     if (!s) return '';
@@ -504,23 +510,6 @@ const DataStore = (() => {
       }
       return { status: 'ok' };
     }
-    if (data.action === 'edit') {
-      const rowIndices = await findOpexRowsByTxId(data.id);
-      if (!rowIndices.length) return { status: 'error', message: 'Transfer rows not found' };
-      const { date, month, fromPm, toPm, amount, notes } = data;
-      const sorted = [...rowIndices].sort((a, b) => a - b);
-      if (sorted.length >= 2) {
-        const r1 = sorted[0];
-        const r2 = sorted[1];
-        await SheetsClient.updateValues(spreadsheetId, `Opex!A${r1}:K${r1}`, [[
-          formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', Number(amount), notes || '', '', 0, data.id
-        ]]);
-        await SheetsClient.updateValues(spreadsheetId, `Opex!A${r2}:K${r2}`, [[
-          formatDateStr(date), month, 'Transfer', 'Transfer', toPm, Number(amount), '', notes || '', '', 0, data.id
-        ]]);
-        return { status: 'ok' };
-      }
-    }
     const { date, month, fromPm, toPm, amount, notes } = data;
     const groupId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
     const txId = 'xfr_' + groupId;
@@ -556,6 +545,8 @@ const DataStore = (() => {
     return { status: 'ok', rows, y, m };
   }
 
+  // Builds a {key: [values...]} map from entries already ordered most-recent-first,
+  // deduping repeated values per key while preserving that recency order.
   function buildRecentMap(entries) {
     const map = {};
     for (const { key, value } of entries) {
@@ -566,6 +557,8 @@ const DataStore = (() => {
     return map;
   }
 
+  // Returns every non-deleted Opex row across all months, shaped to match HIST.opex
+  // ({y, m (0-indexed), d, mk, cat, tx, pm, inc?, exp?, notes?, future?, id?, rowIndex}).
   async function handleGetAllOpex() {
     const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:K');
     const data = res.values || [];
@@ -591,6 +584,9 @@ const DataStore = (() => {
       rows.push(r);
     });
 
+    // Smart-autofill maps for the input form: what Category/PM was used for a given
+    // Transaction name in the last 30 days, most-recent-first (see getSmartCats/
+    // getSmartPms/autoFillIfExactMatch in index.html).
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
     const recent = rows
@@ -635,6 +631,9 @@ const DataStore = (() => {
   }
 
   async function handleInvest(data) {
+    // `op` selects edit/delete; `action` always means Buy/Sell (never overloaded
+    // with 'edit'/'delete' the way Opex's `action` field is, since Invest already
+    // uses `action` for its own Buy/Sell domain value).
     const { op, action, date, month, stock, stockType, account, lot, price, totalIdr, pm } = data;
 
     if (op === 'edit') {
@@ -710,6 +709,8 @@ const DataStore = (() => {
       const dateStr = cellToDateStr(row[0]);
       if (!dateStr) return;
       const isoDate = parseAnyDateToISO(dateStr);
+      // Only exclude when the date parsed cleanly AND is before the cutoff — an
+      // unparseable date must never silently drop a real transaction.
       if (isoDate && isoDate < since) return;
       const r = {
         date: isoDate || dateStr, stock, action,
@@ -722,6 +723,9 @@ const DataStore = (() => {
       rows.push(r);
     });
 
+    // Smart-autofill map for the Invest form's Account field: what Account was used
+    // for a given Asset (stock) in the last 30 days, most-recent-first — independent
+    // of `since`, which is only used to bound how much history the caller wants back.
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
     const recent = rows
@@ -888,6 +892,7 @@ const DataStore = (() => {
     const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L`);
     const rows = res.values || [];
     if (rows.length === 0) {
+      // Header exists but no data rows — seed now.
       const seedRows = CONFIG_DEFAULTS.map(it => [
         it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
         (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
@@ -997,6 +1002,7 @@ const DataStore = (() => {
       String(txId || '').slice(0, 50),
     ]]);
 
+    // Update Column I, J & K in Config sheet for matching account
     try {
       await ensureConfigSheetExists();
       const configRes = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K`);
@@ -1026,7 +1032,7 @@ const DataStore = (() => {
     return { status: 'ok' };
   }
 
-  // ── REQUEST ROUTER ──────────────────────────────────────────────
+  // ── REQUEST ROUTER (mirrors the old doGet/doPost dispatch) ───
   async function handleRequest(urlStr, opts) {
     await requireReady();
     const url = new URL(urlStr);

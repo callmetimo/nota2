@@ -27,7 +27,13 @@
   --bottom-nav-h:calc(56px + env(safe-area-inset-bottom,0px));
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:var(--bg);color:var(--text);height:var(--app-vh,100dvh);max-width:430px;margin:0 auto;overflow:hidden}
+/* iOS standalone/PWA still allows elastic rubber-band bounce at the document
+   level even with body{overflow:hidden}; when a nested scroller (e.g. the day
+   transaction list) hits its end, the scroll chains up to <html> and bounces
+   back, visually snapping the list back before the last item can be tapped.
+   Lock the document itself and stop chaining. */
+html{height:100%;overflow:hidden;overscroll-behavior:none}
+body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:var(--bg);color:var(--text);height:var(--app-vh,100dvh);max-width:430px;margin:0 auto;overflow:hidden;overscroll-behavior:none}
 
 /* HEADER */
 .header{padding:env(safe-area-inset-top,44px) 20px 10px;background:var(--bg);position:sticky;top:0;z-index:100;border-bottom:0.5px solid var(--border)}
@@ -205,7 +211,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .search-clear-btn svg{width:18px;height:18px}
 .search-clear-btn:active{color:var(--accent)}
 #searchResultsCount{flex-shrink:0;padding:8px 20px 0;font-size:12px;color:var(--text2)}
-#searchResults{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 20px 20px}
+#searchResults{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 20px 20px}
 .search-loading{text-align:center;padding:12px 20px;font-size:12px;color:var(--text2)}
 .search-item-note{font-size:11px;color:var(--text2);margin-top:5px;padding:6px 0;border-top:0.5px solid var(--border);word-break:break-word}
 .search-item-note .highlight{color:var(--accent);font-weight:500}
@@ -332,7 +338,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 #page-home.active{display:flex}
 
 /* Calendar segment — top 54% of #page-home */
-.cal-scroll{flex:54 54 0;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;border-bottom:0.5px solid var(--border);scroll-snap-type:y mandatory;scroll-behavior:smooth}
+.cal-scroll{flex:54 54 0;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;border-bottom:0.5px solid var(--border);scroll-snap-type:y mandatory;scroll-behavior:smooth;overscroll-behavior:contain}
 
 .cal-month-label{display:flex;align-items:center;gap:10px;padding:10px 16px 8px;scroll-snap-align:start;scroll-snap-stop:always}
 .cal-month-name{font-size:20px;font-weight:700;letter-spacing:-0.4px;min-width:100px;flex-shrink:0}
@@ -419,7 +425,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .cal-tx-header{height:52px;padding:0 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;border-bottom:0.5px solid var(--border)}
 .cal-tx-date{font-size:17px;font-weight:600;letter-spacing:-0.3px}
 .cal-tx-total{font-size:14px;font-weight:600;color:var(--text2)}
-.cal-tx-list{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.cal-tx-list{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .cal-tx-item{display:flex;align-items:center;padding:13px 20px;border-bottom:0.5px solid var(--border);gap:12px;cursor:pointer;transition:background 0.12s;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .cal-tx-item:last-child{border-bottom:none}
 .cal-tx-item:active{background:var(--bg3)}
@@ -447,7 +453,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .input-overlay.open{pointer-events:auto}
 .input-overlay::before{content:'';position:absolute;inset:0;background:rgba(0,0,0,0);transition:background 0.35s cubic-bezier(0.4,0,0.2,1)}
 .input-overlay.open::before{background:rgba(0,0,0,0.55)}
-.input-sheet{position:absolute;bottom:0;left:0;right:0;background:var(--bg2);border-radius:20px 20px 0 0;border-top:0.5px solid var(--border2);max-height:calc(100dvh - var(--header-height,120px));overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 0 40px;transform:translateY(100%);transition:transform 0.35s cubic-bezier(0.4,0,0.2,1)}
+.input-sheet{position:absolute;bottom:0;left:0;right:0;background:var(--bg2);border-radius:20px 20px 0 0;border-top:0.5px solid var(--border2);max-height:calc(var(--app-vh,100dvh) - var(--header-height,120px));overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 0 40px;transform:translateY(100%);transition:transform 0.35s cubic-bezier(0.4,0,0.2,1)}
 .input-overlay.open .input-sheet{transform:translateY(0)}
 .input-sheet-handle-wrap{display:flex;align-items:center;justify-content:center;padding:14px 0 10px;cursor:grab;-webkit-tap-highlight-color:transparent}.input-sheet-handle{width:32px;height:3px;background:var(--border2);border-radius:2px;pointer-events:none}
 /* Hide page-input from tab switching — it lives inside overlay now */

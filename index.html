@@ -27,7 +27,7 @@
   --bottom-nav-h:calc(56px + env(safe-area-inset-bottom,0px));
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100dvh;max-width:430px;margin:0 auto;overflow:hidden}
+body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:var(--bg);color:var(--text);height:var(--app-vh,100dvh);max-width:430px;margin:0 auto;overflow:hidden}
 
 /* HEADER */
 .header{padding:env(safe-area-inset-top,44px) 20px 10px;background:var(--bg);position:sticky;top:0;z-index:100;border-bottom:0.5px solid var(--border)}
@@ -328,7 +328,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 
 /* ── HOME CALENDAR ─────────────────────────────────────────── */
 /* Added min-height fallback so the scroll container does not collapse */
-#page-home{display:none;padding:0;flex-direction:column;height:calc(100dvh - var(--header-height,80px) - var(--bottom-nav-h,56px));min-height:300px;overflow:hidden;position:relative}
+#page-home{display:none;padding:0;flex-direction:column;height:calc(var(--app-vh,100dvh) - var(--header-height,80px) - var(--bottom-nav-h,56px));min-height:300px;overflow:hidden;position:relative}
 #page-home.active{display:flex}
 
 /* Calendar segment — top 54% of #page-home */
@@ -5311,6 +5311,23 @@ function updateHeaderHeight(){
   const h=document.querySelector('.header');
   if(h)document.documentElement.style.setProperty('--header-height',h.offsetHeight+'px');
 }
+
+// iOS standalone/PWA mode recomputes 100dvh mid-gesture (WebKit quirk), which
+// reflows #page-home's height under a finger scrolling #calTxList and makes the
+// scroll appear to snap back before reaching the last item. Pin the height to a
+// JS-measured value instead, refreshed only on real viewport-size changes (never
+// on scroll) so an in-progress touch-scroll can't trigger this reflow.
+let _lastAppVh = 0;
+function updateAppVh(){
+  const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  if (Math.abs(vh - _lastAppVh) < 1) return;
+  _lastAppVh = vh;
+  document.documentElement.style.setProperty('--app-vh', vh + 'px');
+}
+updateAppVh();
+window.addEventListener('resize', updateAppVh);
+window.addEventListener('orientationchange', updateAppVh);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', updateAppVh);
 
 // ── SEARCH FUNCTIONS ──────────────────────────────────────────
 let searchTimeout;

@@ -189,6 +189,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .tx-icon.cc-bca{background:var(--blue-dim)}
 .tx-icon.cc-niaga{background:var(--red-dim)}
 .tx-icon.invest{background:var(--blue-dim)}
+.tx-icon.transfer{background:rgba(167,139,250,0.15)}
 .tx-info{flex:1;min-width:0}
 .tx-payee{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tx-meta{font-size:11px;color:var(--text2);margin-top:2px}
@@ -3226,7 +3227,7 @@ async function deleteTransfer(txId) {
   } catch (e) { showToast('Delete failed', 'error'); }
 }
 
-function openEditTransferOverlay(tx) {
+function openEditTransferOverlay(tx, dateStr = calCurrentDateStr) {
   if (!tx) return;
   overlayEditId   = tx.sheetId || null;
   overlayEditMode = true;
@@ -3234,9 +3235,9 @@ function openEditTransferOverlay(tx) {
   const btn = document.querySelector('.pill-toggle-btn[data-mode="transfer"]');
   if (btn) setInputMode('transfer', btn);
   const rawEl = document.getElementById('xfrDateRaw');
-  if (rawEl && calCurrentDateStr) {
-    rawEl.value = calCurrentDateStr;
-    document.getElementById('xfrDateText').textContent = isoDisp(calCurrentDateStr);
+  if (rawEl && dateStr) {
+    rawEl.value = dateStr;
+    document.getElementById('xfrDateText').textContent = isoDisp(dateStr);
   }
   document.getElementById('xfrFrom').value   = tx.transferFromPm || '';
   document.getElementById('xfrTo').value     = tx.transferToPm   || '';
@@ -5376,6 +5377,39 @@ function clearSearch() {
   renderAllTransactions();
 }
 
+// Collapses paired Transfer rows (same shared xfr_ id — one expense leg on the
+// source PM, one income leg on the destination PM) into a single display item,
+// same shape as the calendar's calGetMonthData merge (index.html ~5776).
+function mergeTransferPairs(results) {
+  const xfrGroups = {};
+  results.forEach(item => {
+    const row = item.row;
+    if (item.source === 'hist-opex' && (row.cat || row.category) === 'Transfer' && row.id && String(row.id).startsWith('xfr_')) {
+      (xfrGroups[row.id] || (xfrGroups[row.id] = [])).push(item);
+    }
+  });
+  const toRemove = new Set();
+  const merged = [];
+  Object.entries(xfrGroups).forEach(([xfrId, items]) => {
+    if (items.length < 2) return;
+    const expItem = items.find(it => (it.row.exp || 0) > 0);
+    const incItem = items.find(it => (it.row.inc || 0) > 0);
+    if (!expItem || !incItem) return;
+    items.forEach(it => toRemove.add(it));
+    const expRow = expItem.row, incRow = incItem.row;
+    merged.push({
+      source: 'hist-transfer', idx: xfrId, type: 'opex',
+      row: {
+        ...expRow,
+        tx: `${expRow.pm} → ${incRow.pm}`, pm: `${expRow.pm} → ${incRow.pm}`,
+        cat: 'Transfer', category: 'Transfer', amt: expRow.exp || 0, type: 'transfer',
+        transferFromPm: expRow.pm, transferToPm: incRow.pm,
+      },
+    });
+  });
+  return toRemove.size ? results.filter(item => !toRemove.has(item)).concat(merged) : results;
+}
+
 function performSearch(query) {
   const q = query.toLowerCase();
   const results = [];
@@ -5407,14 +5441,15 @@ function performSearch(query) {
     const txMatch = r.stock && r.stock.toLowerCase().includes(q);
     if (txMatch) results.push({source: 'local-invest', idx: i, row: r, type: 'invest'});
   }
-  
-  results.sort((a, b) => {
+
+  const merged = mergeTransferPairs(results);
+  merged.sort((a, b) => {
     const dateA = new Date(a.row.date || `${a.row.y}-${String(a.row.m+1).padStart(2,'0')}-${String(a.row.d).padStart(2,'0')}`);
     const dateB = new Date(b.row.date || `${b.row.y}-${String(b.row.m+1).padStart(2,'0')}-${String(b.row.d).padStart(2,'0')}`);
     return dateB - dateA;
   });
   
-  searchCurrentResults = results;
+  searchCurrentResults = merged;
   searchPageIndex = 0;
   renderSearchResults(q);
 }
@@ -5448,17 +5483,23 @@ function renderTxItemHTML(item, query) {
   const syncBadge = isPending && !row.synced ? '<span class="badge badge-pending">pending</span>' : '';
   const notesHtml = !isInvest && notes ? `<div class="search-item-note">${highlightMatches(notes, query)}</div>` : '';
 
-  const isTransfer = !isInvest && (row.cat === 'Transfer' || row.category === 'Transfer');
-  const editable = isInvest ? !!row.id : !isTransfer;
+  // A Transfer is a paired expense+income row set — row.type/'category' catch both the merged
+  // (synced, tappable) shape from mergeTransferPairs and a pending local {type:'transfer'} row
+  // (not yet split into paired sheet rows, so never tappable — same as the calendar).
+  const isTransfer = !isInvest && (row.cat === 'Transfer' || row.category === 'Transfer' || row.type === 'transfer');
+  const editable = isInvest ? !!row.id : (item.source === 'hist-transfer' ? true : !isTransfer);
   const tapAttrs = editable
-    ? ` data-idx="${item.idx}" data-source="${item.source}" data-type="${isInvest ? 'invest' : 'opex'}" style="cursor:pointer"`
+    ? ` data-idx="${item.idx}" data-source="${item.source}" data-type="${isInvest ? 'invest' : (item.source === 'hist-transfer' ? 'transfer' : 'opex')}" style="cursor:pointer"`
     : '';
+
+  if (isTransfer) { icon = '🔁'; cls = 'transfer'; color = '#a78bfa'; }
+  const metaLine = isTransfer ? 'Transfer' : `${esc(cat)} · ${esc(pm)}`;
 
   return `<div class="tx-item"${tapAttrs}>
     <div class="tx-icon ${cls}">${icon}</div>
     <div class="tx-info" style="flex:1">
       <div class="tx-payee">${highlightMatches(tx, query)}${syncBadge}</div>
-      <div class="tx-meta">${date} • ${esc(cat)} · ${esc(pm)}</div>
+      <div class="tx-meta">${date} • ${metaLine}</div>
       ${notesHtml}
     </div>
     <div class="tx-amount" style="color:${color}">${amount}</div>
@@ -5517,13 +5558,14 @@ function renderAllTransactions() {
     results.push({source:'local-invest', idx:i, row:investHistory[i], type:'invest'});
   }
 
-  results.sort((a, b) => {
+  const merged = mergeTransferPairs(results);
+  merged.sort((a, b) => {
     const dateA = new Date(a.row.date || `${a.row.y}-${String(a.row.m+1).padStart(2,'0')}-${String(a.row.d).padStart(2,'0')}`);
     const dateB = new Date(b.row.date || `${b.row.y}-${String(b.row.m+1).padStart(2,'0')}-${String(b.row.d).padStart(2,'0')}`);
     return dateB - dateA;
   });
 
-  allTxResults = results;
+  allTxResults = merged;
   allTxPageIndex = 0;
   renderAllTxPage();
 }
@@ -5589,6 +5631,22 @@ function openSearchInvestEdit(source, idx) {
   openEditInvestOverlay(row);
 }
 
+// Re-resolves both legs from live HIST.opex at tap time (rather than trusting the
+// merged row captured at render time), same pattern as openSearchTxEdit.
+function openSearchTransferEdit(xfrId) {
+  const rows = (HIST.opex || []).filter(r => r.id === xfrId && (r.cat || r.category) === 'Transfer');
+  const expRow = rows.find(r => (r.exp || 0) > 0);
+  const incRow = rows.find(r => (r.inc || 0) > 0);
+  if (!expRow || !incRow) return;
+  const merged = {
+    ...expRow, cat: 'Transfer', category: 'Transfer', amt: expRow.exp || 0,
+    sheetId: expRow.id || null, transferFromPm: expRow.pm, transferToPm: incRow.pm,
+  };
+  const dateStr = expRow.date ? String(expRow.date).slice(0, 10)
+    : `${expRow.y}-${String(expRow.m + 1).padStart(2, '0')}-${String(expRow.d).padStart(2, '0')}`;
+  openEditTransferOverlay(merged, dateStr);
+}
+
 function initSearchPage() {
   // Focus FIRST while still in the tap-gesture context — iOS rejects focus()
   // called after any heavy work (5K-item loop in renderAllTransactions breaks the chain).
@@ -5611,6 +5669,7 @@ function initSearchPage() {
     const fireSearchTap = item => {
       const { type, source, idx } = item.dataset;
       if (type === 'invest') openSearchInvestEdit(source, parseInt(idx));
+      else if (type === 'transfer') openSearchTransferEdit(idx); // idx is the xfr_ id string, not a numeric index
       else openSearchTxEdit(source, parseInt(idx));
     };
     resultsEl.addEventListener('touchstart', e => {

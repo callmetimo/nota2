@@ -2135,6 +2135,7 @@ async function deleteAccountAndData() {
 const HIST = {opex:[], invest:[], txCat:{}, txPm:{}, txAccount:{}, stockType:{}, cashBalance:0};
 
 let histLoaded = false;
+let histLoadFailed = false; // true once loadHistData() has exhausted its retry and fallen back to cache
 let histLoadCallbacks = [];
 
 function onHistLoaded(cb) {
@@ -5472,7 +5473,7 @@ function initSearchPage() {
 // Nota Public has no data.json bulk-history snapshot (unlike the original Nota app
 // this was forked from) — full Opex history is fetched directly from the user's
 // own Sheet via ?type=allOpex instead.
-async function loadHistData() {
+async function loadHistData(_isRetry) {
   try {
     const res = await fetch(apiGet('type=allOpex'), { method: 'GET' });
     const j = await res.json();
@@ -5487,6 +5488,7 @@ async function loadHistData() {
     if (j.txCat) { HIST.txCat = j.txCat; localStorage.setItem('notapub_txCat', JSON.stringify(j.txCat)); }
     if (j.txPm)  { HIST.txPm  = j.txPm;  localStorage.setItem('notapub_txPm', JSON.stringify(j.txPm)); }
     histLoaded = true;
+    histLoadFailed = false;
     pruneStaleHistory();
     buildAccountBalances();
     renderAccountBalanceCards();
@@ -5494,11 +5496,22 @@ async function loadHistData() {
     histLoadCallbacks = [];
   } catch(e) {
     console.warn('allOpex load failed:', e.message);
+    // One automatic retry before giving up — a lot of failures here are a transient
+    // token refresh/network hiccup during the same startup window, not a real outage.
+    if (!_isRetry) {
+      await new Promise(r => setTimeout(r, 1500));
+      return loadHistData(true);
+    }
     const cachedCat = localStorage.getItem('notapub_txCat');
     const cachedPm  = localStorage.getItem('notapub_txPm');
     if (cachedCat) HIST.txCat = JSON.parse(cachedCat);
     if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
+    // Falling back to whatever's cached (often just recent months) rather than the
+    // full history — mark it so the app can distinguish "loaded" from "gave up" and
+    // offer to retry, instead of silently pretending history is complete.
     histLoaded = true;
+    histLoadFailed = true;
+    showToast('Couldn’t load full history — showing cached data', 'error', 4000);
     pruneStaleHistory();
     buildAccountBalances();
     renderAccountBalanceCards();
@@ -6769,9 +6782,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     const cachedPm  = localStorage.getItem('notapub_txPm');
     if (cachedCat) HIST.txCat = JSON.parse(cachedCat);
     if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
-    histLoaded = true;
-    histLoadCallbacks.forEach(cb => cb());
-    histLoadCallbacks = [];
+    // Note: histLoaded stays false here — the localStorage cache only proves history
+    // loaded in a *past* session, not that HIST.opex holds more than this cached
+    // current month right now. Flipping it true here let other tabs (Insights, Net
+    // Worth, Goals, Search) render off current-month-only data before the real
+    // loadHistData() fetch below actually completed. It's set for real once that
+    // fetch resolves, further down.
     const today = new Date();
     _applyCurrentMonthRows(cachedCurMonth, today.getFullYear(), today.getMonth() + 1);
     patchCurMonthCache();

@@ -497,6 +497,19 @@ const DataStore = (() => {
   }
 
   async function handleTransfer(data) {
+    if (data.action === 'edit') {
+      const rowIndices = await findOpexRowsByTxId(data.id);
+      if (rowIndices.length < 2) return { status: 'error', message: 'Transfer rows not found' };
+      const { date, month, fromPm, toPm, amount, notes } = data;
+      const [rowA, rowB] = [...rowIndices].sort((a, b) => a - b);
+      await SheetsClient.updateValues(spreadsheetId, `Opex!A${rowA}:J${rowA}`, [[
+        formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0,
+      ]]);
+      await SheetsClient.updateValues(spreadsheetId, `Opex!A${rowB}:J${rowB}`, [[
+        formatDateStr(date), month, 'Transfer', 'Transfer', toPm, amount, '', notes || '', '', 0,
+      ]]);
+      return { status: 'ok' };
+    }
     if (data.action === 'delete') {
       const rowIndices = await findOpexRowsByTxId(data.id);
       if (!rowIndices.length) return { status: 'error', message: 'Transfer rows not found' };

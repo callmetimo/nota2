@@ -720,7 +720,8 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <label class="form-label">Notes</label>
         <input type="text" class="form-input" id="xfrNotes" placeholder="Add a note…" autocomplete="off" maxlength="200">
       </div>
-      <button class="submit-btn transfer" onclick="submitTransfer()">Save Transfer</button>
+      <button class="submit-btn transfer" id="submitTransferBtn" onclick="submitTransfer()">Save Transfer</button>
+      <button class="delete-btn" id="deleteTransferBtn" onclick="deleteSheetTransferTransaction()" style="display:none">Delete Transfer</button>
     </div>
   </div>
 </div><!-- /page-input -->
@@ -2996,6 +2997,10 @@ function closeInputOverlay() {
   if (submitInvestBtn) submitInvestBtn.textContent = 'Save Investment';
   const delInvestBtn = document.getElementById('deleteInvestBtn');
   if (delInvestBtn) delInvestBtn.style.display = 'none';
+  const submitTransferBtn = document.getElementById('submitTransferBtn');
+  if (submitTransferBtn) submitTransferBtn.textContent = 'Save Transfer';
+  const delTransferBtn = document.getElementById('deleteTransferBtn');
+  if (delTransferBtn) delTransferBtn.style.display = 'none';
 }
 
 // ── Handle bar swipe-down to close ───────────────────────────
@@ -3119,6 +3124,7 @@ function resetOpexForm() {
 // ── TRANSFER ──────────────────────────────────────────────────
 function submitTransfer() {
   if (isSyncing) return;
+  if (overlayEditMode && overlayEditType === 'transfer') { updateTransferTransaction(); return; }
   isSyncing = true;
   const date = document.getElementById('xfrDateRaw').value;
   const fromPm = sanitizeInput(document.getElementById('xfrFrom').value, 50).trim();
@@ -3211,6 +3217,77 @@ async function deleteTransfer(txId) {
       showToast('Delete failed', 'error');
     }
   } catch (e) { showToast('Delete failed', 'error'); }
+}
+
+function openEditTransferOverlay(tx) {
+  if (!tx) return;
+  overlayEditId   = tx.sheetId || null;
+  overlayEditMode = true;
+  overlayEditType = 'transfer';
+  const btn = document.querySelector('.pill-toggle-btn[data-mode="transfer"]');
+  if (btn) setInputMode('transfer', btn);
+  const rawEl = document.getElementById('xfrDateRaw');
+  if (rawEl && calCurrentDateStr) {
+    rawEl.value = calCurrentDateStr;
+    document.getElementById('xfrDateText').textContent = isoDisp(calCurrentDateStr);
+  }
+  document.getElementById('xfrFrom').value   = tx.transferFromPm || '';
+  document.getElementById('xfrTo').value     = tx.transferToPm   || '';
+  document.getElementById('xfrAmount').value = formatGroupedAmt(tx.amt);
+  document.getElementById('xfrNotes').value  = tx.notes || '';
+  document.getElementById('submitTransferBtn').textContent = 'Update Transfer';
+  document.getElementById('deleteTransferBtn').style.display = 'block';
+  document.getElementById('inputOverlay').classList.add('open');
+}
+
+async function updateTransferTransaction() {
+  const txId = overlayEditId;
+  const date = document.getElementById('xfrDateRaw').value;
+  const fromPm = sanitizeInput(document.getElementById('xfrFrom').value, 50).trim();
+  const toPm = sanitizeInput(document.getElementById('xfrTo').value, 50).trim();
+  const amount = parseGroupedAmt('xfrAmount');
+  const notes = sanitizeInput(document.getElementById('xfrNotes').value, 200);
+  if (!date || !fromPm || !toPm || !amount) { showToast('All fields required', 'error'); return; }
+  if (fromPm === toPm) { showToast('From and To must be different', 'error'); return; }
+
+  closeInputOverlay();
+  showToast('Updating transfer…', 'loading', 0);
+
+  // Optimistically drop the old linked pair locally — the refetch below replaces
+  // it with the authoritative updated rows (same pattern as deleteTransfer).
+  txHistory = txHistory.filter(h => h.id !== txId && String(h.id) !== String(txId));
+  HIST.opex = (HIST.opex || []).filter(r => r.id !== txId && String(r.id) !== String(txId));
+  saveLocal();
+  calInited = false; initCalendar();
+  buildAccountBalances();
+  renderAccountBalanceCards();
+
+  try {
+    const payload = {
+      type: 'transfer', action: 'edit', id: txId,
+      date: isoSheetDate(date), month: isoMonthKey(date),
+      fromPm, toPm, amount, notes,
+    };
+    const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: apiBody(payload) });
+    const j = await res.json().catch(() => ({}));
+    if (j.status === 'ok') {
+      showToast('Transfer updated ✓', 'success');
+      await Promise.all([fetchCurrentMonth(true), fetchAllOpex()]);
+      calInited = false;
+      if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); }
+      buildAccountBalances();
+      renderAccountBalanceCards();
+    } else {
+      showToast('Update failed', 'error');
+    }
+  } catch (e) { showToast(navigator.onLine ? 'Update failed' : 'Offline — update pending', ''); }
+}
+
+async function deleteSheetTransferTransaction() {
+  if (!confirm('Delete this transfer?')) return;
+  const txId = overlayEditId;
+  closeInputOverlay();
+  await deleteTransfer(txId);
 }
 
 // Uncheck "Set as Recurring" and hide/clear its fields — used after a rule has
@@ -6601,18 +6678,18 @@ function calSelectDay(cell, dateStr, totalStr) {
       const isTrulyFuture = tx.future && dateStr > todayISO();
       const isTransfer = tx.cat === 'Transfer' || tx.type === 'transfer';
       const canEdit = isEditableDay && !tx.projected && !isTransfer;
-      const canDelete = isEditableDay && isTransfer && tx.sheetId;
+      const canTransferEdit = isEditableDay && isTransfer && tx.sheetId;
       // A projected recurring entry is due-and-syncable once its date has arrived (not still upcoming)
       const canSyncProjected = tx.projected && tx.ruleId && dateStr <= todayISO();
-      const tapAttrs = canEdit ? `data-idx="${idx}"` : (canSyncProjected ? `data-ruleid="${tx.ruleId}"` : (canDelete ? `data-xfrid="${esc(tx.sheetId)}"` : ''));
-      return `<div class="cal-tx-item${canEdit ? ' editable' : ''}${canSyncProjected ? ' projected-tappable' : ''}${canDelete ? ' transfer-deletable' : ''}" ${tapAttrs}>
+      const tapAttrs = canEdit ? `data-idx="${idx}"` : (canSyncProjected ? `data-ruleid="${tx.ruleId}"` : (canTransferEdit ? `data-idx="${idx}" data-xfrid="${esc(tx.sheetId)}"` : ''));
+      return `<div class="cal-tx-item${canEdit ? ' editable' : ''}${canSyncProjected ? ' projected-tappable' : ''}${canTransferEdit ? ' transfer-deletable' : ''}" ${tapAttrs}>
         <div class="cal-tx-dot ${tx.type||''}${tx.synced===false?' unsynced':''}"></div>
         <div class="cal-tx-info">
           <div class="cal-tx-tx">${esc(tx.tx)}${tx.projected ? '<span class="proj-badge">Projected</span>' : ''}${isTrulyFuture ? '<span class="future-badge">Future</span>' : ''}</div>
-          <div class="cal-tx-meta">${isTransfer ? 'Transfer' : esc(tx.cat) + ' - ' + esc(tx.pm)}${canSyncProjected ? ' · Tap for options' : ''}${canDelete ? ' · Tap to delete' : ''}</div>
+          <div class="cal-tx-meta">${isTransfer ? 'Transfer' : esc(tx.cat) + ' - ' + esc(tx.pm)}${canSyncProjected ? ' · Tap for options' : ''}${canTransferEdit ? ' · Tap to edit' : ''}</div>
         </div>
         <div class="cal-tx-amt ${tx.type||''}">${fRp(tx.amt)}</div>
-        ${canEdit || canSyncProjected || canDelete ? '<div class="cal-tx-edit-chevron">›</div>' : ''}
+        ${canEdit || canSyncProjected || canTransferEdit ? '<div class="cal-tx-edit-chevron">›</div>' : ''}
       </div>`;
     }).join('');
     calSetPanelH(txns.length);
@@ -6745,7 +6822,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       const projItem = e.target.closest('.cal-tx-item[data-ruleid]');
       if (projItem) { _touchFired = Date.now(); openProjectedActionModal(projItem.dataset.ruleid); return; }
       const xfrItem = e.target.closest('.cal-tx-item[data-xfrid]');
-      if (xfrItem) { _touchFired = Date.now(); if (confirm('Delete this transfer?')) deleteTransfer(xfrItem.dataset.xfrid); return; }
+      if (xfrItem) { _touchFired = Date.now(); openEditTransferOverlay(calCurrentTxns[parseInt(xfrItem.dataset.idx)]); return; }
       const item = e.target.closest('.cal-tx-item[data-idx]');
       if (!item) return;
       _touchFired = Date.now();
@@ -6757,7 +6834,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       const projItem = e.target.closest('.cal-tx-item[data-ruleid]');
       if (projItem) { openProjectedActionModal(projItem.dataset.ruleid); return; }
       const xfrItem = e.target.closest('.cal-tx-item[data-xfrid]');
-      if (xfrItem) { if (confirm('Delete this transfer?')) deleteTransfer(xfrItem.dataset.xfrid); return; }
+      if (xfrItem) { openEditTransferOverlay(calCurrentTxns[parseInt(xfrItem.dataset.idx)]); return; }
       const item = e.target.closest('.cal-tx-item[data-idx]');
       if (!item) return;
       openEditOverlay(parseInt(item.dataset.idx));

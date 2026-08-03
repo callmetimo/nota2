@@ -3431,27 +3431,40 @@ function _applyLocalEdit(isoDate, txName, amount, newDate, newTx, newAmount, new
 function openEditOverlay(idx) {
   let tx = calCurrentTxns[idx];
   if (!tx) return;
+  openEditOverlayFromRow(tx, calCurrentDateStr);
+}
+
+// Shared core for opening the edit overlay from any transaction row source
+// (calendar day panel via openEditOverlay, or Search page via openSearchTxEdit).
+// `row` may be a calCurrentTxns-shaped entry (amt/inc/cat) or a raw HIST.opex/
+// txHistory row (exp/inc/amount, cat/category) — both are normalized below.
+function openEditOverlayFromRow(row, dateStr) {
+  let tx = row;
+  const amt = tx.amt != null ? tx.amt : (tx.amount || tx.exp || tx.inc || 0);
+  const cat = tx.cat || tx.category || '';
   // Try HIST.opex for a rowIndex/id (fast path; works once fresh data is cached).
   // If rowIndex is still missing the server will find the row by content via _findRowIndex.
-  if (!tx.rowIndex && calCurrentDateStr) {
-    const [fy, fm, fd] = calCurrentDateStr.split('-').map(Number);
+  if (!tx.rowIndex && dateStr) {
+    const [fy, fm, fd] = dateStr.split('-').map(Number);
     const live = (HIST.opex || []).find(r =>
       r.y === fy && r.m === fm - 1 && r.d === fd && r.rowIndex &&
       r.tx.toLowerCase() === tx.tx.toLowerCase() &&
-      (r.exp || r.inc || 0) === tx.amt
+      (r.exp || r.inc || 0) === amt
     );
     if (live) tx = {...tx, rowIndex: live.rowIndex, sheetId: live.id || null};
   }
-  overlayEditRowIndex = tx.rowIndex || null;
-  overlayEditId       = tx.sheetId || null;
+  const rowIndex = tx.rowIndex || null;
+  const sheetId  = tx.sheetId || tx.id || null;
+  overlayEditRowIndex = rowIndex;
+  overlayEditId       = sheetId;
   overlayEditMode = true;
 
   // Store original identifying info so the server can find the row by content
   // when rowIndex is unavailable (old Apps Script cache / stale response).
-  overlayEditOrigDate  = calCurrentDateStr ? isoSheetDate(calCurrentDateStr) : '';
-  overlayEditOrigMonth = calCurrentDateStr ? isoMonthKey(calCurrentDateStr)  : '';
+  overlayEditOrigDate  = dateStr ? isoSheetDate(dateStr) : '';
+  overlayEditOrigMonth = dateStr ? isoMonthKey(dateStr)  : '';
   overlayEditOrigTx    = tx.tx  || '';
-  overlayEditOrigAmt   = tx.amt || 0;
+  overlayEditOrigAmt   = amt || 0;
   overlayEditOrigInc   = (tx.inc || 0) > 0;
 
   // Set mode pill (income vs expense)
@@ -3459,26 +3472,32 @@ function openEditOverlay(idx) {
   const modeBtn = document.querySelector(`.pill-toggle-btn[data-mode="${mode}"]`);
   if (modeBtn) setInputMode(mode, modeBtn);
 
-  // Pre-fill date from the selected day, constrained to current month
+  // Pre-fill date from the transaction's own date. Only clamp to current-month
+  // bounds when the transaction actually falls in the current month — editing
+  // an older transaction shouldn't be blocked from keeping its original date.
   const rawEl = document.getElementById('inputDateRaw');
   if (rawEl) {
     const b = curMonthBounds();
-    rawEl.min = b.min; rawEl.max = b.max;
-    if (calCurrentDateStr) {
-      rawEl.value = calCurrentDateStr;
-      document.getElementById('inputDateText').textContent = isoDisp(calCurrentDateStr);
+    if (dateStr && dateStr >= b.min && dateStr <= b.max) {
+      rawEl.min = b.min; rawEl.max = b.max;
+    } else {
+      rawEl.removeAttribute('min'); rawEl.removeAttribute('max');
+    }
+    if (dateStr) {
+      rawEl.value = dateStr;
+      document.getElementById('inputDateText').textContent = isoDisp(dateStr);
     }
   }
 
   // Pre-fill fields
   document.getElementById('inputTx').value     = tx.tx    || '';
-  document.getElementById('inputAmount').value = formatGroupedAmt(tx.amt);
-  document.getElementById('inputCat').value    = tx.cat   || '';
+  document.getElementById('inputAmount').value = formatGroupedAmt(amt);
+  document.getElementById('inputCat').value    = cat;
   document.getElementById('inputPm').value     = tx.pm    || '';
   document.getElementById('inputNotes').value  = tx.notes || '';
 
   // Pre-set the recurring day from the transaction's date (user still must toggle recurring ON)
-  const _recurringDay = parseInt(calCurrentDateStr?.split('-')[2] || tx.d) || new Date().getDate();
+  const _recurringDay = parseInt(dateStr?.split('-')[2] || tx.d) || new Date().getDate();
   document.getElementById('inputRecurringDay').value = _recurringDay;
 
   // Switch button labels
@@ -3595,11 +3614,6 @@ async function deleteSheetTransaction() {
 }
 
 // ── EDIT / DELETE INVEST TRANSACTION ───────────────────────────
-function openEditInvestOverlayById(id) {
-  const row = (liveInvest || []).find(r => r.id === id);
-  if (row) openEditInvestOverlay(row);
-}
-
 function openEditInvestOverlay(row) {
   if (!row) return;
   overlayEditRowIndex = row.rowIndex || null;
@@ -5434,10 +5448,13 @@ function renderTxItemHTML(item, query) {
   const syncBadge = isPending && !row.synced ? '<span class="badge badge-pending">pending</span>' : '';
   const notesHtml = !isInvest && notes ? `<div class="search-item-note">${highlightMatches(notes, query)}</div>` : '';
 
-  const editable = isInvest && item.source === 'live-invest' && row.id;
-  const clickAttr = editable ? ` onclick="openEditInvestOverlayById('${esc(row.id)}')" style="cursor:pointer"` : '';
+  const isTransfer = !isInvest && (row.cat === 'Transfer' || row.category === 'Transfer');
+  const editable = isInvest ? !!row.id : !isTransfer;
+  const tapAttrs = editable
+    ? ` data-idx="${item.idx}" data-source="${item.source}" data-type="${isInvest ? 'invest' : 'opex'}" style="cursor:pointer"`
+    : '';
 
-  return `<div class="tx-item"${clickAttr}>
+  return `<div class="tx-item"${tapAttrs}>
     <div class="tx-icon ${cls}">${icon}</div>
     <div class="tx-info" style="flex:1">
       <div class="tx-payee">${highlightMatches(tx, query)}${syncBadge}</div>
@@ -5554,6 +5571,24 @@ function highlightMatches(text, query) {
   return safe.replace(regex, '<span class="highlight">$1</span>');
 }
 
+function openSearchTxEdit(source, idx) {
+  const row = source === 'hist-opex' ? (HIST.opex || [])[idx]
+            : source === 'local-opex' ? (txHistory || [])[idx]
+            : null;
+  if (!row) return;
+  const dateStr = row.date ? String(row.date).slice(0, 10)
+    : `${row.y}-${String(row.m + 1).padStart(2, '0')}-${String(row.d).padStart(2, '0')}`;
+  openEditOverlayFromRow(row, dateStr);
+}
+
+function openSearchInvestEdit(source, idx) {
+  const row = source === 'live-invest' ? (liveInvest || [])[idx]
+            : source === 'hist-invest' ? (HIST.invest || [])[idx]
+            : null;
+  if (!row || !row.id) return;
+  openEditInvestOverlay(row);
+}
+
 function initSearchPage() {
   // Focus FIRST while still in the tap-gesture context — iOS rejects focus()
   // called after any heavy work (5K-item loop in renderAllTransactions breaks the chain).
@@ -5566,6 +5601,35 @@ function initSearchPage() {
         if (searchActiveQuery) loadMoreSearchResults(searchActiveQuery);
         else loadMoreAllTx();
       }
+    });
+
+    // Reliable tap-to-edit on mobile: inline onclick is swallowed by iOS
+    // -webkit-overflow-scrolling:touch scroll layers. Use touchstart/touchend
+    // event delegation on the container to detect taps vs scrolls (same
+    // pattern as #calTxList).
+    let _ts = 0, _tx = 0, _ty = 0, _touchFired = 0;
+    const fireSearchTap = item => {
+      const { type, source, idx } = item.dataset;
+      if (type === 'invest') openSearchInvestEdit(source, parseInt(idx));
+      else openSearchTxEdit(source, parseInt(idx));
+    };
+    resultsEl.addEventListener('touchstart', e => {
+      _ts = Date.now(); _tx = e.touches[0].clientX; _ty = e.touches[0].clientY;
+    }, {passive: true});
+    resultsEl.addEventListener('touchend', e => {
+      const dt = Date.now() - _ts;
+      const dx = Math.abs(e.changedTouches[0].clientX - _tx);
+      const dy = Math.abs(e.changedTouches[0].clientY - _ty);
+      if (dt > 400 || dx > 8 || dy > 8) return; // scroll or long-press
+      const item = e.target.closest('.tx-item[data-idx]');
+      if (!item) return;
+      _touchFired = Date.now(); fireSearchTap(item);
+    }, {passive: true});
+    resultsEl.addEventListener('click', e => {
+      if (Date.now() - _touchFired < 600) return;
+      const item = e.target.closest('.tx-item[data-idx]');
+      if (!item) return;
+      fireSearchTap(item);
     });
   }
   clearSearch();

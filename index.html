@@ -97,16 +97,17 @@ body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:
 /* Non-home pages need their own scroll since body is overflow:hidden */
 #page-insights.active,#page-networth.active,#page-goals.active,#page-recurring.active,#page-profile.active,#page-settings.active,#page-account.active{
   display:block;
-  height:calc(100dvh - var(--header-height,80px) - var(--bottom-nav-h,56px));
+  height:calc(var(--app-vh,100dvh) - var(--header-height,80px) - var(--bottom-nav-h,56px));
   overflow-y:auto;
   -webkit-overflow-scrolling:touch;
-  padding-bottom:24px;
+  overscroll-behavior:contain;
+  padding-bottom:100px;
 }
 /* Search page: flex column so header is sticky and list scrolls */
 #page-search.active{
   display:flex;
   flex-direction:column;
-  height:calc(100dvh - var(--header-height,80px) - var(--bottom-nav-h,56px));
+  height:calc(var(--app-vh,100dvh) - var(--header-height,80px) - var(--bottom-nav-h,56px));
   overflow:hidden;
   padding:0;
 }
@@ -138,7 +139,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .amount-prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text2);font-size:15px}
 .amount-input{padding-left:44px !important;font-size:20px !important;font-weight:600}
 .autocomplete-wrapper{position:relative}
-.autocomplete-list{position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--radius-sm);z-index:200;max-height:150px;overflow-y:auto;margin-top:3px}
+.autocomplete-list{position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--radius-sm);z-index:200;max-height:150px;overflow-y:auto;overscroll-behavior:contain;margin-top:3px}
 .autocomplete-item{padding:9px 12px;font-size:14px;cursor:pointer;border-bottom:0.5px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .autocomplete-item:last-child{border-bottom:none}
 .autocomplete-item:active{background:var(--accent-dim);color:var(--accent)}
@@ -211,7 +212,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .search-clear-btn svg{width:18px;height:18px}
 .search-clear-btn:active{color:var(--accent)}
 #searchResultsCount{flex-shrink:0;padding:8px 20px 0;font-size:12px;color:var(--text2)}
-#searchResults{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 20px 20px}
+#searchResults{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 20px 100px}
 .search-loading{text-align:center;padding:12px 20px;font-size:12px;color:var(--text2)}
 .search-item-note{font-size:11px;color:var(--text2);margin-top:5px;padding:6px 0;border-top:0.5px solid var(--border);word-break:break-word}
 .search-item-note .highlight{color:var(--accent);font-weight:500}
@@ -319,7 +320,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 /* MODAL */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:500;align-items:flex-end;display:none}
 .modal-overlay.open{display:flex}
-.modal{background:var(--bg2);border-radius:20px 20px 0 0;padding:18px;width:100%;max-height:85vh;overflow-y:auto;border-top:0.5px solid var(--border2)}
+.modal{background:var(--bg2);border-radius:20px 20px 0 0;padding:18px;width:100%;max-height:85vh;overflow-y:auto;overscroll-behavior:contain;border-top:0.5px solid var(--border2)}
 .modal-handle{width:32px;height:3px;background:var(--border2);border-radius:2px;margin:0 auto 14px}
 .modal-title{font-size:15px;font-weight:600;margin-bottom:14px}
 .modal-actions{display:flex;gap:7px;margin-top:10px}
@@ -338,7 +339,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 #page-home.active{display:flex}
 
 /* Calendar segment — top 54% of #page-home */
-.cal-scroll{flex:54 54 0;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;border-bottom:0.5px solid var(--border);scroll-snap-type:y mandatory;scroll-behavior:smooth;overscroll-behavior:contain}
+.cal-scroll{flex:54 54 0;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;border-bottom:0.5px solid var(--border);scroll-snap-type:y mandatory;scroll-behavior:smooth;overscroll-behavior:contain;padding-bottom:24px}
 
 .cal-month-label{display:flex;align-items:center;gap:10px;padding:10px 16px 8px;scroll-snap-align:start;scroll-snap-stop:always}
 .cal-month-name{font-size:20px;font-weight:700;letter-spacing:-0.4px;min-width:100px;flex-shrink:0}

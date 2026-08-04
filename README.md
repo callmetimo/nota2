@@ -197,6 +197,11 @@ performance improvements.
 - **Settings Selector Grid**: Redesigned the settings selector navigation bar from a scrolling flex row into a neat, fully visible 2x2 grid, making tabs like "Payment Methods" and "Accounts" fit perfectly on mobile screens without truncation.
 - **Expense Insights Account Filter**: Replaced the static, hardcoded payment source flex toggles ("All", "Flazz", "eWallet", "Bank", "CC") on the Expense Insights tab with a single dynamic **Account Filter** select dropdown at the very top of the section (matching the design in the Search tab). Synchronized all underlying chart view scopes (`wView`, `mView`, `yView`, `cView`) with the dropdown value and updated the chart summary labels dynamically. When set to "All Accounts", the scopes now correctly evaluate all transaction data, including credit cards.
 
+### Session 17: Resolve Bootstrap Hang Caused by Hoisting Order / ReferenceError
+- **Bug**: Upon launching the app, the UI would remain indefinitely stuck on the Google sign-in overlay showing "Setting up your Nota spreadsheet".
+- **Root Cause**: The modularization refactor (Session 11) moved `updateHeaderHeight()` to `ui-insights.js`. However, `index.html` was invoking this function synchronously in the global scope during initial script load before the external `ui-insights.js` script tag (placed at the bottom of the body) was fetched and executed. This threw a synchronous `ReferenceError` that halted the main script before it registered the `DOMContentLoaded` listener, preventing the sign-in overlay from receiving the signal to hide (`Auth.markAppReady()`).
+- **Fix**: Moved `updateHeaderHeight()` and date picker initialization functions inside the `DOMContentLoaded` event listener, guaranteeing that all deferred and synchronous modular sub-scripts (`ui-settings.js`, `ui-calendar.js`, and `ui-insights.js`) are fully loaded and defined before their contents are executed.
+
 ## Config Persistence Pattern (Best Practice)
 
 When adding new user-configurable features (checkboxes, toggles, flags, settings), always persist them to the Google Sheets `Config` sheet using an empty column, not hardcoded in `index.html` or stored only in memory/localStorage.

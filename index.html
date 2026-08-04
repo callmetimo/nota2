@@ -587,8 +587,20 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <div class="form-group autocomplete-wrapper">
           <label class="form-label" id="inputPmLabel">Payment Method</label>
           <input type="text" class="form-input" id="inputPm" placeholder="Method..." autocomplete="off" maxlength="50"
-            oninput="showAC('inputPm', getSmartPms())" onfocus="showAC('inputPm', getSmartPms())">
+            oninput="showAC('inputPm', getSmartPms()); checkCcInstallmentVisibility()" onfocus="showAC('inputPm', getSmartPms())">
           <div class="autocomplete-list" id="ac-inputPm" style="display:none"></div>
+        </div>
+      </div>
+      <div class="form-group" id="installmentRow" style="display:none;background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:0.5px solid var(--border);margin-top:6px">
+        <label class="form-label" style="margin-bottom:6px">Installment Option</label>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <div class="pill-toggle-btn active expense" id="ccFullPaymentBtn" onclick="setInstallmentMode('full')">Full Payment</div>
+          <div class="pill-toggle-btn" id="ccInstallmentBtn" onclick="setInstallmentMode('installment')">Installment</div>
+        </div>
+        <div id="installmentPeriodContainer" style="display:none;align-items:center;gap:8px">
+          <span style="color:var(--text2);font-size:13px">Period:</span>
+          <input type="number" class="form-input" id="inputInstallmentMonths" min="2" placeholder="X" style="width:70px">
+          <span style="color:var(--text2);font-size:13px">months</span>
         </div>
       </div>
       <div class="form-group">
@@ -2572,6 +2584,7 @@ function setInputMode(mode, el) {
   }
   document.getElementById('inputCat').value = '';
   document.getElementById('inputPm').value = '';
+  checkCcInstallmentVisibility();
 }
 
 function setInvestAction(action, el) {
@@ -2601,11 +2614,78 @@ function selectAC(fid,val){
   if(fid==='inputTx'){onTxSelect(val);}
   if(fid==='inputStock'){onStockSelect(val);}
   if(fid==='inputAccount'){onAccountSelect();}
+  if(fid==='inputPm'){checkCcInstallmentVisibility();}
 }
 document.addEventListener('click',e=>{
   if(!e.target.closest('.autocomplete-wrapper'))
     document.querySelectorAll('.autocomplete-list').forEach(d=>d.style.display='none');
 });
+
+// ── CC INSTALLMENT OPTIONS ────────────────────────────────────
+function checkCcInstallmentVisibility() {
+  const pmVal = document.getElementById('inputPm').value.trim();
+  const isCC = isCreditCardPM(pmVal);
+  const isExpense = inputMode === 'expense';
+  const isNew = !overlayEditMode;
+  const row = document.getElementById('installmentRow');
+  if (row) {
+    row.style.display = (isCC && isExpense && isNew) ? '' : 'none';
+  }
+  if (!isCC || !isExpense || !isNew) {
+    setInstallmentMode('full');
+  }
+}
+
+function setInstallmentMode(mode) {
+  const fullBtn = document.getElementById('ccFullPaymentBtn');
+  const instBtn = document.getElementById('ccInstallmentBtn');
+  const container = document.getElementById('installmentPeriodContainer');
+  const monthsInput = document.getElementById('inputInstallmentMonths');
+  if (!fullBtn || !instBtn || !container) return;
+
+  if (mode === 'installment') {
+    instBtn.classList.add('active', 'expense');
+    fullBtn.classList.remove('active', 'expense');
+    container.style.display = 'flex';
+  } else {
+    fullBtn.classList.add('active', 'expense');
+    instBtn.classList.remove('active', 'expense');
+    container.style.display = 'none';
+  }
+}
+
+function dateToMonthKey(dateStr) {
+  if (!dateStr) return curMonthKey();
+  const parts = dateStr.split('-');
+  return `${parts[0]}-${parts[1]}`;
+}
+
+function getEndMonth(dateStr, months) {
+  const parts = dateStr.split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  
+  let targetM = m + months - 1;
+  let targetY = y;
+  while (targetM > 12) {
+    targetM -= 12;
+    targetY += 1;
+  }
+  return `${targetY}-${String(targetM).padStart(2, '0')}`;
+}
+
+function getInstallmentName(rule, monthKey) {
+  if (!rule.installmentTotal || !rule.installmentStart) return rule.tx;
+  const [startY, startM] = rule.installmentStart.split('-').map(Number);
+  const [curY, curM] = monthKey.split('-').map(Number);
+  const monthsDiff = (curY - startY) * 12 + (curM - startM);
+  const curIndex = monthsDiff + 1;
+  if (curIndex <= rule.installmentTotal) {
+    const cleanName = rule.tx.replace(/\s*\(Installment\)$/i, '');
+    return `${cleanName} (${curIndex}/${rule.installmentTotal})`;
+  }
+  return rule.tx;
+}
 
 // ── TX SMART SUGGESTIONS ──────────────────────────────────────
 function getRecentMonths(n) {
@@ -2689,6 +2769,7 @@ function autoFillIfExactMatch(txName) {
     document.getElementById('inputCat').value = txCat[catKey][0];
   if (pmKey && txPm[pmKey].length > 0)
     document.getElementById('inputPm').value = txPm[pmKey][0];
+  checkCcInstallmentVisibility();
 }
 
 function updateSmartSuggestions(txName) {
@@ -2981,6 +3062,7 @@ function openInputOverlay() {
   document.getElementById('inputRecurringEndMonth').value = '';
   document.getElementById('inputRecurringEndYear').value = '';
   if (typeof buildSmartPills === 'function') buildSmartPills();
+  checkCcInstallmentVisibility();
   document.getElementById('inputOverlay').classList.add('open');
   // Focus first input after slide animation completes
   setTimeout(() => {
@@ -3064,8 +3146,27 @@ function submitOpex() {
   const pm=sanitizeInput(document.getElementById('inputPm').value,50);
   const notes=sanitizeInput(document.getElementById('inputNotes').value,200);
   if(!date||!tx||!amount||!cat||!pm){isSyncing=false;showToast('All fields required','error');return}
+
+  // CC Installment Logic
+  const isInstallment = document.getElementById('ccInstallmentBtn').classList.contains('active');
+  const installmentMonths = parseInt(document.getElementById('inputInstallmentMonths').value) || 0;
+  if (isInstallment) {
+    if (installmentMonths < 2) {
+      isSyncing = false;
+      showToast('Installment period must be at least 2 months', 'error');
+      return;
+    }
+  }
+
+  let finalAmount = amount;
+  let finalTx = tx;
+  if (isInstallment) {
+    finalAmount = Math.round(amount / installmentMonths);
+    finalTx = `${tx} (1/${installmentMonths})`;
+  }
+
   const isFuture = date > todayISO();
-  const r = {id:Date.now(),date,tx,amount,category:cat,pm,notes,type:inputMode,synced:false,future:isFuture};
+  const r = {id:Date.now(),date,tx:finalTx,amount:finalAmount,category:cat,pm,notes,type:inputMode,synced:false,future:isFuture};
   txHistory.unshift(r);
   queue.push({...r, action:inputMode});
   saveLocal();updateStatus();
@@ -3097,7 +3198,26 @@ function submitOpex() {
     else showToast(navigator.onLine ? 'Saved locally — sync pending' : 'Offline — will sync when connected','');
   });
   // Save recurring rule if toggle is ON
-  if (document.getElementById('inputRecurring').checked) {
+  if (isInstallment) {
+    const endMonthVal = getEndMonth(date, installmentMonths);
+    const rules = loadRecurring();
+    rules.push({
+      id: Date.now() + 1,
+      type: 'expense',
+      tx: `${tx} (Installment)`,
+      cat,
+      amount: finalAmount,
+      pm,
+      notes: notes || '',
+      dayOfMonth: parseInt(date.split('-')[2]) || new Date().getDate(),
+      active: true,
+      lastFired: dateToMonthKey(date),
+      endMonth: endMonthVal,
+      installmentTotal: installmentMonths,
+      installmentStart: dateToMonthKey(date)
+    });
+    saveRecurring(rules);
+  } else if (document.getElementById('inputRecurring').checked) {
     const day = parseInt(document.getElementById('inputRecurringDay').value) || 0;
     if (day >= 1 && day <= 31) {
       const endMonth = _getEndMonthValue('inputRecurringEndMonth', 'inputRecurringEndYear');
@@ -3127,6 +3247,7 @@ function resetOpexForm() {
   document.getElementById('inputPm').value='';
   document.getElementById('inputNotes').value='';
   resetRecurringToggle();
+  checkCcInstallmentVisibility();
 }
 
 // ── TRANSFER ──────────────────────────────────────────────────
@@ -3505,6 +3626,7 @@ function openEditOverlayFromRow(row, dateStr) {
   document.getElementById('submitOpexBtn').textContent = 'Update Transaction';
   document.getElementById('deleteOpexBtn').style.display = 'block';
 
+  checkCcInstallmentVisibility();
   document.getElementById('inputOverlay').classList.add('open');
 }
 
@@ -7675,7 +7797,7 @@ function getRecurringProjections(year, month) {
       id: `proj_${r.id}`,
       ruleId: r.id,
       date: `${year}-${String(month).padStart(2,'0')}-${String(r.dayOfMonth).padStart(2,'0')}`,
-      tx: r.tx,
+      tx: getInstallmentName(r, mk),
       amount: r.amount,
       category: r.cat,
       pm: r.pm,
@@ -7749,7 +7871,7 @@ function _renderRecurringPrompt() {
     <label class="recurring-prompt-item">
       <input class="recurring-prompt-check" type="checkbox" data-ridx="${i}" checked onchange="_updateRecurringPromptBtn()">
       <div class="recurring-prompt-info">
-        <div class="recurring-prompt-tx">${esc(r.tx)}</div>
+        <div class="recurring-prompt-tx">${esc(getInstallmentName(r, curMonthKey()))}</div>
         <div class="recurring-prompt-meta">${esc(r.cat)} · ${esc(r.pm)}</div>
       </div>
       <div class="recurring-prompt-amt ${r.type === 'income' ? 'income' : ''}" style="color:${r.type==='income'?'var(--green)':'var(--text)'}">${r.type === 'income' ? '+' : '-'}${fRp(r.amount)}</div>
@@ -7766,7 +7888,8 @@ function _updateRecurringPromptBtn() {
 // the local optimistic transaction and pushes it to the sheet the same way submitOpex() does.
 function _addAndSyncRecurringRule(r) {
   const today = todayISO();
-  const rec = { id: Date.now() + Math.random(), date: today, tx: r.tx, amount: r.amount,
+  const txName = getInstallmentName(r, curMonthKey());
+  const rec = { id: Date.now() + Math.random(), date: today, tx: txName, amount: r.amount,
     category: r.cat, pm: r.pm, notes: r.notes || '', type: r.type, synced: false };
   txHistory.unshift(rec);
   queue.push({...rec, action: r.type});

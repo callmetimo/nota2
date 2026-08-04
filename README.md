@@ -108,6 +108,17 @@ signed-in user's own short-lived OAuth token.
 - **Disabled State for Sign-in Button**: Updated `auth.js` `signIn()` to visually disable the "Sign in with Google" button (`btn.disabled = true; btn.textContent = 'Connecting...'`) immediately upon click to prevent accidental double-clicks and confusion while the background auth and bootstrap process is running.
 - **Error Recovery**: Automatically re-enables the button and restores its text if the Google authentication or bootstrap fails, allowing the user to try again safely.
 
+### Session 14: Credit Card Installment Options & Automatic Recurring Transactions
+- **Credit Card Installment Toggle**: Added a brand-consistent "Installment Option" row (`#installmentRow`) to the Expense input form which is dynamically revealed only when a configured Credit Card Payment Method is selected.
+  - Features two active toggle pill buttons: **Full Payment** (default) and **Installment**.
+  - Selecting **Installment** reveals an inline number input to let users type the installment period (`X`) in months.
+- **Installment Splits & Automatic Recurring Rules**: 
+  - On submission, if **Installment** is selected with period `X` (min 2 months), the app automatically divides the total amount by `X`.
+  - Records the first payment immediately as a regular transaction, appending `(1/X)` to the name.
+  - Automatically creates a recurring rule for the remaining `X-1` months, calculating the correct `endMonth` (Date + `X-1` months) and setting `lastFired` to the current month to prevent duplicate triggers.
+  - Automatically syncs this new rule to the user's `Recurring` sheet in Google Sheets.
+- **Dynamic Installment Index Naming**: Integrated dynamic name formatting (`getInstallmentName()`) into the recurring projection engine, calendar display, and recurring prompt popup, showing progressive indexes (e.g. `(2/3)`, `(3/3)`) for subsequent monthly installments.
+
 ## Config Persistence Pattern (Best Practice)
 
 When adding new user-configurable features (checkboxes, toggles, flags, settings), always persist them to the Google Sheets `Config` sheet using an empty column, not hardcoded in `index.html` or stored only in memory/localStorage.

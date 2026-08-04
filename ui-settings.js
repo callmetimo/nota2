@@ -1726,5 +1726,3 @@ function deleteRecurringRule(id) {
   renderRecurringList();
   showToast('Recurring rule deleted', 'success');
 }
-</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" integrity="sha384-dug+JxfBvklEQdJ4AYuBBAIScUz0bVN73xpy273gcAwHjb3qI0fXmuYNaNfdyYJG" crossorigin="anonymous">

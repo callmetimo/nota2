@@ -2350,10 +2350,17 @@ function closeInputOverlay() {
 }
 
 // ── Handle bar swipe-down to close ───────────────────────────
-// Attach directly — script runs after DOM is parsed, no DOMContentLoaded needed
+// Attach directly — script runs after DOM is parsed, no DOMContentLoaded needed.
+// closeGoalsOverlay/closeConfigItemOverlay live in ui-settings.js, which loads
+// after this inline script — wrap in arrow functions so the lookup happens at
+// swipe time (once ui-settings.js has loaded), not here. A direct reference
+// throws ReferenceError immediately, which used to halt this script's
+// execution before it could reach the DOMContentLoaded listener further down
+// (the one that calls Auth.markAppReady()) — leaving the sign-in overlay
+// stuck forever even after a successful sign-in.
 attachSwipeClose('inputSheetHandle', closeInputOverlay);
-attachSwipeClose('goalsSheetHandle', closeGoalsOverlay);
-attachSwipeClose('configItemSheetHandle', closeConfigItemOverlay);
+attachSwipeClose('goalsSheetHandle', () => closeGoalsOverlay());
+attachSwipeClose('configItemSheetHandle', () => closeConfigItemOverlay());
 
 function openInputFromHome() {
   openInputOverlay();

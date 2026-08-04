@@ -213,7 +213,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .search-clear-btn svg{width:18px;height:18px}
 .search-clear-btn:active{color:var(--accent)}
 #searchResultsCount{flex-shrink:0;padding:8px 20px 0;font-size:12px;color:var(--text2)}
-#searchResults{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 20px 100px}
+#searchResults, #searchMonitorContainer{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:12px 20px 100px}
 .search-loading{text-align:center;padding:12px 20px;font-size:12px;color:var(--text2)}
 .search-item-note{font-size:11px;color:var(--text2);margin-top:5px;padding:6px 0;border-top:0.5px solid var(--border);word-break:break-word}
 .search-item-note .highlight{color:var(--accent);font-weight:500}
@@ -761,7 +761,8 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     </div>
   </div>
   <div id="searchResultsCount" style="display:none"></div>
-  <div id="searchResults"></div>
+  <div id="searchResults" style="display:none"></div>
+  <div id="searchMonitorContainer"></div>
 </div>
 
 <!-- INSIGHTS -->
@@ -773,7 +774,6 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
   <div class="toggle-row" id="insightsSubPageToggle" style="margin-bottom:16px">
     <div class="toggle-btn active" data-sub="accounts" onclick="setInsightsSubPage('accounts',this)">Accounts</div>
     <div class="toggle-btn" data-sub="expense" onclick="setInsightsSubPage('expense',this)">Expense Insights</div>
-    <div class="toggle-btn" data-sub="cc" onclick="setInsightsSubPage('cc',this)">Transactions</div>
   </div>
 
   <!-- Subpage 1: Accounts -->
@@ -867,10 +867,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     </div>
   </div>
 
-  <!-- Subpage 3: Transactions -->
-  <div id="insightsSubCC" style="display:none">
-    <div id="ccMonitorContainer"></div>
-  </div>
+
 </div>
 
 <!-- NET WORTH -->
@@ -3029,7 +3026,7 @@ function switchTab(tab, el) {
   }
   if(tab==='search'){
     initSearchPage();
-    if(!histLoaded) onHistLoaded(()=>{ if(!searchActiveQuery) renderAllTransactions(); });
+    if(!histLoaded) onHistLoaded(()=>{ renderSearchOrMonitor(); });
   }
 }
 
@@ -3658,6 +3655,10 @@ async function updateTransaction() {
   calInited = false; initCalendar();
   buildAccountBalances();
   renderAccountBalanceCards();
+  if (document.getElementById('page-search').classList.contains('active')) {
+    renderSearchOrMonitor();
+    if (searchActiveQuery) performSearch(searchActiveQuery);
+  }
   showToast('Updating…', 'loading', 0);
 
   const payload = {
@@ -3678,6 +3679,10 @@ async function updateTransaction() {
       calInited = false; initCalendar();
       buildAccountBalances();
       renderAccountBalanceCards();
+      if (document.getElementById('page-search').classList.contains('active')) {
+        renderSearchOrMonitor();
+        if (searchActiveQuery) performSearch(searchActiveQuery);
+      }
       showToast('Updated ✓', 'success');
     } else {
       showToast('Updated locally ✓', 'success');
@@ -3712,6 +3717,10 @@ async function deleteSheetTransaction() {
   calInited = false; initCalendar();
   buildAccountBalances();
   renderAccountBalanceCards();
+  if (document.getElementById('page-search').classList.contains('active')) {
+    renderSearchOrMonitor();
+    if (searchActiveQuery) performSearch(searchActiveQuery);
+  }
   showToast('Deleting…', 'loading', 0);
 
   const payload = {
@@ -3725,7 +3734,16 @@ async function deleteSheetTransaction() {
       showToast('Deleted ✓', 'success');
       // Force-refresh cache from sheet so the deleted row is gone from localStorage.
       // This prevents the stale cache from showing the deleted transaction on next startup.
-      fetchCurrentMonth(true).then(() => { calInited = false; if (document.getElementById('page-home').classList.contains('active')) initCalendar(); buildAccountBalances(); renderAccountBalanceCards(); });
+      fetchCurrentMonth(true).then(() => {
+        calInited = false;
+        if (document.getElementById('page-home').classList.contains('active')) initCalendar();
+        buildAccountBalances();
+        renderAccountBalanceCards();
+        if (document.getElementById('page-search').classList.contains('active')) {
+          renderSearchOrMonitor();
+          if (searchActiveQuery) performSearch(searchActiveQuery);
+        }
+      });
     } else {
       showToast('Deleted locally ✓', 'success');
     }
@@ -3790,7 +3808,7 @@ async function updateInvestTransaction() {
       await fetchLiveInvest();
       localStorage.removeItem(curMonthCacheKey());
       await fetchCurrentMonth(true);
-      if (document.getElementById('page-search').classList.contains('active')) renderAllTransactions();
+      if (document.getElementById('page-search').classList.contains('active')) renderSearchOrMonitor();
       buildAccountBalances();
       renderAccountBalanceCards();
       showToast('Updated ✓', 'success');
@@ -3816,7 +3834,7 @@ async function deleteSheetInvestTransaction() {
       await fetchLiveInvest();
       localStorage.removeItem(curMonthCacheKey());
       await fetchCurrentMonth(true);
-      if (document.getElementById('page-search').classList.contains('active')) renderAllTransactions();
+      if (document.getElementById('page-search').classList.contains('active')) renderSearchOrMonitor();
       buildAccountBalances();
       renderAccountBalanceCards();
       showToast('Deleted ✓', 'success');
@@ -3968,18 +3986,14 @@ function setInsightsSubPage(sub, el) {
 
   const subAccounts = document.getElementById('insightsSubAccounts');
   const subExpense = document.getElementById('insightsSubExpense');
-  const subCC = document.getElementById('insightsSubCC');
 
   if (subAccounts) subAccounts.style.display = (insightsSubPage === 'accounts' ? 'block' : 'none');
   if (subExpense) subExpense.style.display = (insightsSubPage === 'expense' ? 'block' : 'none');
-  if (subCC) subCC.style.display = (insightsSubPage === 'cc' ? 'block' : 'none');
 
   if (insightsSubPage === 'accounts') {
     renderAccountBalanceCards();
   } else if (insightsSubPage === 'expense') {
     renderChartTab(insightsMode);
-  } else if (insightsSubPage === 'cc') {
-    renderCCMonitor();
   }
 }
 
@@ -3994,33 +4008,18 @@ function onCCPmChange(val) {
 }
 
 function renderCCMonitor() {
-  const container = document.getElementById('ccMonitorContainer');
+  const container = document.getElementById('searchMonitorContainer');
   if (!container) return;
 
   const curY = ccMonitorDate.getFullYear();
   const curM = ccMonitorDate.getMonth() + 1; // 1-12
   const monthNameStr = new Date(curY, curM - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
-  // 1. Credit Card PM detection
-  const ccPmSet = new Set();
-  (CONFIG_ITEMS || []).forEach(item => {
-    if (item.kind === 'account' && item.linkedPM) {
-      ccPmSet.add(item.linkedPM.trim());
-    }
-    if (item.kind === 'pm' && item.name && item.name.toLowerCase().includes('cc')) {
-      ccPmSet.add(item.name.trim());
-    }
-  });
-  (allPMs || []).forEach(pm => {
-    if (pm.toLowerCase().includes('cc')) {
-      ccPmSet.add(pm.trim());
-    }
-  });
-  if (ccPmSet.size === 0) ccPmSet.add('CC BCA');
-  const ccPmList = Array.from(ccPmSet);
+  // 1. Get all available payment methods (from settings/history config)
+  const pmList = Array.from(new Set(allPMs || []));
 
   const targetPms = (ccMonitorPmFilter === 'all')
-    ? ccPmList.map(p => p.toLowerCase())
+    ? pmList.map(p => p.toLowerCase())
     : [ccMonitorPmFilter.toLowerCase()];
 
   function isMatchPM(pmVal) {
@@ -4029,42 +4028,47 @@ function renderCCMonitor() {
     return targetPms.some(t => low.includes(t) || t.includes(low));
   }
 
-  // 2. Fetch current month expenses
+  // 2. Fetch current month opex transactions (both expenses and incomes)
   const currentTxns = [];
-  (HIST.opex || []).forEach(r => {
-    if (r.y === curY && r.m === (curM - 1) && (r.exp || 0) > 0 && isMatchPM(r.pm)) {
+  (HIST.opex || []).forEach((r, i) => {
+    if (r.y === curY && r.m === (curM - 1) && isMatchPM(r.pm)) {
+      const isInc = (r.inc || 0) > 0;
       currentTxns.push({
-        date: `${curY}-${String(curM).padStart(2, '0')}-${String(r.d).padStart(2, '0')}`,
+        source: 'hist-opex',
+        idx: i,
         day: r.d,
-        desc: r.tx || r.notes || 'Expense',
-        category: r.cat || 'Other',
-        pm: r.pm || 'CC',
-        amount: Number(r.exp) || 0,
-        notes: r.notes || ''
+        desc: r.tx || r.notes || (isInc ? 'Income' : 'Expense'),
+        category: r.cat || (isInc ? 'Income' : 'Other'),
+        pm: r.pm || '',
+        amount: Number(isInc ? r.inc : r.exp) || 0,
+        type: isInc ? 'income' : 'expense',
+        row: r
       });
     }
   });
 
   const isCurrentCalMonth = (curY === new Date().getFullYear() && curM === (new Date().getMonth() + 1));
-  (txHistory || []).forEach(r => {
-    if (r.type !== 'expense' || !r.amount) return;
+  (txHistory || []).forEach((r, i) => {
     if (isCurrentCalMonth && r.synced) return;
     if (!r.date) return;
     const parts = r.date.split('-');
     if (+parts[0] === curY && +parts[1] === curM && isMatchPM(r.pm)) {
+      const isInc = r.type === 'income';
       currentTxns.push({
-        date: r.date,
+        source: 'local-opex',
+        idx: i,
         day: parseInt(parts[2], 10),
-        desc: r.desc || r.notes || 'Expense',
-        category: r.category || 'Other',
-        pm: r.pm || 'CC',
+        desc: r.tx || r.notes || (isInc ? 'Income' : 'Expense'),
+        category: r.category || (isInc ? 'Income' : 'Other'),
+        pm: r.pm || '',
         amount: Number(r.amount) || 0,
-        notes: r.notes || ''
+        type: r.type,
+        row: r
       });
     }
   });
 
-  // Previous month total for comparison
+  // Previous month opex expenses total for comparison
   let prevY = curY;
   let prevM = curM - 1;
   if (prevM < 1) { prevM = 12; prevY--; }
@@ -4076,27 +4080,20 @@ function renderCCMonitor() {
   });
 
   currentTxns.sort((a, b) => b.day - a.day || b.amount - a.amount);
-  const currentTotal = currentTxns.reduce((s, t) => s + t.amount, 0);
+  const currentTotalExpenses = currentTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  const currentTotalIncome = currentTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const txCount = currentTxns.length;
-  const avgTx = txCount > 0 ? Math.round(currentTotal / txCount) : 0;
+  const avgTx = txCount > 0 ? Math.round(currentTotalExpenses / txCount) : 0;
 
   let compDiffHtml = '';
   if (prevTotal > 0) {
-    const diffPct = Math.round(((currentTotal - prevTotal) / prevTotal) * 100);
+    const diffPct = Math.round(((currentTotalExpenses - prevTotal) / prevTotal) * 100);
     const sign = diffPct > 0 ? '+' : '';
     const color = diffPct > 0 ? 'var(--red)' : 'var(--accent)';
     compDiffHtml = `<span style="color:${color};font-weight:600">${sign}${diffPct}%</span> vs prev month`;
   } else {
     compDiffHtml = 'No prev month comparison';
   }
-
-  const catMap = {};
-  currentTxns.forEach(t => {
-    catMap[t.category] = (catMap[t.category] || 0) + t.amount;
-  });
-  const catList = Object.entries(catMap)
-    .map(([cat, amt]) => ({ cat, amt, pct: currentTotal > 0 ? (amt / currentTotal * 100) : 0 }))
-    .sort((a, b) => b.amt - a.amt);
 
   let html = `
     <!-- Header Controls -->
@@ -4111,7 +4108,7 @@ function renderCCMonitor() {
         <span style="font-size:12px;color:var(--text2);white-space:nowrap">Account Filter:</span>
         <select class="form-input" style="padding:6px 10px;font-size:12px;border-radius:var(--radius-sm)" onchange="onCCPmChange(this.value)">
           <option value="all"${ccMonitorPmFilter==='all'?' selected':''}>All Accounts</option>
-          ${ccPmList.map(pm => `<option value="${esc(pm)}"${ccMonitorPmFilter===pm?' selected':''}>${esc(pm)}</option>`).join('')}
+          ${pmList.map(pm => `<option value="${esc(pm)}"${ccMonitorPmFilter===pm?' selected':''}>${esc(pm)}</option>`).join('')}
         </select>
       </div>
     </div>
@@ -4119,42 +4116,16 @@ function renderCCMonitor() {
     <!-- Summary Stats -->
     <div class="summary-row" style="grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
       <div class="summary-card">
-        <div class="s-label">Total Transactions</div>
-        <div class="s-value" style="color:var(--text);font-size:19px">${fRpS(currentTotal)}</div>
+        <div class="s-label">Total Expenses</div>
+        <div class="s-value" style="color:var(--text);font-size:19px">${fRpS(currentTotalExpenses)}</div>
         <div class="s-sub">${compDiffHtml}</div>
       </div>
       <div class="summary-card">
-        <div class="s-label">Transactions</div>
-        <div class="s-value" style="color:var(--text);font-size:19px">${txCount} <span style="font-size:12px;font-weight:normal;color:var(--text2)">txns</span></div>
-        <div class="s-sub">Avg ${fRpS(avgTx)} / txn</div>
+        <div class="s-label">Total Income</div>
+        <div class="s-value" style="color:var(--green);font-size:19px">${fRpS(currentTotalIncome)}</div>
+        <div class="s-sub">${txCount} txn${txCount !== 1 ? 's' : ''} avg ${fRpS(avgTx)}</div>
       </div>
     </div>
-
-    <!-- Category Breakdown -->
-    ${catList.length > 0 ? `
-      <div class="chart-card" style="margin-bottom:12px">
-        <div class="chart-card-title">Category Breakdown</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          ${catList.map(item => {
-            const catColor = CAT_COLORS[item.cat] || 'var(--accent)';
-            return `
-              <div>
-                <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-                  <span style="font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
-                    <span style="width:8px;height:8px;border-radius:50%;background:${catColor}"></span>
-                    ${esc(item.cat)}
-                  </span>
-                  <span style="color:var(--text2)">${fRpS(item.amt)} (${item.pct.toFixed(1)}%)</span>
-                </div>
-                <div style="width:100%;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden">
-                  <div style="width:${Math.min(100, Math.max(2, item.pct))}%;height:100%;background:${catColor};border-radius:3px"></div>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-    ` : ''}
 
     <!-- Transaction List -->
     <div class="chart-card">
@@ -4165,28 +4136,34 @@ function renderCCMonitor() {
         </div>
       ` : `
         <div style="display:flex;flex-direction:column;gap:0">
-          ${currentTxns.map(t => {
-            const catColor = CAT_COLORS[t.category] || 'var(--text2)';
+          ${currentTxns.map(item => {
+            const t = item.row;
+            const isInc = item.type === 'income';
+            const catColor = CAT_COLORS[t.cat || t.category] || 'var(--text2)';
+            const amountStr = (isInc ? '+' : '-') + fRpS(item.amount);
+            const amountColor = isInc ? 'var(--green)' : 'var(--text)';
+            const dispDate = monthNameStr.split(' ')[0] + ' ' + item.day;
+            const tapAttrs = `data-idx="${item.idx}" data-source="${item.source}" data-type="opex" style="cursor:pointer"`;
             return `
-              <div class="detail-item" style="padding:10px 0">
+              <div class="detail-item" style="padding:10px 0" ${tapAttrs}>
                 <div style="flex:1;min-width:0;padding-right:8px">
                   <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                    ${esc(t.desc)}
+                    ${esc(t.tx || t.desc || '')}
                   </div>
                   <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
                     <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg3);color:${catColor};font-weight:600">
-                      ${esc(t.category)}
+                      ${esc(t.cat || t.category || '')}
                     </span>
                     <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg3);color:var(--text2)">
-                      ${esc(t.pm)}
+                      ${esc(t.pm || '')}
                     </span>
-                    <span style="font-size:11px;color:var(--text2)">
-                      ${monthNameStr.split(' ')[0]} ${t.day}
+                    <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg3);color:var(--text2)">
+                      ${dispDate}
                     </span>
                   </div>
                 </div>
-                <div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap">
-                  ${fRpS(t.amount)}
+                <div style="font-size:14px;font-weight:700;color:${amountColor};white-space:nowrap">
+                  ${amountStr}
                 </div>
               </div>
             `;
@@ -5482,12 +5459,35 @@ let searchScrollAttached = false;
 let allTxResults = [];
 let allTxPageIndex = 0;
 
+function renderSearchOrMonitor() {
+  const query = (document.getElementById('searchInput')?.value || '').trim();
+  const monitorContainer = document.getElementById('searchMonitorContainer');
+  const resultsCount = document.getElementById('searchResultsCount');
+  const results = document.getElementById('searchResults');
+  
+  if (query) {
+    if (monitorContainer) monitorContainer.style.display = 'none';
+    if (resultsCount) resultsCount.style.display = 'block';
+    if (results) results.style.display = 'block';
+  } else {
+    if (resultsCount) resultsCount.style.display = 'none';
+    if (results) results.style.display = 'none';
+    if (monitorContainer) {
+      monitorContainer.style.display = 'block';
+      renderCCMonitor();
+    }
+  }
+}
+
 function onSearchInput() {
   const val = document.getElementById('searchInput').value.trim();
   document.getElementById('searchClearBtn').style.display = val ? 'flex' : 'none';
   clearTimeout(searchTimeout);
   if (!val) { clearSearch(); return; }
-  searchTimeout = setTimeout(() => { performSearch(val); }, 300);
+  searchTimeout = setTimeout(() => {
+    renderSearchOrMonitor();
+    performSearch(val);
+  }, 300);
 }
 
 function clearSearch() {
@@ -5496,7 +5496,7 @@ function clearSearch() {
   searchCurrentResults = [];
   searchPageIndex = 0;
   searchActiveQuery = '';
-  renderAllTransactions();
+  renderSearchOrMonitor();
 }
 
 // Collapses paired Transfer rows (same shared xfr_ id — one expense leg on the
@@ -5770,9 +5770,6 @@ function openSearchTransferEdit(xfrId) {
 }
 
 function initSearchPage() {
-  // Focus FIRST while still in the tap-gesture context — iOS rejects focus()
-  // called after any heavy work (5K-item loop in renderAllTransactions breaks the chain).
-  document.getElementById('searchInput').focus();
   if (!searchScrollAttached) {
     searchScrollAttached = true;
     const resultsEl = document.getElementById('searchResults');
@@ -5787,31 +5784,38 @@ function initSearchPage() {
     // -webkit-overflow-scrolling:touch scroll layers. Use touchstart/touchend
     // event delegation on the container to detect taps vs scrolls (same
     // pattern as #calTxList).
-    let _ts = 0, _tx = 0, _ty = 0, _touchFired = 0;
     const fireSearchTap = item => {
       const { type, source, idx } = item.dataset;
       if (type === 'invest') openSearchInvestEdit(source, parseInt(idx));
       else if (type === 'transfer') openSearchTransferEdit(idx); // idx is the xfr_ id string, not a numeric index
       else openSearchTxEdit(source, parseInt(idx));
     };
-    resultsEl.addEventListener('touchstart', e => {
-      _ts = Date.now(); _tx = e.touches[0].clientX; _ty = e.touches[0].clientY;
-    }, {passive: true});
-    resultsEl.addEventListener('touchend', e => {
-      const dt = Date.now() - _ts;
-      const dx = Math.abs(e.changedTouches[0].clientX - _tx);
-      const dy = Math.abs(e.changedTouches[0].clientY - _ty);
-      if (dt > 400 || dx > 8 || dy > 8) return; // scroll or long-press
-      const item = e.target.closest('.tx-item[data-idx]');
-      if (!item) return;
-      _touchFired = Date.now(); fireSearchTap(item);
-    }, {passive: true});
-    resultsEl.addEventListener('click', e => {
-      if (Date.now() - _touchFired < 600) return;
-      const item = e.target.closest('.tx-item[data-idx]');
-      if (!item) return;
-      fireSearchTap(item);
-    });
+
+    const setupTapToEdit = el => {
+      if (!el) return;
+      let _ts = 0, _tx = 0, _ty = 0, _touchFired = 0;
+      el.addEventListener('touchstart', e => {
+        _ts = Date.now(); _tx = e.touches[0].clientX; _ty = e.touches[0].clientY;
+      }, {passive: true});
+      el.addEventListener('touchend', e => {
+        const dt = Date.now() - _ts;
+        const dx = Math.abs(e.changedTouches[0].clientX - _tx);
+        const dy = Math.abs(e.changedTouches[0].clientY - _ty);
+        if (dt > 400 || dx > 8 || dy > 8) return; // scroll or long-press
+        const item = e.target.closest('.tx-item[data-idx], .detail-item[data-idx]');
+        if (!item) return;
+        _touchFired = Date.now(); fireSearchTap(item);
+      }, {passive: true});
+      el.addEventListener('click', e => {
+        if (Date.now() - _touchFired < 600) return;
+        const item = e.target.closest('.tx-item[data-idx], .detail-item[data-idx]');
+        if (!item) return;
+        fireSearchTap(item);
+      });
+    };
+
+    setupTapToEdit(resultsEl);
+    setupTapToEdit(document.getElementById('searchMonitorContainer'));
   }
   clearSearch();
 }

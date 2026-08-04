@@ -119,6 +119,17 @@ signed-in user's own short-lived OAuth token.
   - Automatically syncs this new rule to the user's `Recurring` sheet in Google Sheets.
 - **Dynamic Installment Index Naming**: Integrated dynamic name formatting (`getInstallmentName()`) into the recurring projection engine, calendar display, and recurring prompt popup, showing progressive indexes (e.g. `(2/3)`, `(3/3)`) for subsequent monthly installments.
 
+### Session 15: Search Page Redesign & Transactions Subpage Migration
+- **Migrated Transactions Subpage**: Moved the entire layout and functionality of the "Transactions" subpage of the Insights page into the main "Search" page under `#searchMonitorContainer`.
+- **Deleted Original Subpage**: Deleted the "Transactions" button from the Insights subpage navigation bar and removed its layout element entirely from the Insights page.
+- **Support for All Accounts (Not Just CC)**: Expanded the monthly transaction monitor to display transactions across *all* active Payment Methods (rather than being restricted to Credit Cards). The dropdown filter was updated to list all Payment Methods, and the summary cards were enhanced to display both **Total Expenses** (with Month-over-Month comparison) and **Total Income** side-by-side.
+- **Removed Category Breakdown**: Strip-mined the Category Breakdown section from the transaction monitor to keep the list clean and compact, per user specifications.
+- **Disabled Auto-Keyboard Popup**: Removed the `.focus()` call on the search input field during tab switches to prevent the virtual keyboard from automatically popping up when navigating to the Search page.
+- **Integrated Global Search**: The Search page now behaves dynamically:
+  - If the search bar is *empty*, it displays the monthly transactions monitor layout (month controls, account filter, summary cards, and transactions list matching the filters).
+  - If the user *types* a query, it hides the monitor view and executes a global search across all history (including previous months/years), disregarding the month filter settings.
+- **Tap-to-Edit Support**: Added event delegation and tap handlers on `#searchMonitorContainer` (supporting both `.detail-item` and `.tx-item` formats), making every transaction in the monitor list fully tappable/editable. Both optimistic (local) and server-synchronized updates and deletes correctly refresh the Search tab view if it is active.
+
 ## Config Persistence Pattern (Best Practice)
 
 When adding new user-configurable features (checkboxes, toggles, flags, settings), always persist them to the Google Sheets `Config` sheet using an empty column, not hardcoded in `index.html` or stored only in memory/localStorage.

@@ -1227,9 +1227,19 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <input type="date" class="date-input-hidden" id="goalEndDateRaw" onchange="document.getElementById('goalEndDateText').textContent=isoDisp(this.value)">
       </div>
       <div class="form-group">
+        <label class="form-label">Currency</label>
+        <select class="form-input" id="goalCcy" onchange="onGoalCcyChange(this.value)">
+          <option value="IDR">IDR (Rp)</option>
+          <option value="USD">USD ($)</option>
+          <option value="CHF">CHF (CHF)</option>
+          <option value="SGD">SGD (S$)</option>
+          <option value="EUR">EUR (€)</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label class="form-label">Target Amount</label>
         <div class="amount-wrapper">
-          <span class="amount-prefix">Rp</span>
+          <span class="amount-prefix" id="goalCcyPrefix">Rp</span>
           <input type="text" class="form-input amount-input" id="goalTargetAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
         </div>
       </div>
@@ -7372,42 +7382,120 @@ async function fetchGoals() {
   renderGoals();
 }
 
+function onGoalCcyChange(ccy) {
+  const prefixEl = document.getElementById('goalCcyPrefix');
+  if (!prefixEl) return;
+  if (ccy === 'IDR') prefixEl.textContent = 'Rp';
+  else if (ccy === 'USD') prefixEl.textContent = '$';
+  else if (ccy === 'SGD') prefixEl.textContent = 'S$';
+  else if (ccy === 'EUR') prefixEl.textContent = '€';
+  else prefixEl.textContent = ccy;
+}
+
+function fGoalAmt(n, ccy) {
+  ccy = (ccy || 'IDR').toUpperCase();
+  if (ccy === 'IDR') {
+    return fRpS(n);
+  }
+  let symbol = ccy + ' ';
+  if (ccy === 'USD') symbol = '$';
+  else if (ccy === 'SGD') symbol = 'S$';
+  else if (ccy === 'EUR') symbol = '€';
+  
+  if (!n) return symbol + '0';
+  
+  if (n >= 1000000000) return symbol + (n / 1000000000).toFixed(1) + 'B';
+  if (n >= 1000000) return symbol + (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return symbol + (n / 1000).toFixed(0) + 'K';
+  
+  return symbol + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function getAssetValue(stock) {
+  const allInvest = getAllInvestRows();
+  const { buyLots, sellLots, buyTotalIdr } = computeInvestNetLots(allInvest);
+  
+  const manualUSD = parsePrice(stockPrices['USDIDR']);
+  const manualCHF = parsePrice(stockPrices['CHFIDR']);
+  const usdRate = manualUSD > 0 ? manualUSD : (fxRates.USD || 16500);
+  const chfRate = manualCHF > 0 ? manualCHF : (fxRates.CHF || 19000);
+
+  const navStar = parsePrice(stockPrices['StarStable']);
+  const priceQQQ  = parsePrice(stockPrices['QQQ']);
+  const priceJNJ  = parsePrice(stockPrices['JNJ']);
+  const priceVYM  = parsePrice(stockPrices['VYM']);
+  const priceAAPL = parsePrice(stockPrices['AAPL']);
+
+  const netLot = (buyLots[stock] || 0) - (sellLots[stock] || 0);
+
+  if (netLot <= 0) {
+    const sItem = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name && i.name.toLowerCase() === stock.toLowerCase() && !i.archived);
+    if (sItem) {
+      let rawBal = sItem.balance;
+      if (rawBal == null && rawAccountBalances[sItem.name]) {
+        rawBal = rawAccountBalances[sItem.name].amount;
+      }
+      const balNum = parseConfigBalance(rawBal);
+      if (balNum !== null && balNum > 0) {
+        return balNum;
+      }
+    }
+    return 0;
+  }
+
+  const stockConfig = CONFIG_ITEMS.find(i => i.name && i.name.toLowerCase() === stock.toLowerCase());
+  let type = getAssetTypeForItem(stock, stockConfig?.assetType || STOCK_TYPE[stock], false);
+  const buyRatio = buyLots[stock] > 0 ? netLot / buyLots[stock] : 0;
+  const costBasis = buyTotalIdr[stock] * buyRatio;
+
+  let currentValue = 0;
+  if (stock === 'Star Stable Income Fund') currentValue = navStar > 0 ? netLot * navStar : 0;
+  else if (stock.startsWith('USDIDR')) currentValue = netLot * usdRate;
+  else if (stock === 'CHFIDR') currentValue = netLot * chfRate;
+  else if (stock === 'QQQ')  currentValue = priceQQQ  > 0 ? netLot * priceQQQ  * usdRate : 0;
+  else if (stock === 'JNJ')  currentValue = priceJNJ  > 0 ? netLot * priceJNJ  * usdRate : 0;
+  else if (stock === 'VYM')  currentValue = priceVYM  > 0 ? netLot * priceVYM  * usdRate : 0;
+  else if (stock === 'AAPL') currentValue = priceAAPL > 0 ? netLot * priceAAPL * usdRate : 0;
+  else if (parsePrice(stockPrices[stock]) > 0) {
+    currentValue = netLot * parsePrice(stockPrices[stock]) * (type === 'US Stock' ? usdRate : 1);
+  } else {
+    currentValue = costBasis;
+  }
+  return currentValue;
+}
+
 function getGoalAssetList() {
-  const accounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).map(i => i.name);
   const allInvest = getAllInvestRows();
   const stocks = new Set();
   allInvest.forEach(r => { if (r.stock) stocks.add(r.stock); });
   CONFIG_ITEMS.filter(i => i.kind === 'stock' && !i.archived).forEach(i => { if (i.name) stocks.add(i.name); });
-  return ['Cash', ...accounts, ...Array.from(stocks)];
+  return Array.from(stocks).sort((a, b) => a.localeCompare(b));
 }
 
 function getGoalCurrentValue(goal) {
-  const allInvest = getAllInvestRows();
-  const { buyLots, sellLots } = computeInvestNetLots(allInvest);
-  const usdRate = parsePrice(stockPrices['USDIDR']) || fxRates.USD || 16500;
-  const chfRate = parsePrice(stockPrices['CHFIDR']) || fxRates.CHF || 19000;
-  let total = 0;
+  let totalIdr = 0;
   (goal.sources || []).forEach(source => {
-    if (source === 'Cash') { total += computeCashBalance(); return; }
+    if (source === 'Cash') { totalIdr += computeCashBalance(); return; }
     if (accountBalances[source]) {
-      total += accountBalances[source].amount || 0;
+      totalIdr += accountBalances[source].amount || 0;
       return;
     }
-    const netLot = (buyLots[source] || 0) - (sellLots[source] || 0);
-    if (netLot <= 0) return;
-    if (source === 'Star Stable Income Fund') {
-      const nav = parsePrice(stockPrices['StarStable']);
-      total += nav > 0 ? netLot * nav : 0;
-    } else if (source.startsWith('USDIDR')) {
-      total += netLot * usdRate;
-    } else if (source === 'CHFIDR') {
-      total += netLot * chfRate;
-    } else {
-      const price = parsePrice(stockPrices[source]);
-      total += price > 0 ? netLot * price * usdRate : 0;
-    }
+    totalIdr += getAssetValue(source);
   });
-  return total;
+
+  const ccy = (goal.ccy || 'IDR').toUpperCase();
+  if (ccy === 'IDR') return totalIdr;
+
+  const manualUSD = parsePrice(stockPrices['USDIDR']);
+  const manualCHF = parsePrice(stockPrices['CHFIDR']);
+  const usdRate = manualUSD > 0 ? manualUSD : (fxRates.USD || 16500);
+  const chfRate = manualCHF > 0 ? manualCHF : (fxRates.CHF || 19000);
+
+  if (ccy === 'USD') return totalIdr / usdRate;
+  if (ccy === 'CHF') return totalIdr / chfRate;
+  if (fxRates[ccy]) return totalIdr / fxRates[ccy];
+
+  return totalIdr;
 }
 
 function renderGoals() {
@@ -7432,7 +7520,7 @@ function renderGoals() {
       <div style="font-size:11px;color:var(--text2);margin-top:2px">${g.startDate} – ${g.endDate||'…'}</div>
       <div class="goal-progress-wrap"><div class="goal-progress-fill" style="width:${pct.toFixed(1)}%"></div></div>
       <div style="display:flex;justify-content:space-between;font-size:12px">
-        <span style="color:var(--text2)">${fRpS(Math.round(current))} of ${fRpS(g.targetAmount)}</span>
+        <span style="color:var(--text2)">${fGoalAmt(current, g.ccy)} of ${fGoalAmt(g.targetAmount, g.ccy)}</span>
         <span style="color:var(--accent);font-weight:600">${pct.toFixed(0)}%</span>
       </div>
     </div>`;
@@ -7461,6 +7549,10 @@ function openGoalsOverlay(mode, goalId) {
   document.getElementById('goalEndDateRaw').value = endDate;
   document.getElementById('goalEndDateText').textContent = endDate ? isoDisp(endDate) : 'Select date';
   document.getElementById('goalTargetAmount').value = goal ? formatGroupedAmt(goal.targetAmount) : '';
+  
+  const ccy = goal ? (goal.ccy || 'IDR') : 'IDR';
+  document.getElementById('goalCcy').value = ccy;
+  onGoalCcyChange(ccy);
 
   const selectedSources = goal ? (goal.sources || []) : [];
   const assets = getGoalAssetList();
@@ -7490,6 +7582,7 @@ async function saveGoal() {
   const endDate = document.getElementById('goalEndDateRaw').value;
   const targetAmount = parseAmt('goalTargetAmount');
   const sources = Array.from(document.querySelectorAll('#goalSourceFundList input[type=checkbox]:checked')).map(cb => cb.value);
+  const ccy = document.getElementById('goalCcy').value;
   if (!name || !targetAmount) return;
   const saveBtn = document.querySelector('#goalsOverlay .submit-btn');
   if (saveBtn) saveBtn.textContent = 'Saving…';
@@ -7497,7 +7590,7 @@ async function saveGoal() {
   const payload = {
     type: 'goals', action: 'save',
     id: goalsEditId || null,
-    name, startDate, endDate, targetAmount, sources,
+    name, startDate, endDate, targetAmount, sources, ccy,
     completed: existing ? existing.completed : false,
     completedDate: existing ? (existing.completedDate || '') : ''
   };
@@ -7507,9 +7600,9 @@ async function saveGoal() {
     if (j.status === 'ok') {
       if (goalsEditId) {
         const idx = GOALS.findIndex(g => g.id === goalsEditId);
-        if (idx >= 0) GOALS[idx] = { ...GOALS[idx], name, startDate, endDate, targetAmount, sources };
+        if (idx >= 0) GOALS[idx] = { ...GOALS[idx], name, startDate, endDate, targetAmount, sources, ccy };
       } else {
-        GOALS.push({ id: j.id, name, startDate, endDate, targetAmount, sources, completed: false, completedDate: null });
+        GOALS.push({ id: j.id, name, startDate, endDate, targetAmount, sources, ccy, completed: false, completedDate: null });
       }
       closeGoalsOverlay();
       renderGoals();
@@ -7550,7 +7643,7 @@ async function toggleGoalComplete() {
       body: apiBody({
         type: 'goals', action: 'save', id: goalsEditId,
         name: goal.name, startDate: goal.startDate, endDate: goal.endDate,
-        targetAmount: goal.targetAmount, sources: goal.sources,
+        targetAmount: goal.targetAmount, sources: goal.sources, ccy: goal.ccy || 'IDR',
         completed: newCompleted, completedDate: newCompletedDate || ''
       })
     });

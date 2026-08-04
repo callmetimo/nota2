@@ -177,8 +177,8 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A2:B8`, [
       ['AAPL',''], ['JNJ',''], ['VYM',''], ['QQQ',''], ['CHF IDR',''], ['USD IDR',''], ['Star Stable',''],
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:H1`, [[
-      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate','id',
+    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:I1`, [[
+      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate','id','Ccy',
     ]]);
     await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
       'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
@@ -242,8 +242,8 @@ const DataStore = (() => {
     if (await sheetHasHeader(GOALS_SHEET)) return;
     const old = await SheetsClient.getValues(spreadsheetId, `Invest!J${OLD_GOALS_START_ROW}:P`);
     const dataRows = (old.values || []).filter(r => r && r[0]);
-    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:H1`, [[
-      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate','id',
+    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:I1`, [[
+      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate','id','Ccy',
     ]]);
     if (dataRows.length) {
       await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A2:G${1 + dataRows.length}`, dataRows);
@@ -772,7 +772,7 @@ const DataStore = (() => {
 
   // ── GOALS (Goals!A2:H) ─────────────────────────────────────────
   async function handleGetGoals() {
-    const res = await SheetsClient.getValues(spreadsheetId, `${GOALS_SHEET}!A${GOALS_START_ROW}:H`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${GOALS_SHEET}!A${GOALS_START_ROW}:I`);
     const data = res.values || [];
     const goals = [];
     data.forEach((row, idx) => {
@@ -793,6 +793,7 @@ const DataStore = (() => {
         sources: row[4] ? String(row[4]).split(',').map(s => s.trim()).filter(Boolean) : [],
         completed: String(row[5] || '').toLowerCase() === 'true',
         completedDate: cellToDateStr(row[6]) || null,
+        ccy: String(row[8] || '').trim() || 'IDR',
       });
     });
     return { status: 'ok', goals };
@@ -807,7 +808,7 @@ const DataStore = (() => {
   }
 
   async function handleGoals(data) {
-    const { action, id, name, startDate, endDate, targetAmount, sources, completed, completedDate } = data;
+    const { action, id, name, startDate, endDate, targetAmount, sources, completed, completedDate, ccy } = data;
     
     // Fetch latest goals to find target row by matching ID
     const { goals } = await handleGetGoals();
@@ -815,7 +816,7 @@ const DataStore = (() => {
 
     if (action === 'delete') {
       if (!existing) return { status: 'error', message: 'Goal not found' };
-      await SheetsClient.clearValues(spreadsheetId, `${GOALS_SHEET}!A${existing.rowNum}:H${existing.rowNum}`);
+      await SheetsClient.clearValues(spreadsheetId, `${GOALS_SHEET}!A${existing.rowNum}:I${existing.rowNum}`);
       return { status: 'ok' };
     }
 
@@ -823,11 +824,11 @@ const DataStore = (() => {
     const sourcesStr = Array.isArray(sources) ? sources.join(', ') : (sources || '');
     const rowData = [
       name || '', startDate || '', endDate || '', Number(targetAmount) || 0,
-      sourcesStr, completed ? 'TRUE' : 'FALSE', completedDate || '', goalId
+      sourcesStr, completed ? 'TRUE' : 'FALSE', completedDate || '', goalId, ccy || 'IDR'
     ];
 
     const targetRow = existing ? existing.rowNum : await findNextGoalRow();
-    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A${targetRow}:H${targetRow}`, [rowData]);
+    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A${targetRow}:I${targetRow}`, [rowData]);
     return { status: 'ok', id: goalId };
   }
 

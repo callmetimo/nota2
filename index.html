@@ -784,20 +784,18 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
   <div id="insightsSubExpense" style="display:none">
     <div class="chart-page-section">
       <div class="insights-sticky">
-        <div class="toggle-row" id="insightsModeToggle">
+        <div class="chart-card" style="margin-bottom:8px;padding:8px 12px;display:flex;align-items:center;gap:8px" id="insightsAccountFilterGroup">
+          <span style="font-size:12px;color:var(--text2);white-space:nowrap">Account Filter:</span>
+          <select class="form-input" id="insightsAccountFilter" style="padding:6px 10px;font-size:12px;border-radius:var(--radius-sm)" onchange="onInsightsAccountFilterChange(this.value)">
+          </select>
+        </div>
+        <div class="toggle-row" id="insightsModeToggle" style="margin-bottom:8px">
           <div class="toggle-btn" data-m="weekly" onclick="setIM('weekly',this)">Weekly</div>
           <div class="toggle-btn active" data-m="monthly" onclick="setIM('monthly',this)">Monthly</div>
           <div class="toggle-btn" data-m="yearly" onclick="setIM('yearly',this)">Yearly</div>
           <div class="toggle-btn" data-m="category" onclick="setIM('category',this)">Category</div>
         </div>
         <div id="weeklyControls" style="display:none">
-          <div class="toggle-row" id="weeklySourceToggle">
-            <div class="toggle-btn active" data-v="all" onclick="setWV('all',this)">All</div>
-            <div class="toggle-btn" data-v="flazz" onclick="setWV('flazz',this)">Flazz</div>
-            <div class="toggle-btn" data-v="ewallet" onclick="setWV('ewallet',this)">eWallet</div>
-            <div class="toggle-btn" data-v="bank" onclick="setWV('bank',this)">Bank</div>
-            <div class="toggle-btn" data-v="cc" onclick="setWV('cc',this)">CC</div>
-          </div>
           <div class="toggle-row" id="weeklyRangeToggle">
             <div class="toggle-btn active" data-r="4" onclick="setWR(4,this)">4 Wk</div>
             <div class="toggle-btn" data-r="8" onclick="setWR(8,this)">8 Wk</div>
@@ -806,13 +804,6 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           </div>
         </div>
         <div id="monthlyControls">
-          <div class="toggle-row" id="monthlySourceToggle">
-            <div class="toggle-btn active" data-v="all" onclick="setMV('all',this)">All</div>
-            <div class="toggle-btn" data-v="flazz" onclick="setMV('flazz',this)">Flazz</div>
-            <div class="toggle-btn" data-v="ewallet" onclick="setMV('ewallet',this)">eWallet</div>
-            <div class="toggle-btn" data-v="bank" onclick="setMV('bank',this)">Bank</div>
-            <div class="toggle-btn" data-v="cc" onclick="setMV('cc',this)">CC</div>
-          </div>
           <div class="toggle-row" id="monthlyRangeToggle">
             <div class="toggle-btn active" data-r="3" onclick="setMR(3,this)">3 Mo</div>
             <div class="toggle-btn" data-r="6" onclick="setMR(6,this)">6 Mo</div>
@@ -821,13 +812,6 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           </div>
         </div>
         <div id="yearlyControls" style="display:none">
-          <div class="toggle-row" id="yearlySourceToggle">
-            <div class="toggle-btn active" data-v="all" onclick="setYV('all',this)">All</div>
-            <div class="toggle-btn" data-v="flazz" onclick="setYV('flazz',this)">Flazz</div>
-            <div class="toggle-btn" data-v="ewallet" onclick="setYV('ewallet',this)">eWallet</div>
-            <div class="toggle-btn" data-v="bank" onclick="setYV('bank',this)">Bank</div>
-            <div class="toggle-btn" data-v="cc" onclick="setYV('cc',this)">CC</div>
-          </div>
           <div class="toggle-row" id="yearlyRangeToggle">
             <div class="toggle-btn active" data-r="3" onclick="setYR(3,this)">3 Yr</div>
             <div class="toggle-btn" data-r="5" onclick="setYR(5,this)">5 Yr</div>
@@ -835,13 +819,6 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           </div>
         </div>
         <div id="categoryControls" style="display:none">
-          <div class="toggle-row" id="catSourceToggle">
-            <div class="toggle-btn active" data-v="all" onclick="setCV('all',this)">All</div>
-            <div class="toggle-btn" data-v="flazz" onclick="setCV('flazz',this)">Flazz</div>
-            <div class="toggle-btn" data-v="ewallet" onclick="setCV('ewallet',this)">eWallet</div>
-            <div class="toggle-btn" data-v="bank" onclick="setCV('bank',this)">Bank</div>
-            <div class="toggle-btn" data-v="cc" onclick="setCV('cc',this)">CC</div>
-          </div>
           <div class="toggle-row" id="catRangeToggle">
             <div class="toggle-btn active" data-r="3" onclick="setCR(3,this)">3 Mo</div>
             <div class="toggle-btn" data-r="6" onclick="setCR(6,this)">6 Mo</div>
@@ -2510,6 +2487,7 @@ let wView='all', wRange=4, wSelWeek=null, wSelCat=null;
 let mView='all', mRange=3, mSelMonth=null, mSelCat=null;
 let yView='all', yRange=3, ySelYear=null, ySelCat=null;
 let cView='all', cRange=3, cSelCat=null;
+let insightsAccountFilterVal = 'all';
 
 // ── COMBINED DATA ROWS ────────────────────────────────────────
 function getAllOpexRows() {
@@ -2535,12 +2513,9 @@ function getAllOpexRows() {
 
 function getRows(view) {
   const hist = getAllOpexRows().filter(r => r.exp && r.cat !== 'Investment' && r.cat !== 'Transfer');
-  if (view === 'all')     return hist.filter(r => !isCreditCardPM(r.pm));
-  if (view === 'flazz')   return hist.filter(r => r.pm === 'Flazz');
-  if (view === 'ewallet') return hist.filter(r => r.pm === 'eWallet');
-  if (view === 'bank')    return hist.filter(r => !isCreditCardPM(r.pm) && r.pm !== 'eWallet' && r.pm !== 'Flazz');
-  if (view === 'cc')      return hist.filter(r => isCreditCardPM(r.pm));
-  return [];
+  if (!view || view === 'all') return hist;
+  const lowView = String(view).toLowerCase().trim();
+  return hist.filter(r => r.pm && r.pm.toLowerCase().trim() === lowView);
 }
 
 function getAllInvestRows() {
@@ -4016,6 +3991,7 @@ function setInsightsSubPage(sub, el) {
   if (insightsSubPage === 'accounts') {
     renderAccountBalanceCards();
   } else if (insightsSubPage === 'expense') {
+    renderInsightsAccountFilter();
     renderChartTab(insightsMode);
   }
 }
@@ -4028,6 +4004,24 @@ function changeCCMonth(delta) {
 function onCCPmChange(val) {
   ccMonitorPmFilter = val;
   renderCCMonitor();
+}
+
+function renderInsightsAccountFilter() {
+  const select = document.getElementById('insightsAccountFilter');
+  if (!select) return;
+  const pmList = Array.from(new Set(allPMs || []));
+  let html = `<option value="all"${insightsAccountFilterVal === 'all' ? ' selected' : ''}>All Accounts</option>`;
+  html += pmList.map(pm => `<option value="${esc(pm)}"${insightsAccountFilterVal === pm ? ' selected' : ''}>${esc(pm)}</option>`).join('');
+  select.innerHTML = html;
+}
+
+function onInsightsAccountFilterChange(val) {
+  insightsAccountFilterVal = val;
+  wView = val;
+  mView = val;
+  yView = val;
+  cView = val;
+  renderChartTab(insightsMode);
 }
 
 function renderCCMonitor() {
@@ -4310,7 +4304,7 @@ function renderWeekly(){
   const sumEl=document.getElementById('weeklySummary');
   if(sumEl)sumEl.innerHTML=`
     <div class="summary-row">
-      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${VIEW_LABELS[wView]||'All'}</div></div>
+      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${wView === 'all' ? 'All Accounts' : wView}</div></div>
       <div class="summary-card"><div class="s-label">vs Last Week</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Avg ${fRpS(Math.round(avgTotal))}/wk</div></div>
     </div>`;
 
@@ -4438,7 +4432,7 @@ function renderMonthly(){
 
   document.getElementById('monthlySummary').innerHTML=`
     <div class="summary-row">
-      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${VIEW_LABELS[mView]||'All'}</div></div>
+      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${mView === 'all' ? 'All Accounts' : mView}</div></div>
       <div class="summary-card"><div class="s-label">vs Last Month</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Avg ${fRpS(Math.round(avgTotal))}/mo</div></div>
     </div>`;
 
@@ -4498,7 +4492,7 @@ function renderYearly(){
 
   document.getElementById('yearlySummary').innerHTML=`
     <div class="summary-row">
-      <div class="summary-card"><div class="s-label">${selY}</div><div class="s-value">${fRpS(curTotal)}</div><div class="s-sub">${VIEW_LABELS[yView]||'All'}</div></div>
+      <div class="summary-card"><div class="s-label">${selY}</div><div class="s-value">${fRpS(curTotal)}</div><div class="s-sub">${yView === 'all' ? 'All Accounts' : yView}</div></div>
       <div class="summary-card"><div class="s-label">vs Last Year</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Prev: ${fRpS(prevTotal)}</div></div>
     </div>`;
 

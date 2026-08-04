@@ -124,7 +124,7 @@ performance improvements.
 - **Bug**: Accounts with "Show on Insights" unchecked (e.g. `CIMB IDR`, `JHT`) silently disappeared from both the Net Worth **Holdings** and **Overview** pages, not just the home page's Insights cards.
 - **Root cause**: `renderHoldings()` and `renderOverview()` both filtered their account list with `showOnInsights !== false` — a flag meant only to control the home page's Insights account-balance cards (`renderAccountBalanceCards`). Once excluded there, the account was also blocked from `getNetWorthAllocations()`'s raw-balance fallback, since that fallback skips anything already present in `CONFIG_ITEMS`, leaving no path for the account to reappear.
 - **Fix**: Removed the `showOnInsights` condition from both `renderHoldings()` and `renderOverview()`'s account filters so Net Worth always reflects every non-archived configured account, independent of the Insights-tab display preference. `renderAccountBalanceCards` keeps using `showOnInsights` as before.
-- **Follow-up bug**: After the above fix, `CIMB IDR` (a plain IDR cash account) still didn't appear. Root cause: `isFxAccountMatch()` (`index.html:4641`) — used by `getNetWorthAllocations()` to avoid double-counting an FX funding account (e.g. `USD CIMB`) that's already represented by its linked Forex holding (e.g. `USDIDR CIMB`) — strips currency tokens like `"IDR"`/`"USD"` from both names before comparing. Stripping `"IDR"` off `"CIMB IDR"` also collapsed it to `"cimb"`, which then coincidentally matched the unrelated `USDIDR CIMB` Forex holding (also strips to `"cimb"`), so `CIMB IDR` was wrongly treated as a duplicate and dropped.
+- **Follow-up bug**: After the above fix, `CIMB IDR` (a plain IDR cash account) still didn't appear. Root cause: `isFxAccountMatch()` (moved to `ui-insights.js:914` by the Session 11 script split; was `index.html:4641` at the time this bug was fixed) — used by `getNetWorthAllocations()` to avoid double-counting an FX funding account (e.g. `USD CIMB`) that's already represented by its linked Forex holding (e.g. `USDIDR CIMB`) — strips currency tokens like `"IDR"`/`"USD"` from both names before comparing. Stripping `"IDR"` off `"CIMB IDR"` also collapsed it to `"cimb"`, which then coincidentally matched the unrelated `USDIDR CIMB` Forex holding (also strips to `"cimb"`), so `CIMB IDR` was wrongly treated as a duplicate and dropped.
 - **Fix**: Added a currency guard to `isFxAccountMatch()`'s token-normalization step — it only applies when the account's `ccy` is a real foreign currency (not `IDR`/blank), since a legitimate FX-linked account always carries a foreign `ccy` (per the "Dual-purpose stock/account entries" convention below), while a plain IDR cash account never should be. Also fixed the raw-balance fallback (`getNetWorthAllocations()` step 3) to look up each raw key's actual `ccy` from `CONFIG_ITEMS`/`ACCOUNT_CCY` instead of passing `null`, so the same guard applies consistently there.
 
 ### Session 9: Persist Credit Card Billing Flag to Config Sheet (Column L)
@@ -220,11 +220,11 @@ When adding new user-configurable features (checkboxes, toggles, flags, settings
 **How:** Use the `creditCard` flag (Session 9, Column L) as a template:
 1. Pick an unused column in `Config` (grid already reserves space to column O).
 2. Add the column to the header row in `data-store.js:ensureConfigSheetExists()` (`A1:K1` → `A1:L1`, add header string).
-3. Include the field in all **four** Config sheet read/write sites in `data-store.js`:
-   - Header row write (line ~872, `A1:L1`)
-   - Seed/bootstrap builders (lines ~882, ~895, both CONFIG_DEFAULTS map, add `it.fieldName ? 'TRUE' : 'FALSE'`)
-   - Read mapping in `handleGetConfig()` (line ~890 read range `A...L`, line ~918-930 item object add `fieldName: String(r[N] || '').trim().toUpperCase() === 'TRUE'`)
-   - Write mapping in `handleConfig()`'s `saveAll` (line ~940 clearValues `A...L`, line ~943-956 write rows add `it.fieldName ? 'TRUE' : 'FALSE'`, line ~956 updateValues `A...L`)
+3. Include the field in all **four** Config sheet read/write sites in `data-store.js` (line numbers current as of this edit — `data-store.js` has grown since this pattern was first documented, so re-check with `grep -n` rather than trusting these forever):
+   - Header row write in `ensureConfigSheetExists()` (line ~964, `A1:L1`)
+   - Seed/bootstrap builders: the first site (line ~973) just calls the shared `serializeConfigRow(it, idx)` helper (line ~27-42, which already includes every field's ternary — add your field's ternary there); the second site (lines ~981-988) still has its own literal duplicate array needing the same `it.fieldName ? 'TRUE' : 'FALSE'` added by hand
+   - Read mapping in `handleGetConfig()` (line ~977 read range `A...L`, line ~1006-1019 item object add `fieldName: String(r[N] || '').trim().toUpperCase() === 'TRUE'`)
+   - Write mapping in `handleConfig()`'s `saveAll` (line ~1030 builds rows via `serializeConfigRow` — no separate `clearValues` step anymore, that was removed by Session 10's SYNC-3 optimization — then a single `updateValues` call at line ~1036)
 4. On the frontend (`index.html`), store the value on `CONFIG_ITEMS` entries and call `saveConfigToServer()` when the user changes it — no special sync code needed if `saveConfigToServer()` is already being called (which it is for overlay Save buttons and inline checkboxes).
 5. Document the column and feature in README.md under the session entry.
 
@@ -312,8 +312,8 @@ spending is invisible and the balance looks like 3,365 (wrong). So for any accou
 you use this way, add `ccy = USD` in the Config sheet so the depletion logic kicks in.
 
 Both `renderNetWorth()` and `getGoalCurrentValue()` share the aggregation logic
-via `computeInvestNetLots()` (defined in `index.html` ~line 3220) to prevent them
-from drifting out of sync.
+via `computeInvestNetLots()` (moved to `ui-insights.js:724` by the Session 11 script
+split) to prevent them from drifting out of sync.
 
 ## Inherited frontend knowledge (from the original Nota)
 
@@ -409,7 +409,7 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
   from the queue before the next retry.
 - **Config Balance Parsing (`parseConfigBalance` & `data-store.js`)**: Config balance strings formatted like `Rp 150.000.000` or `150,000,000` MUST NOT be parsed with naive `replace(/[^\d.-]/g, '')`. In dot-separated formats, `Number("150.000.000")` turns into `150` or `NaN`. Use `parseConfigBalance()` which handles currency prefixes, thousand dots, and commas before numeric conversion.
 - **Asset Type Fallback Priority**: Always perform keyword-based asset identification (e.g. `sUpper.includes('JHT')`) BEFORE testing generic fallbacks (`!type || type === 'Other'`). Otherwise, items configured with `Other` or missing asset types will fall back to `Cash` or `US Stock` instead of `JHT`.
-- **Net Worth Fallback Aggregation (`renderNetWorthOverview`)**: Non-invest stock items and static account snapshots stored in `rawAccountBalances` or `CONFIG_ITEMS` (like JHT) must be included via the fallback pass in `renderNetWorthOverview()` step 3, ensuring assets without Opex/Invest sheet transaction rows are still counted in total net worth and donut visualization.
+- **Net Worth Fallback Aggregation (`getNetWorthAllocations` step 3, `ui-insights.js`)**: Non-invest stock items and static account snapshots stored in `rawAccountBalances` or `CONFIG_ITEMS` (like JHT) must be included via the fallback pass inside `getNetWorthAllocations()` (called by `renderOverview()`, `ui-insights.js:952-1040`, the fallback block at line ~999), ensuring assets without Opex/Invest sheet transaction rows are still counted in total net worth and donut visualization. (There is no function literally named `renderNetWorthOverview` — that name never existed in the codebase; this bullet previously cited it in error.)
 
 ### Resilience & error handling patterns
 
@@ -423,8 +423,7 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
   double-submit — prevents duplicate transactions from repeated taps.
 - **`visibilitychange` listener:** re-fetches the current month when the app
   returns to foreground (tabs, app switcher) — prevents stale data on iOS.
-- **`window.onerror`:** logs runtime errors to console for debugging on
-  mobile devices where DevTools aren't always available.
+- **Global runtime-error logging:** `window.addEventListener('error', ...)` (now at `ui-settings.js:1136`, moved there by the Session 11 script split) logs uncaught runtime errors to console for debugging on mobile devices where DevTools aren't always available. (This has always been implemented via `addEventListener('error', ...)`, never the `window.onerror` property — an old wording mismatch, not a code change.)
 - **Service worker:** only registers on localhost/HTTPS. Opening `index.html`
   as a `file://` URL won't activate it — use `serve.py` instead.
 - **Cross-file top-level references need a deferred lookup, not a direct one.** The app is split across several `<script src>` files that all share one global scope (`index.html`'s inline script, then `ui-settings.js`, `ui-calendar.js`, `ui-insights.js` in that order). Hoisting makes a function safely callable from anywhere *within the same file*, or from any file that loads *after* the file defining it — but a **top-level** (immediately-executed, not deferred to `DOMContentLoaded`) statement in an *earlier*-loading file can never directly reference a bare identifier defined only in a *later*-loading file. The reference is evaluated the instant that line runs, before the later file has even been fetched, and throws `ReferenceError`. This doesn't just fail that one line — it halts the rest of *that script's* top-level execution, silently skipping every subsequent top-level statement (though later `function` declarations in the same file are still hoisted and remain callable). If the skipped statement happens to be the one registering the `DOMContentLoaded` listener that calls `Auth.markAppReady()`, the sign-in overlay hangs forever with no console error and no network activity — see Sessions 17 and 18. Fixes: either move the call inside `DOMContentLoaded` (the file will have loaded by then), or — if it must run immediately, like `attachSwipeClose()`'s direct-attach calls, which need to bind their touch listeners as soon as the DOM parses — wrap the cross-file reference in a closure (`() => laterFileFn()`) so the identifier lookup happens at call time instead of script-load time.

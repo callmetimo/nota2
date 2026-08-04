@@ -113,6 +113,11 @@ const Auth = (() => {
 
   async function signIn() {
     overlay.showSignIn();
+    const btn = document.getElementById('notaSignInBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Connecting...';
+    }
     overlay.setStatus('Opening Google sign-in…');
     try {
       // '' lets Google decide: silently reuses an already-granted session for a
@@ -125,6 +130,10 @@ const Auth = (() => {
     } catch (err) {
       console.error('[auth] sign-in failed', err);
       overlay.setStatus('Sign-in failed: ' + err.message + ' — try again.');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Sign in with Google';
+      }
     }
   }
 

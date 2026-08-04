@@ -1333,7 +1333,7 @@ function curMonthCacheKey(y, m) {
   const now = new Date();
   return `notapub_curMonth_${y ?? now.getFullYear()}_${m ?? now.getMonth() + 1}`;
 }
-const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MO = DataStore.MONTHS;
 // Escape a value for a single-quoted JS string inside an inline onclick attribute.
 // Backslash-escape quotes first, then HTML-escape (the browser decodes the
 // attribute before evaluating the JS, so both layers are needed).
@@ -1416,14 +1416,7 @@ try {
 let accountBalances = {}; // {accountName: {amount}} after applying transaction deltas
 
 function parseConfigBalance(val) {
-  if (val === undefined || val === null || val === '') return null;
-  if (typeof val === 'number') return isNaN(val) ? null : val;
-  let str = String(val).trim().replace(/^(Rp|USD|\$)\s*/i, '');
-  if (!str) return null;
-  if (/^\d{1,3}(\.\d{3})+$/.test(str)) str = str.replace(/\./g, '');
-  else str = str.replace(/,/g, '');
-  const n = Number(str);
-  return isNaN(n) ? null : n;
+  return DataStore.parseMoneyCell(val, null);
 }
 
 function syncConfigToRawAccountBalances() {
@@ -3996,9 +3989,14 @@ function pruneStaleHistory(){
   // Also protect the previous month in case data.json hasn't been fully archived yet
   const prevDate=new Date(today.getFullYear(),today.getMonth()-1,1);
   const prevMk=`${MO[prevDate.getMonth()]} ${prevDate.getFullYear()}`;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 60);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
   const before=txHistory.length;
   txHistory=txHistory.filter(r=>{
     if(!r.synced) return true; // never drop unsynced
+    if(r.date && typeof r.date === 'string' && r.date < cutoffStr) return false; // aggressively drop synced > 60 days
+    if(!r.date || typeof r.date !== 'string') return true;
     const mk=isoMonthKey(r.date);
     if(mk===curMk) return true; // keep current month
     if(mk===prevMk) return true; // keep previous month (may not be fully archived yet)

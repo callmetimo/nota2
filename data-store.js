@@ -14,6 +14,33 @@ const DataStore = (() => {
   // Centralised here so the guard/fallback doesn't have to be repeated at every call site.
   function generateId() { return crypto.randomUUID(); }
 
+  async function fetchAndCacheSheetGids(ssId) {
+    const meta = await SheetsClient.getSpreadsheetMeta(ssId);
+    const sheets = meta.sheets || [];
+    opexGid = sheets.find(s => s.properties.title === 'Opex')?.properties.sheetId ?? null;
+    investGid = sheets.find(s => s.properties.title === 'Invest')?.properties.sheetId ?? null;
+    if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
+    if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
+    return meta;
+  }
+
+  function serializeConfigRow(it, idx) {
+    return [
+      String(it.kind || '').slice(0, 20),
+      String(it.name || '').slice(0, 100),
+      String(it.color || '').slice(0, 20),
+      String(it.ccy || '').slice(0, 10),
+      String(it.assetType || '').slice(0, 50),
+      it.archived ? 'TRUE' : 'FALSE',
+      Number.isFinite(it.sortOrder) ? it.sortOrder : idx,
+      String(it.linkedPM || '').slice(0, 50),
+      (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
+      String(it.balanceDate || '').slice(0, 10),
+      it.showOnInsights === false ? 'FALSE' : 'TRUE',
+      it.creditCard ? 'TRUE' : 'FALSE',
+    ];
+  }
+
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const STOCK_PRICES_SHEET = 'Stock Prices';
   const GOALS_SHEET = 'Goals';
@@ -109,13 +136,7 @@ const DataStore = (() => {
             console.log('[bootstrap] Switching from empty cached sheet to sheet with data:', better.id);
             spreadsheetId = better.id;
             localStorage.setItem(LS_SS_ID, spreadsheetId);
-            const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
-            const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
-            const investSheet = (meta.sheets || []).find(s => s.properties.title === 'Invest');
-            opexGid = opexSheet ? opexSheet.properties.sheetId : null;
-            investGid = investSheet ? investSheet.properties.sheetId : null;
-            if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
-            if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
+            await fetchAndCacheSheetGids(spreadsheetId);
           }
         }
       } catch (e) {
@@ -137,13 +158,8 @@ const DataStore = (() => {
     const existing = await findExistingSpreadsheet();
     if (existing) {
       spreadsheetId = existing.id;
-      const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
-      const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
-      const investSheet = (meta.sheets || []).find(s => s.properties.title === 'Invest');
-      opexGid = opexSheet ? opexSheet.properties.sheetId : null;
-      investGid = investSheet ? investSheet.properties.sheetId : null;
       localStorage.setItem(LS_SS_ID, spreadsheetId);
-      if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
+      const meta = await fetchAndCacheSheetGids(spreadsheetId);
       if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
       await migrateToSplitSheets(meta);
       localStorage.setItem(LS_SPLIT_MIGRATED, '1');
@@ -190,13 +206,7 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:L1`, [[
       'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights', 'creditCard',
     ]]);
-    const configRows = CONFIG_DEFAULTS.map(it => [
-      it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
-      (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
-      String(it.balanceDate || '').slice(0, 10),
-      it.showOnInsights === false ? 'FALSE' : 'TRUE',
-      it.creditCard ? 'TRUE' : 'FALSE',
-    ]);
+    const configRows = CONFIG_DEFAULTS.map((it, idx) => serializeConfigRow(it, idx));
     await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
     await SheetsClient.updateValues(spreadsheetId, `${BALANCES_SHEET}!A1:D1`, [[
       'Account', 'Date', 'Amount', 'TxID',
@@ -421,14 +431,15 @@ const DataStore = (() => {
   // back as e.g. "1.000.000" (Indonesian-locale dot-grouped) or "1,000" (comma-grouped)
   // instead of a raw number — Number() on either yields NaN. Same parsing already used
   // for Config balances and account Balances; reused here for Goals targetAmount.
-  function parseMoneyCell(val) {
-    if (val === undefined || val === null || String(val).trim() === '') return 0;
-    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  function parseMoneyCell(val, defaultValue = 0) {
+    if (val === undefined || val === null || String(val).trim() === '') return defaultValue;
+    if (typeof val === 'number') return isNaN(val) ? defaultValue : val;
     let str = String(val).trim().replace(/^(Rp|USD|\$)\s*/i, '');
+    if (!str) return defaultValue;
     if (/^\d{1,3}(\.\d{3})+$/.test(str)) str = str.replace(/\./g, '');
     else str = str.replace(/,/g, '');
     const n = Number(str);
-    return isNaN(n) ? 0 : n;
+    return isNaN(n) ? defaultValue : n;
   }
 
   // Invest!A has a mix of formats across its history: legacy rows entered as
@@ -889,15 +900,17 @@ const DataStore = (() => {
       ]]);
     }
 
-    await SheetsClient.clearValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:L`);
-    if (rules.length === 0) return { status: 'ok', count: 0 };
-
     const rows = rules.map(r => [
       Number(r.id) || 0, String(r.type || '').slice(0, 20), String(r.tx || '').slice(0, 100),
       String(r.cat || '').slice(0, 50), Number(r.amount) || 0, String(r.pm || '').slice(0, 30),
       String(r.notes || '').slice(0, 500), Number(r.dayOfMonth) || 1, r.active ? 'TRUE' : 'FALSE',
       String(r.lastFired || '').slice(0, 7), '', String(r.endMonth || '').slice(0, 7),
     ]);
+
+    // Pad with empty rows to overwrite deleted rules in a single API request instead of sequential clear+update
+    const emptyRow = Array(12).fill('');
+    while (rows.length < 100) rows.push(emptyRow);
+
     await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:L${RECURRING_DATA_ROW + rows.length - 1}`, rows);
     return { status: 'ok', count: rows.length };
   }
@@ -931,13 +944,7 @@ const DataStore = (() => {
   async function handleGetConfig() {
     const justCreated = await ensureConfigSheetExists();
     if (justCreated) {
-      const rows = CONFIG_DEFAULTS.map(it => [
-        it.kind, it.name, it.color, it.ccy, it.assetType, it.archived ? 'TRUE' : 'FALSE', it.sortOrder, it.linkedPM || '',
-        (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
-        String(it.balanceDate || '').slice(0, 10),
-        it.showOnInsights === false ? 'FALSE' : 'TRUE',
-        it.creditCard ? 'TRUE' : 'FALSE',
-      ]);
+      const rows = CONFIG_DEFAULTS.map((it, idx) => serializeConfigRow(it, idx));
       await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + rows.length - 1}`, rows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
@@ -994,22 +1001,12 @@ const DataStore = (() => {
     if (action !== 'saveAll') return { status: 'error', message: 'Unknown action' };
     if (!Array.isArray(items)) return { status: 'error', message: 'items must be an array' };
     await ensureConfigSheetExists();
-    await SheetsClient.clearValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L`);
-    if (items.length === 0) return { status: 'ok', count: 0 };
-    const rows = items.map((it, idx) => [
-      String(it.kind || '').slice(0, 20),
-      String(it.name || '').slice(0, 100),
-      String(it.color || '').slice(0, 20),
-      String(it.ccy || '').slice(0, 10),
-      String(it.assetType || '').slice(0, 50),
-      it.archived ? 'TRUE' : 'FALSE',
-      Number.isFinite(it.sortOrder) ? it.sortOrder : idx,
-      String(it.linkedPM || '').slice(0, 50),
-      (it.balance !== null && it.balance !== undefined && String(it.balance).trim() !== '') ? Number(it.balance) : '',
-      String(it.balanceDate || '').slice(0, 10),
-      it.showOnInsights === false ? 'FALSE' : 'TRUE',
-      it.creditCard ? 'TRUE' : 'FALSE',
-    ]);
+    const rows = items.map((it, idx) => serializeConfigRow(it, idx));
+    
+    // Pad with empty rows to overwrite deleted configs in a single API request
+    const emptyRow = Array(12).fill('');
+    while (rows.length < 150) rows.push(emptyRow);
+
     await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + rows.length - 1}`, rows);
     return { status: 'ok', count: rows.length };
   }
@@ -1161,5 +1158,5 @@ const DataStore = (() => {
 
   function getSpreadsheetId() { return spreadsheetId; }
 
-  return { bootstrap, handleRequest, getSpreadsheetId, installLivePriceFormulas, listAvailableSpreadsheets, setSpreadsheetId };
+  return { bootstrap, handleRequest, getSpreadsheetId, installLivePriceFormulas, listAvailableSpreadsheets, setSpreadsheetId, MONTHS, parseMoneyCell };
 })();

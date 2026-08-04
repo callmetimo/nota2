@@ -3941,6 +3941,8 @@ async function retryPendingQueue() {
 }
 
 </script>
+<!-- async: a stalled/blocked CDN request must never gate DOMContentLoaded, or Auth.markAppReady() (which only runs in that handler) never fires and the sign-in overlay hangs forever even after a successful sign-in. ui-insights.js already guards every Chart.js call site with `typeof Chart === 'undefined'`. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" integrity="sha384-dug+JxfBvklEQdJ4AYuBBAIScUz0bVN73xpy273gcAwHjb3qI0fXmuYNaNfdyYJG" crossorigin="anonymous" async></script>
 <script src="./ui-settings.js"></script>
 <script src="./ui-calendar.js"></script>
 <script src="./ui-insights.js"></script>

@@ -12,6 +12,23 @@ signed-in user's own short-lived OAuth token.
 
 ## Recent Updates & Feature Additions (AI Studio Sessions Recap)
 
+### Session 11: Architecture & `handleGetAllOpex` Caching (PERF-1 & ARCH-1)
+- **PERF-1 — `handleGetAllOpex` Caching**: Addressed the main application bottleneck by implementing a stale-while-revalidate caching pattern in `data-store.js`. Navigation to Insights and History is now instant, rendering from `localStorage`, while a background fetch checks Google Sheets for updates. If new data is found, a `notaOpexUpdated` event is fired to quietly refresh the UI without reloading.
+- **ARCH-1 — Modularised `index.html`**: Extracted 4,500 lines of JavaScript from the massive `index.html` monolith into safe, domain-specific modules (`ui-insights.js`, `ui-calendar.js`, `ui-settings.js`). This significantly improves maintainability while preserving the existing top-to-bottom variable scoping.
+- **Guardrails**: Documented the Client ID environment variable fallback (see Session 9) to ensure forks and local development do not crash when the production secret is missing.
+
+### Session 10: Code Audit — Medium Refactors Pass
+- **RED-1 / RED-4 / RED-5 — DataStore Cleanup**: Centralized duplicate code patterns. Merged `parseConfigBalance` into a shared utility, extracted `serializeConfigRow` to deduplicate config serialization, and moved the `MONTHS` array mapping strictly into `DataStore`.
+- **RED-3 — Extracted `fetchAndCacheSheetGids`**: Eliminated redundant GID logic across bootstrap, settings, and initial fetch paths by centralizing the lookup.
+- **SYNC-1 — Aggressive Sync Pruning**: Updated `pruneStaleHistory` to automatically prune synced history older than 60 days from `localStorage`, preventing long-term storage bloat on mobile browsers. Unsynced (pending) transactions are completely immune.
+- **SYNC-3 — Optimized API Calls for Rules**: Replaced the sequential `clearValues` and `updateValues` API calls with a single `updateValues` request dynamically padded with empty rows. This cuts the network overhead of saving Config and Recurring rules by 50%.
+
+### Session 9: Code Audit — Quick Wins & Security Pass
+- **SEC-1 — GitHub Actions Secret Injection**: Moved the Google Client ID out of the public source code. The codebase now uses a placeholder (`___GOOGLE_CLIENT_ID___`) which is injected by GitHub Actions at deploy time.
+- **Client ID Local Fallback (Guardrail)**: Built a dynamic hostname detection mechanism into `config.js`. If the app runs locally (`localhost`, `127.0.0.1`, `192.168.x.x`), it falls back to a locally-defined `GOOGLE_CLIENT_ID_LOCAL` so developers don't encounter OAuth errors, while production correctly enforces the secret.
+- **Resilience Fix (`sw.js`)**: Wrapped `new URL()` in a `try...catch` inside the Service Worker fetch handler and hardened `BYPASS_HOSTS` matching. This prevents the Service Worker from crashing on non-standard request schemes (like `chrome-extension://`), which previously blocked the Google Sign-In script from loading.
+- **RED-2 / PERF-2 / PERF-4**: Grouped transfer deletions into single API batch updates, swapped `Math.random` UUIDs for `crypto.randomUUID`, and removed global state overrides (all previously noted in older logs but formally finalized here).
+
 ### Session 8: Code Audit — Quick-Win Refactoring Pass
 
 A focused refactoring pass addressing the "Quick Wins" tier from a full codebase audit.

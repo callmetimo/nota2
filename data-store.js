@@ -603,42 +603,68 @@ const DataStore = (() => {
   // Returns every non-deleted Opex row across all months, shaped to match HIST.opex
   // ({y, m (0-indexed), d, mk, cat, tx, pm, inc?, exp?, notes?, future?, id?, rowIndex}).
   async function handleGetAllOpex() {
-    const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:K');
-    const data = res.values || [];
-    const rows = [];
-    data.forEach((row, idx) => {
-      if (isDeletedFlag(row[8])) return;
-      const parsed = parseDateInfo(row[0], row[1]);
-      if (!parsed) return;
-      const mIdx = parsed.month - 1; // 0-indexed month
-      const y = parsed.year;
-      const day = parsed.day;
-      const r = {
-        y, m: mIdx, d: day, mk: `${MONTHS[mIdx]} ${y}`,
-        cat: String(row[2] || '').trim(), tx: String(row[3] || '').trim(), pm: String(row[4] || '').trim(),
-        rowIndex: idx + 2,
-      };
-      const inc = Number(row[5]) || 0, exp = Number(row[6]) || 0, notes = String(row[7] || '').trim();
-      if (inc) r.inc = inc;
-      if (exp) r.exp = exp;
-      if (notes) r.notes = notes;
-      if (Number(row[9]) === 1) r.future = true;
-      if (row[10]) r.id = String(row[10]).trim();
-      rows.push(r);
-    });
+    const CACHE_KEY = `notapub_opex_cache_${spreadsheetId}`;
+    const cachedStr = localStorage.getItem(CACHE_KEY);
 
-    // Smart-autofill maps for the input form: what Category/PM was used for a given
-    // Transaction name in the last 30 days, most-recent-first (see getSmartCats/
-    // getSmartPms/autoFillIfExactMatch in index.html).
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 30);
-    const recent = rows
-      .filter(r => new Date(r.y, r.m, r.d) >= cutoff)
-      .sort((a, b) => new Date(b.y, b.m, b.d) - new Date(a.y, a.m, a.d));
-    const txCat = buildRecentMap(recent.map(r => ({ key: r.tx, value: r.cat })));
-    const txPm = buildRecentMap(recent.map(r => ({ key: r.tx, value: r.pm })));
+    const fetchFresh = async () => {
+      try {
+        const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:K');
+        const data = res.values || [];
+        const rows = [];
+        data.forEach((row, idx) => {
+          if (isDeletedFlag(row[8])) return;
+          const parsed = parseDateInfo(row[0], row[1]);
+          if (!parsed) return;
+          const mIdx = parsed.month - 1; // 0-indexed month
+          const y = parsed.year;
+          const day = parsed.day;
+          const r = {
+            y, m: mIdx, d: day, mk: `${MONTHS[mIdx]} ${y}`,
+            cat: String(row[2] || '').trim(), tx: String(row[3] || '').trim(), pm: String(row[4] || '').trim(),
+            rowIndex: idx + 2,
+          };
+          const inc = Number(row[5]) || 0, exp = Number(row[6]) || 0, notes = String(row[7] || '').trim();
+          if (inc) r.inc = inc;
+          if (exp) r.exp = exp;
+          if (notes) r.notes = notes;
+          if (Number(row[9]) === 1) r.future = true;
+          if (row[10]) r.id = String(row[10]).trim();
+          rows.push(r);
+        });
 
-    return { status: 'ok', rows, txCat, txPm };
+        // Smart-autofill maps for the input form: what Category/PM was used for a given
+        // Transaction name in the last 30 days, most-recent-first
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 30);
+        const recent = rows
+          .filter(r => new Date(r.y, r.m, r.d) >= cutoff)
+          .sort((a, b) => new Date(b.y, b.m, b.d) - new Date(a.y, a.m, a.d));
+        const txCat = buildRecentMap(recent.map(r => ({ key: r.tx, value: r.cat })));
+        const txPm = buildRecentMap(recent.map(r => ({ key: r.tx, value: r.pm })));
+
+        const payload = { status: 'ok', rows, txCat, txPm };
+        const newStr = JSON.stringify(payload);
+
+        if (cachedStr !== newStr) {
+          localStorage.setItem(CACHE_KEY, newStr);
+          if (cachedStr) {
+            window.dispatchEvent(new CustomEvent('notaOpexUpdated', { detail: payload }));
+          }
+        }
+        return payload;
+      } catch (e) {
+        console.warn('[data-store] Background fetch failed for allOpex', e);
+        if (!cachedStr) throw e;
+        return JSON.parse(cachedStr);
+      }
+    };
+
+    if (cachedStr) {
+      // Return immediately, update cache in background
+      fetchFresh();
+      return JSON.parse(cachedStr);
+    }
+    return await fetchFresh();
   }
 
   async function getCashBalance() {

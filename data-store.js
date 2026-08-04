@@ -413,6 +413,20 @@ const DataStore = (() => {
 
   function cellToDateStr(val) { return String(val || '').trim(); }
 
+  // Sheets API values.get defaults to FORMATTED_VALUE, so a numeric cell can come
+  // back as e.g. "1.000.000" (Indonesian-locale dot-grouped) or "1,000" (comma-grouped)
+  // instead of a raw number — Number() on either yields NaN. Same parsing already used
+  // for Config balances and account Balances; reused here for Goals targetAmount.
+  function parseMoneyCell(val) {
+    if (val === undefined || val === null || String(val).trim() === '') return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    let str = String(val).trim().replace(/^(Rp|USD|\$)\s*/i, '');
+    if (/^\d{1,3}(\.\d{3})+$/.test(str)) str = str.replace(/\./g, '');
+    else str = str.replace(/,/g, '');
+    const n = Number(str);
+    return isNaN(n) ? 0 : n;
+  }
+
   // Invest!A has a mix of formats across its history: legacy rows entered as
   // "DD/MM/YYYY" and rows written by this app via formatDateStr() as "DD Mon YY".
   // Comparing either of those directly against an ISO "YYYY-MM-DD" `since` cutoff
@@ -794,7 +808,7 @@ const DataStore = (() => {
         name,
         startDate: cellToDateStr(row[1]),
         endDate: cellToDateStr(row[2]),
-        targetAmount: Number(row[3]) || 0,
+        targetAmount: parseMoneyCell(row[3]),
         sources: row[4] ? String(row[4]).split(',').map(s => s.trim()).filter(Boolean) : [],
         completed: String(row[5] || '').toLowerCase() === 'true',
         completedDate: cellToDateStr(row[6]) || null,

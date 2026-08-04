@@ -130,6 +130,12 @@ signed-in user's own short-lived OAuth token.
   - If the user *types* a query, it hides the monitor view and executes a global search across all history (including previous months/years), disregarding the month filter settings.
 - **Tap-to-Edit Support**: Added event delegation and tap handlers on `#searchMonitorContainer` (supporting both `.detail-item` and `.tx-item` formats), making every transaction in the monitor list fully tappable/editable. Both optimistic (local) and server-synchronized updates and deletes correctly refresh the Search tab view if it is active.
 
+### Session 16: Goals Unique IDs, Account Colors & Redirections, Search card refinements, and Settings selector Grid
+- **Goals Unique IDs**: Upgraded the `Goals` sheet to support unique persistent IDs (Column H). Updated `handleGetGoals()` and `handleGoals()` in [`data-store.js`](file:///g:/My%20Drive/AI Tools/Claude Projects/Nota/data-store.js) to read/write Column H and target actions against this ID rather than fragile physical row indices. Refactored the frontend (`index.html`) client state `goalsEditId` and matching routines to fully utilize unique IDs.
+- **Account Colors & Tap Redirections**: Enabled custom color selection for accounts under Profile -> Settings -> Accounts. Account balance cards on the Insights tab now render with their selected custom color as a left-border indicator. Tapping an account card automatically clears the active search bar query, sets the search tab's account filter to the account's corresponding payment method, and navigates the user directly to the Search page.
+- **Search Card Refinements**: Replaced short value formatting (`fRpS`) with exact value formatting (`fRp`) on both **Total Expenses** and **Total Income** cards. Added a previous month income comparison calculation and replaced the average transaction statistics subtitle on the Total Income card with `"xx% vs prev month"` matching the Total Expenses card.
+- **Settings Selector Grid**: Redesigned the settings selector navigation bar from a scrolling flex row into a neat, fully visible 2x2 grid, making tabs like "Payment Methods" and "Accounts" fit perfectly on mobile screens without truncation.
+
 ## Config Persistence Pattern (Best Practice)
 
 When adding new user-configurable features (checkboxes, toggles, flags, settings), always persist them to the Google Sheets `Config` sheet using an empty column, not hardcoded in `index.html` or stored only in memory/localStorage.

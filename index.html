@@ -53,9 +53,8 @@ body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:
 .more-menu-divider{height:0.5px;background:var(--border);margin:0}
 .profile-back-btn{background:none;border:none;color:var(--text2);display:flex;align-items:center;gap:4px;font-size:14px;cursor:pointer;padding:6px 0;margin-bottom:4px}
 .profile-back-btn svg{width:18px;height:18px}
-.settings-tab-toggle{display:flex;gap:4px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:4px;margin-top:12px;margin-bottom:16px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.settings-tab-toggle::-webkit-scrollbar{display:none}
-.settings-tab-btn{flex:1 0 auto;min-width:max-content;padding:8px 10px;border-radius:var(--radius-sm);border:0.5px solid transparent;background:transparent;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;text-align:center;white-space:nowrap;transition:all 0.2s;-webkit-tap-highlight-color:transparent}
+.settings-tab-toggle{display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:6px;margin-top:12px;margin-bottom:16px}
+.settings-tab-btn{width:100%;padding:8px 10px;border-radius:var(--radius-sm);border:0.5px solid transparent;background:transparent;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;text-align:center;white-space:nowrap;transition:all 0.2s;-webkit-tap-highlight-color:transparent}
 .settings-tab-btn:active{color:var(--text)}
 .settings-tab-btn.active{background:var(--accent-dim);color:var(--accent);border-color:var(--accent);font-weight:700}
 .config-section-header{display:flex;align-items:center;justify-content:space-between;margin-top:12px;margin-bottom:8px}
@@ -1714,7 +1713,8 @@ function renderAccountBalanceCards() {
     if (ccy !== 'IDR' && balObj?.nativeAmount != null) {
       subText = `<div style="font-size:10px;color:var(--text2);margin-top:2px">${ccy} ${balObj.nativeAmount.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})}</div>`;
     }
-    return `<div class="acct-bal-card" onclick="goToHoldings()">
+    const borderStyle = a.color ? ` style="border-left: 3.5px solid ${a.color}; padding-left: 10px;"` : '';
+    return `<div class="acct-bal-card"${borderStyle} onclick="tapAccountCard('${escJsAttr(a.name)}')">
       <div class="acct-bal-name">${esc(a.name)}</div>
       <div class="acct-bal-amount">${fRp(Math.round(bal))}</div>
       ${subText}
@@ -1736,6 +1736,29 @@ function renderAccountBalanceCards() {
 function goToHoldings() {
   nwMode = 'holdings';
   switchTabFromMore('networth');
+}
+
+function tapAccountCard(accountName) {
+  const account = CONFIG_ITEMS.find(i => i.kind === 'account' && i.name === accountName);
+  let pmToFilter = 'all';
+  if (account) {
+    if (account.linkedPM) {
+      const exactPm = (allPMs || []).find(p => p.toLowerCase() === account.linkedPM.toLowerCase());
+      pmToFilter = exactPm || account.linkedPM;
+    } else {
+      const exactPm = (allPMs || []).find(p => p.toLowerCase() === account.name.toLowerCase());
+      pmToFilter = exactPm || account.name;
+    }
+  }
+  ccMonitorPmFilter = pmToFilter;
+  ccMonitorDate = new Date();
+  
+  // Clear search input query
+  const searchInput = document.getElementById('searchInput');
+  if (searchInput) searchInput.value = '';
+  searchActiveQuery = '';
+  
+  switchTab('search');
 }
 
 function openSetBalanceFromConfigOverlay() {
@@ -1897,7 +1920,7 @@ async function toggleAccountShowOnInsights(accountName, checked) {
 }
 
 function _configFieldsForKind(kind) {
-  document.getElementById('configItemColorGroup').style.display = kind === 'category' ? 'block' : 'none';
+  document.getElementById('configItemColorGroup').style.display = (kind === 'category' || kind === 'account') ? 'block' : 'none';
   document.getElementById('configItemAssetTypeGroup').style.display = (kind === 'stock' || kind === 'account') ? 'block' : 'none';
   document.getElementById('configItemCcyGroup').style.display = kind === 'account' ? 'block' : 'none';
   document.getElementById('configItemLinkedPMGroup').style.display = kind === 'account' ? 'block' : 'none';
@@ -2004,7 +2027,7 @@ async function saveConfigItem() {
   if (dup) { showToast('An active item with that name already exists', 'error'); return; }
 
   const existing = origName ? CONFIG_ITEMS.find(i => i.kind === kind && i.name === origName) : null;
-  const color = kind === 'category' ? document.getElementById('configItemColor').value : '';
+  const color = (kind === 'category' || kind === 'account') ? document.getElementById('configItemColor').value : '';
   
   let assetType = '';
   if (kind === 'stock' || kind === 'account') {
@@ -4068,14 +4091,16 @@ function renderCCMonitor() {
     }
   });
 
-  // Previous month opex expenses total for comparison
+  // Previous month opex expenses and income total for comparison
   let prevY = curY;
   let prevM = curM - 1;
   if (prevM < 1) { prevM = 12; prevY--; }
   let prevTotal = 0;
+  let prevIncomeTotal = 0;
   (HIST.opex || []).forEach(r => {
-    if (r.y === prevY && r.m === (prevM - 1) && (r.exp || 0) > 0 && isMatchPM(r.pm)) {
-      prevTotal += Number(r.exp) || 0;
+    if (r.y === prevY && r.m === (prevM - 1) && isMatchPM(r.pm)) {
+      if ((r.exp || 0) > 0) prevTotal += Number(r.exp) || 0;
+      if ((r.inc || 0) > 0) prevIncomeTotal += Number(r.inc) || 0;
     }
   });
 
@@ -4083,7 +4108,6 @@ function renderCCMonitor() {
   const currentTotalExpenses = currentTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
   const currentTotalIncome = currentTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const txCount = currentTxns.length;
-  const avgTx = txCount > 0 ? Math.round(currentTotalExpenses / txCount) : 0;
 
   let compDiffHtml = '';
   if (prevTotal > 0) {
@@ -4093,6 +4117,16 @@ function renderCCMonitor() {
     compDiffHtml = `<span style="color:${color};font-weight:600">${sign}${diffPct}%</span> vs prev month`;
   } else {
     compDiffHtml = 'No prev month comparison';
+  }
+
+  let compIncomeDiffHtml = '';
+  if (prevIncomeTotal > 0) {
+    const diffPct = Math.round(((currentTotalIncome - prevIncomeTotal) / prevIncomeTotal) * 100);
+    const sign = diffPct > 0 ? '+' : '';
+    const color = diffPct > 0 ? 'var(--green)' : 'var(--red)';
+    compIncomeDiffHtml = `<span style="color:${color};font-weight:600">${sign}${diffPct}%</span> vs prev month`;
+  } else {
+    compIncomeDiffHtml = 'No prev month comparison';
   }
 
   let html = `
@@ -4117,13 +4151,13 @@ function renderCCMonitor() {
     <div class="summary-row" style="grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
       <div class="summary-card">
         <div class="s-label">Total Expenses</div>
-        <div class="s-value" style="color:var(--text);font-size:19px">${fRpS(currentTotalExpenses)}</div>
+        <div class="s-value" style="color:var(--text);font-size:19px">${fRp(currentTotalExpenses)}</div>
         <div class="s-sub">${compDiffHtml}</div>
       </div>
       <div class="summary-card">
         <div class="s-label">Total Income</div>
-        <div class="s-value" style="color:var(--green);font-size:19px">${fRpS(currentTotalIncome)}</div>
-        <div class="s-sub">${txCount} txn${txCount !== 1 ? 's' : ''} avg ${fRpS(avgTx)}</div>
+        <div class="s-value" style="color:var(--green);font-size:19px">${fRp(currentTotalIncome)}</div>
+        <div class="s-sub">${compIncomeDiffHtml}</div>
       </div>
     </div>
 
@@ -7390,7 +7424,7 @@ function renderGoals() {
     const current = getGoalCurrentValue(g);
     const pct = Math.min(100, g.targetAmount > 0 ? (current / g.targetAmount * 100) : 0);
     const opacity = g.completed ? '0.45' : '1';
-    return `<div class="goal-card" style="opacity:${opacity}" onclick="openGoalsOverlay('edit',${g.rowNum})">
+    return `<div class="goal-card" style="opacity:${opacity}" onclick="openGoalsOverlay('edit','${g.id}')">
       <div class="goal-card-header">
         <div class="goal-card-name">${g.name}</div>
         ${g.completed ? '<span style="font-size:10px;color:var(--green);font-weight:600;background:var(--green-dim);padding:2px 8px;border-radius:20px">Done</span>' : ''}
@@ -7413,7 +7447,7 @@ function renderGoals() {
 
 function openGoalsOverlay(mode, goalId) {
   goalsEditId = mode === 'edit' ? goalId : null;
-  const goal = goalsEditId ? GOALS.find(g => g.rowNum === goalsEditId) : null;
+  const goal = goalsEditId ? GOALS.find(g => g.id === goalsEditId) : null;
   document.getElementById('goalsOverlayTitle').textContent = mode === 'new' ? 'New Goal' : 'Edit Goal';
   document.getElementById('goalDeleteBtn').style.display = mode === 'edit' ? 'block' : 'none';
   const completeBtn = document.getElementById('goalMarkCompleteBtn');
@@ -7459,10 +7493,10 @@ async function saveGoal() {
   if (!name || !targetAmount) return;
   const saveBtn = document.querySelector('#goalsOverlay .submit-btn');
   if (saveBtn) saveBtn.textContent = 'Saving…';
-  const existing = goalsEditId ? GOALS.find(g => g.rowNum === goalsEditId) : null;
+  const existing = goalsEditId ? GOALS.find(g => g.id === goalsEditId) : null;
   const payload = {
     type: 'goals', action: 'save',
-    rowNum: goalsEditId || null,
+    id: goalsEditId || null,
     name, startDate, endDate, targetAmount, sources,
     completed: existing ? existing.completed : false,
     completedDate: existing ? (existing.completedDate || '') : ''
@@ -7472,10 +7506,10 @@ async function saveGoal() {
     const j = await res.json().catch(() => ({}));
     if (j.status === 'ok') {
       if (goalsEditId) {
-        const idx = GOALS.findIndex(g => g.rowNum === goalsEditId);
+        const idx = GOALS.findIndex(g => g.id === goalsEditId);
         if (idx >= 0) GOALS[idx] = { ...GOALS[idx], name, startDate, endDate, targetAmount, sources };
       } else {
-        GOALS.push({ rowNum: j.rowNum, name, startDate, endDate, targetAmount, sources, completed: false, completedDate: null });
+        GOALS.push({ id: j.id, name, startDate, endDate, targetAmount, sources, completed: false, completedDate: null });
       }
       closeGoalsOverlay();
       renderGoals();
@@ -7490,10 +7524,10 @@ async function deleteGoal() {
   const delBtn = document.getElementById('goalDeleteBtn');
   if (delBtn) delBtn.textContent = 'Deleting…';
   try {
-    const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: {'Content-Type': 'text/plain'}, body: apiBody({ type: 'goals', action: 'delete', rowNum: goalsEditId }) });
+    const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: {'Content-Type': 'text/plain'}, body: apiBody({ type: 'goals', action: 'delete', id: goalsEditId }) });
     const j = await res.json().catch(() => ({}));
     if (j.status === 'ok') {
-      GOALS = GOALS.filter(g => g.rowNum !== goalsEditId);
+      GOALS = GOALS.filter(g => g.id !== goalsEditId);
       closeGoalsOverlay();
       renderGoals();
     }
@@ -7504,7 +7538,7 @@ async function deleteGoal() {
 
 async function toggleGoalComplete() {
   if (!goalsEditId) return;
-  const goal = GOALS.find(g => g.rowNum === goalsEditId);
+  const goal = GOALS.find(g => g.id === goalsEditId);
   if (!goal) return;
   const newCompleted = !goal.completed;
   const newCompletedDate = newCompleted ? todayISO() : null;
@@ -7514,7 +7548,7 @@ async function toggleGoalComplete() {
     const res = await fetchWithTimeout(APPS_SCRIPT_URL, {
       method: 'POST', headers: {'Content-Type': 'text/plain'},
       body: apiBody({
-        type: 'goals', action: 'save', rowNum: goalsEditId,
+        type: 'goals', action: 'save', id: goalsEditId,
         name: goal.name, startDate: goal.startDate, endDate: goal.endDate,
         targetAmount: goal.targetAmount, sources: goal.sources,
         completed: newCompleted, completedDate: newCompletedDate || ''

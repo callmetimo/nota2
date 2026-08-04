@@ -177,8 +177,8 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A2:B8`, [
       ['AAPL',''], ['JNJ',''], ['VYM',''], ['QQQ',''], ['CHF IDR',''], ['USD IDR',''], ['Star Stable',''],
     ]);
-    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:G1`, [[
-      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate',
+    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:H1`, [[
+      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate','id',
     ]]);
     await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
       'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
@@ -242,8 +242,8 @@ const DataStore = (() => {
     if (await sheetHasHeader(GOALS_SHEET)) return;
     const old = await SheetsClient.getValues(spreadsheetId, `Invest!J${OLD_GOALS_START_ROW}:P`);
     const dataRows = (old.values || []).filter(r => r && r[0]);
-    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:G1`, [[
-      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate',
+    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:H1`, [[
+      'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate','id',
     ]]);
     if (dataRows.length) {
       await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A2:G${1 + dataRows.length}`, dataRows);
@@ -770,15 +770,21 @@ const DataStore = (() => {
     return { status: 'ok', prices, cashBalance, ts: new Date().toISOString() };
   }
 
-  // ── GOALS (Goals!A2:G) ─────────────────────────────────────────
+  // ── GOALS (Goals!A2:H) ─────────────────────────────────────────
   async function handleGetGoals() {
-    const res = await SheetsClient.getValues(spreadsheetId, `${GOALS_SHEET}!A${GOALS_START_ROW}:G`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${GOALS_SHEET}!A${GOALS_START_ROW}:H`);
     const data = res.values || [];
     const goals = [];
     data.forEach((row, idx) => {
       const name = String(row[0] || '').trim();
       if (!name) return;
+      let id = String(row[7] || '').trim();
+      if (!id) {
+        // Generate a random stable-looking ID for legacy goals
+        id = 'g_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+      }
       goals.push({
+        id,
         rowNum: GOALS_START_ROW + idx,
         name,
         startDate: cellToDateStr(row[1]),
@@ -801,20 +807,28 @@ const DataStore = (() => {
   }
 
   async function handleGoals(data) {
-    const { action, rowNum, name, startDate, endDate, targetAmount, sources, completed, completedDate } = data;
+    const { action, id, name, startDate, endDate, targetAmount, sources, completed, completedDate } = data;
+    
+    // Fetch latest goals to find target row by matching ID
+    const { goals } = await handleGetGoals();
+    const existing = id ? goals.find(g => g.id === id) : null;
+
     if (action === 'delete') {
-      if (!rowNum || rowNum < GOALS_START_ROW) return { status: 'error', message: 'Invalid rowNum' };
-      await SheetsClient.clearValues(spreadsheetId, `${GOALS_SHEET}!A${rowNum}:G${rowNum}`);
+      if (!existing) return { status: 'error', message: 'Goal not found' };
+      await SheetsClient.clearValues(spreadsheetId, `${GOALS_SHEET}!A${existing.rowNum}:H${existing.rowNum}`);
       return { status: 'ok' };
     }
+
+    const goalId = id || 'g_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
     const sourcesStr = Array.isArray(sources) ? sources.join(', ') : (sources || '');
     const rowData = [
       name || '', startDate || '', endDate || '', Number(targetAmount) || 0,
-      sourcesStr, completed ? 'TRUE' : 'FALSE', completedDate || '',
+      sourcesStr, completed ? 'TRUE' : 'FALSE', completedDate || '', goalId
     ];
-    const targetRow = rowNum || await findNextGoalRow();
-    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A${targetRow}:G${targetRow}`, [rowData]);
-    return { status: 'ok', rowNum: targetRow };
+
+    const targetRow = existing ? existing.rowNum : await findNextGoalRow();
+    await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A${targetRow}:H${targetRow}`, [rowData]);
+    return { status: 'ok', id: goalId };
   }
 
   // ── RECURRING (Recurring!A2:L) ─────────────────────────────────

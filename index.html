@@ -3018,7 +3018,14 @@ function switchTab(tab, el) {
   }
   if(tab==='goals'){
     fetchFxRates();
-    const _loadGoals = () => fetchSheetPrices().then(fetchGoals);
+    const _loadGoals = () => Promise.all([
+      fetchSheetPrices(),
+      fetchLiveInvest().catch(() => {}),
+      fetchAccountBalances().catch(() => {})
+    ]).then(() => {
+      buildAccountBalances();
+      return fetchGoals();
+    });
     if(!histLoaded) onHistLoaded(_loadGoals);
     else _loadGoals();
   }
@@ -5482,11 +5489,26 @@ function updateAppVh(){
   if (Math.abs(vh - _lastAppVh) < 1) return;
   _lastAppVh = vh;
   document.documentElement.style.setProperty('--app-vh', vh + 'px');
+  window.scrollTo(0, 0);
 }
 updateAppVh();
 window.addEventListener('resize', updateAppVh);
 window.addEventListener('orientationchange', updateAppVh);
 if (window.visualViewport) window.visualViewport.addEventListener('resize', updateAppVh);
+
+// Prevent window scroll from shifting fixed/absolute overlays on input focus
+window.addEventListener('scroll', () => {
+  if (window.scrollY !== 0 || window.scrollX !== 0) {
+    window.scrollTo(0, 0);
+  }
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('scroll', () => {
+    if (window.visualViewport.offsetTop !== 0 || window.visualViewport.offsetLeft !== 0) {
+      window.scrollTo(0, 0);
+    }
+  });
+}
 
 // ── SEARCH FUNCTIONS ──────────────────────────────────────────
 let searchTimeout;

@@ -104,6 +104,10 @@ signed-in user's own short-lived OAuth token.
   - Pending/unsynced local transfers (created via `submitTransfer()` but not yet synced) now correctly display with transfer styling but remain non-tappable, consistent with the calendar's own constraint (they lack a `sheetId` until synced). This also fixes a latent bug where pending transfers were misdetected as editable plain expenses.
   - Modified `openEditTransferOverlay()` signature to accept an optional `dateStr` parameter, allowing Search calls to pass the transfer's own date instead of the global calendar date.
 
+### Session 13: Sign-In UX & Double-Click Prevention
+- **Disabled State for Sign-in Button**: Updated `auth.js` `signIn()` to visually disable the "Sign in with Google" button (`btn.disabled = true; btn.textContent = 'Connecting...'`) immediately upon click to prevent accidental double-clicks and confusion while the background auth and bootstrap process is running.
+- **Error Recovery**: Automatically re-enables the button and restores its text if the Google authentication or bootstrap fails, allowing the user to try again safely.
+
 ## Config Persistence Pattern (Best Practice)
 
 When adding new user-configurable features (checkboxes, toggles, flags, settings), always persist them to the Google Sheets `Config` sheet using an empty column, not hardcoded in `index.html` or stored only in memory/localStorage.
@@ -356,3 +360,14 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
   mark clearly why they're kept.
 - Don't comment obvious code.
 - **Don't leave `fetch()` calls to external APIs unbounded.** A stalled connection can hang forever with no error, leaving entire data-load chains pending indefinitely. Always wrap external API calls in `AbortController` with a timeout (15s for Sheets API, 8s for user-visible endpoints). See `sheets-client.js:authedFetch()` and `index.html:fetchWithTimeout()` as templates.
+
+### Brand Guidelines & Design
+
+- **App Name**: Nota
+- **Design Philosophy**: Sleek, modern, and distraction-free mobile web application layout with a premium dark-mode aesthetic.
+- **Typography**: Uses modern, clean sans-serif system fonts for optimum readability.
+- **Color Palette & Theme**:
+  - Employs soft gradients and distinct semantic colors for categories (e.g., `#60a0f0` for Transport, `#c8f060` for Meals, `#ff6b6b` for Entertainment).
+  - Uses standard red/green for expense/income tracking to create immediate visual recognition.
+  - Buttons and interactive elements use subtle hover/active states for feedback without layout shifting.
+- **Layout Integrity**: The application structure depends on a fixed viewport height (`100dvh`) with `overflow: hidden` on the body, using specific flexbox sections and touch-optimized scrolling containers (`-webkit-overflow-scrolling:touch`) instead of document scrolling.

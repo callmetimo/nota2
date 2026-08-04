@@ -3664,14 +3664,16 @@ async function loadHistData(_isRetry) {
 })();
 
 // ── INIT ──────────────────────────────────────────────────────
-updateHeaderHeight();
-window.addEventListener('resize',updateHeaderHeight);
-initDatePicker('inputDateRaw','inputDateDisplay','inputDateText');
-initDatePicker('inputDateRawI','inputDateDisplayI','inputDateTextI');
-initDatePicker('xfrDateRaw','xfrDateDisplay','xfrDateText');
+// (Moved inside DOMContentLoaded to ensure ui-insights.js functions are available)
 
 // ── INIT v3.5: Render from cache instantly, fetch in background ──
 window.addEventListener('DOMContentLoaded', async () => {
+  updateHeaderHeight();
+  window.addEventListener('resize', updateHeaderHeight);
+  initDatePicker('inputDateRaw', 'inputDateDisplay', 'inputDateText');
+  initDatePicker('inputDateRawI', 'inputDateDisplayI', 'inputDateTextI');
+  initDatePicker('xfrDateRaw', 'xfrDateDisplay', 'xfrDateText');
+
   const isHome = () => document.getElementById('page-home').classList.contains('active');
 
   // Arms the splash/sign-in overlay to hide itself as soon as Auth.ready resolves —

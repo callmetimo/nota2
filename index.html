@@ -1760,11 +1760,18 @@ function openSetBalanceFromConfigOverlay() {
   document.getElementById('setBalanceAmount').value = amtVal !== '' ? formatGroupedAmt(amtVal) : '';
   document.getElementById('setBalanceDate').value = dateVal;
   closeConfigItemOverlay();
-  document.getElementById('setBalanceOverlay').classList.add('open');
+  const ov = document.getElementById('setBalanceOverlay');
+  ov.classList.add('open');
+  adjustOverlayForVisualViewport();
 }
 
 function closeSetBalanceOverlay() {
-  document.getElementById('setBalanceOverlay').classList.remove('open');
+  const ov = document.getElementById('setBalanceOverlay');
+  if (ov) {
+    ov.classList.remove('open');
+    ov.style.top = '';
+    ov.style.height = '';
+  }
 }
 
 async function saveAccountBalance() {
@@ -1997,11 +2004,18 @@ function openConfigItemOverlay(kind, name) {
   document.getElementById('configItemArchiveBtn').style.display = item ? 'block' : 'none';
   document.getElementById('configItemArchiveBtn').textContent = item && item.archived ? 'Restore' : 'Delete';
   _configFieldsForKind(kind);
-  document.getElementById('configItemOverlay').classList.add('open');
+  const ov = document.getElementById('configItemOverlay');
+  ov.classList.add('open');
+  adjustOverlayForVisualViewport();
 }
 
 function closeConfigItemOverlay() {
-  document.getElementById('configItemOverlay').classList.remove('open');
+  const ov = document.getElementById('configItemOverlay');
+  if (ov) {
+    ov.classList.remove('open');
+    ov.style.top = '';
+    ov.style.height = '';
+  }
 }
 
 async function saveConfigItem() {
@@ -3075,7 +3089,9 @@ function openInputOverlay() {
   document.getElementById('inputRecurringEndYear').value = '';
   if (typeof buildSmartPills === 'function') buildSmartPills();
   checkCcInstallmentVisibility();
-  document.getElementById('inputOverlay').classList.add('open');
+  const ov = document.getElementById('inputOverlay');
+  ov.classList.add('open');
+  adjustOverlayForVisualViewport();
   // Focus first input after slide animation completes
   setTimeout(() => {
     const f = document.getElementById('inputTx');
@@ -3085,7 +3101,11 @@ function openInputOverlay() {
 
 function closeInputOverlay() {
   const ov = document.getElementById('inputOverlay');
-  if (ov) ov.classList.remove('open');
+  if (ov) {
+    ov.classList.remove('open');
+    ov.style.top = '';
+    ov.style.height = '';
+  }
   // Reset edit state
   overlayEditRowIndex = null;
   overlayEditId = null;
@@ -5510,6 +5530,22 @@ if (window.visualViewport) {
   });
 }
 
+// Keeps the currently-open input-sheet overlay anchored within the area the
+// on-screen keyboard hasn't covered, instead of the full layout viewport —
+// otherwise the sheet (and its focused input) ends up hidden below the keyboard.
+function adjustOverlayForVisualViewport() {
+  const ov = document.querySelector('.input-overlay.open');
+  if (!ov) return;
+  const vv = window.visualViewport;
+  if (!vv) { ov.style.top = ''; ov.style.height = ''; return; }
+  ov.style.top = vv.offsetTop + 'px';
+  ov.style.height = vv.height + 'px';
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', adjustOverlayForVisualViewport);
+  window.visualViewport.addEventListener('scroll', adjustOverlayForVisualViewport);
+}
+
 // ── SEARCH FUNCTIONS ──────────────────────────────────────────
 let searchTimeout;
 let searchCurrentResults = [];
@@ -7393,14 +7429,18 @@ async function retryPendingQueue() {
 let GOALS = [];
 let goalsEditId = null; // sheet rowNum of the goal being edited, or null for new
 
+let _goalsFetchSeq = 0;
 async function fetchGoals() {
+  const seq = ++_goalsFetchSeq;
   const container = document.getElementById('goalsListContainer');
   if (container) container.innerHTML = '<div class="chart-loading">Loading…</div>';
   try {
     const res = await fetch(apiGet('type=goals'), { method: 'GET' });
     const j = await res.json();
+    if (seq !== _goalsFetchSeq) return; // a newer fetchGoals() call superseded this one
     if (j.status === 'ok' && Array.isArray(j.goals)) GOALS = j.goals;
   } catch(e) { /* silently fall through to empty render */ }
+  if (seq !== _goalsFetchSeq) return;
   renderGoals();
 }
 
@@ -7589,12 +7629,18 @@ function openGoalsOverlay(mode, goalId) {
     completeBtn.textContent = goal.completed ? 'Mark Incomplete' : 'Mark Complete';
     completeBtn.className = 'goal-complete-btn' + (goal.completed ? ' done' : '');
   }
-  document.getElementById('goalsOverlay').classList.add('open');
+  const ov = document.getElementById('goalsOverlay');
+  ov.classList.add('open');
+  adjustOverlayForVisualViewport();
 }
 
 function closeGoalsOverlay() {
   const ov = document.getElementById('goalsOverlay');
-  if (ov) ov.classList.remove('open');
+  if (ov) {
+    ov.classList.remove('open');
+    ov.style.top = '';
+    ov.style.height = '';
+  }
   goalsEditId = null;
 }
 

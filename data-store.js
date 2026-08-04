@@ -775,13 +775,18 @@ const DataStore = (() => {
     const res = await SheetsClient.getValues(spreadsheetId, `${GOALS_SHEET}!A${GOALS_START_ROW}:I`);
     const data = res.values || [];
     const goals = [];
-    data.forEach((row, idx) => {
+    for (let idx = 0; idx < data.length; idx++) {
+      const row = data[idx];
       const name = String(row[0] || '').trim();
-      if (!name) return;
+      if (!name) continue;
       let id = String(row[7] || '').trim();
       if (!id) {
-        // Generate a random stable-looking ID for legacy goals
+        // Legacy row with no persisted ID — generate one and write it back so
+        // future lookups (edits/deletes) match this row instead of regenerating
+        // a different random ID every read and silently appending a duplicate row.
         id = 'g_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        const rowNum = GOALS_START_ROW + idx;
+        await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!H${rowNum}`, [[id]]);
       }
       goals.push({
         id,
@@ -795,7 +800,7 @@ const DataStore = (() => {
         completedDate: cellToDateStr(row[6]) || null,
         ccy: String(row[8] || '').trim() || 'IDR',
       });
-    });
+    }
     return { status: 'ok', goals };
   }
 

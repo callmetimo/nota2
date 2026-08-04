@@ -188,6 +188,7 @@ const Auth = (() => {
     localStorage.removeItem('notaPublic_spreadsheetId');
     localStorage.removeItem('notaPublic_opexSheetId');
     localStorage.removeItem('notaPublic_investSheetId');
+    localStorage.removeItem('notaPublic_splitMigratedV1'); // migration flag — reset so it re-runs if the user signs into a different account
     location.reload();
   }
 

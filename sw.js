@@ -9,7 +9,9 @@ const SHELL_FILES = ['./index.html', './icon.png'];
 // host DataStore/SheetsClient talk to (sheets.googleapis.com, www.googleapis.com) —
 // caches.put() throws on a non-GET request (e.g. POST writes), which was silently
 // turning real, successful Sheets API calls into a fake "Offline" 503 response.
-const BYPASS_HOSTS = [
+// Matching is done against URL.hostname (not url.includes()) to avoid false positives
+// on paths that happen to contain a hostname substring.
+const BYPASS_HOSTS = new Set([
   'script.google.com',
   'sheets.googleapis.com',
   'www.googleapis.com',
@@ -18,7 +20,7 @@ const BYPASS_HOSTS = [
   'frankfurter.app',
   'fonts.googleapis.com',
   'fonts.gstatic.com'
-];
+]);
 
 // ── Install: pre-cache shell ──────────────────────────────────
 self.addEventListener('install', e => {
@@ -44,8 +46,10 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = e.request.url;
 
-  // Always bypass API and font calls
-  if (BYPASS_HOSTS.some(h => url.includes(h))) return;
+  // Always bypass API and font calls — match on hostname so a URL whose *path*
+  // happens to contain a hostname string does not accidentally match.
+  const reqHost = new URL(e.request.url).hostname;
+  if (BYPASS_HOSTS.has(reqHost) || [...BYPASS_HOSTS].some(h => reqHost.endsWith('.' + h))) return;
 
   // data.json — stale-while-revalidate (instant load, updates in background)
   if (url.includes('data.json')) {

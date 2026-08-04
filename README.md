@@ -12,7 +12,50 @@ signed-in user's own short-lived OAuth token.
 
 ## Recent Updates & Feature Additions (AI Studio Sessions Recap)
 
+### Session 8: Code Audit — Quick-Win Refactoring Pass
+
+A focused refactoring pass addressing the "Quick Wins" tier from a full codebase audit.
+No user-visible behaviour changed; all fixes are internal code quality, correctness, and
+performance improvements.
+
+- **RED-2 — `generateId()` helper** (`data-store.js`): Replaced three identical inline
+  `(crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random())` ternaries
+  with a single `generateId()` function. Dropped the weak `Date.now()+Math.random()` fallback —
+  `crypto.randomUUID` is supported in every browser that can run this app's OAuth flow.
+
+- **PERF-2 — Single-call transfer deletion** (`data-store.js`): Transfer deletions now send
+  all row-delete requests in one `batchUpdate` call instead of one call per row, halving the
+  API quota cost for every transfer delete operation.
+
+- **PERF-4 — Correct service-worker host bypass** (`sw.js`): Replaced
+  `BYPASS_HOSTS.some(h => url.includes(h))` (which could false-positive on URL paths that
+  happen to contain a hostname substring) with a proper `URL.hostname` check. Also converted
+  `BYPASS_HOSTS` from an array to a `Set` for O(1) lookups.
+
+- **QW-1 — Documented `fetchWithTimeout`** (`index.html`): Added an explanatory comment
+  clarifying why `fetchWithTimeout` coexists with `SheetsClient.authedFetch`'s own
+  `AbortController` timeout. They serve different purposes (HTTP abort vs. promise-chain
+  deadline) and the named wrapper is intentionally kept as the shared call site for ~15
+  POST operations.
+
+- **QW-2 — Empty global arrays** (`index.html`): Removed hardcoded seeds from
+  `allCategories`, `allPMs`, `allStocks`, and `allAccounts`. These were overwritten by
+  `applyConfigToGlobals()` within milliseconds of boot anyway. `CONFIG_DEFAULTS` in
+  `data-store.js` is now the single source of truth for default names.
+
+- **QW-3 — `APP_BUILD` surfaced in Account page** (`index.html`): Added a **Build** row to
+  the Account info card displaying `APP_VERSION (APP_BUILD)`. The constant was previously
+  defined but never shown anywhere, making remote support/diagnostics harder.
+
+- **QW-4 — Migration flag cleared on sign-out** (`auth.js`): Added
+  `localStorage.removeItem('notaPublic_splitMigratedV1')` to `signOut()` so the one-time
+  sheet-split migration flag is reset when a user signs out, preventing it from silently
+  blocking the migration if they sign in with a different Google account on the same browser.
+
+---
+
 ### Session 1: Multi-Tenant Architecture & Smart Autofill
+
 - **Client-Side Google Sheets Backend**: Replaced shared Apps Script backend with `auth.js`, `sheets-client.js`, and `data-store.js` using OAuth `drive.file` scope.
 - **Smart Autofill**: Auto-suggests **Category** & **Payment Method** (Expense/Income) and **Account** (Invest) based on rolling 30-day transaction history.
 - **Resilient Offline Sync**: Background transaction retry queue (`retryPendingQueue`) and foreground re-fetch handlers.

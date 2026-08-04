@@ -944,6 +944,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     <div class="account-info-row"><span class="account-info-label">Last modified</span><span id="acctInfoModified">Loading…</span></div>
     <div class="account-info-row"><span class="account-info-label">Transactions</span><span id="acctInfoOpexCount">Loading…</span></div>
     <div class="account-info-row"><span class="account-info-label">Investments</span><span id="acctInfoInvestCount">Loading…</span></div>
+    <div class="account-info-row"><span class="account-info-label">Build</span><span id="acctInfoBuild">—</span></div>
   </div>
   <button class="submit-btn" style="background:var(--bg3);color:var(--text)" onclick="Auth.signOut()">Sign Out</button>
   <button class="delete-btn" onclick="openDeleteAccountConfirm1()">Delete Account &amp; Data</button>
@@ -1283,7 +1284,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
 }
 
 const APP_VERSION = 'v4.26';
-const APP_BUILD = '2026-07-27d';
+const APP_BUILD = '2026-07-27d'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
 }
@@ -1305,6 +1306,13 @@ window.fetch = function(url, opts) {
   return _notaRealFetch(url, opts);
 };
 
+// fetchWithTimeout wraps every APPS_SCRIPT_URL POST with a race against a
+// plain setTimeout, acting as a user-visible deadline (default 8 s) on top of
+// SheetsClient.authedFetch's lower-level AbortController (15 s). The two layers
+// serve different purposes: authedFetch aborts the in-flight HTTP request;
+// fetchWithTimeout races the DataStore.handleRequest() promise chain which may
+// itself queue retries. Kept as a named helper so all ~15 call sites share the
+// same deadline logic without inline duplication.
 function fetchWithTimeout(url, opts, ms = 8000) {
   return Promise.race([
     fetch(url, opts),
@@ -1367,10 +1375,14 @@ function attachSwipeClose(handleId, closeFn, threshold = 60) {
 }
 document.getElementById('appVersionLabel').textContent = APP_VERSION;
 
-const allCategories = ['Entertainment','Gas','Gifts','Groceries','Home Repair','Household','Income','Insurance','Meals','Medical','Self Care','Transport','Travel','Utilities'];
-const allPMs = ['BCA','CIMB Niaga','eWallet','Flazz'];
-const allStocks = ['USDIDR CIMB'];
-const allAccounts = ['BCA IDR','USD CIMB','CIMB IDR','Maybank IDR'];
+// These arrays start empty and are immediately populated by applyConfigToGlobals()
+// (called synchronously from the localStorage-cached CONFIG_ITEMS on boot, or after
+// fetchConfig() resolves). Hardcoded seeds were removed — CONFIG_DEFAULTS in
+// data-store.js is the single source of truth for default category/PM/stock/account names.
+const allCategories = [];
+const allPMs = [];
+const allStocks = [];
+const allAccounts = [];
 
 const CAT_COLORS = {
   'Transport':'#60a0f0','Meals':'#c8f060','Entertainment':'#ff6b6b','Groceries':'#ffaa44',
@@ -2116,6 +2128,8 @@ async function loadAccountUsageInfo() {
   document.getElementById('acctInfoModified').textContent = 'Loading…';
   document.getElementById('acctInfoOpexCount').textContent = 'Loading…';
   document.getElementById('acctInfoInvestCount').textContent = 'Loading…';
+  // Always show build info immediately (no async needed)
+  document.getElementById('acctInfoBuild').textContent = `${APP_VERSION} (${APP_BUILD})`;
   try {
     const meta = await SheetsClient.getFileMeta(ssId);
     const sizeKb = meta.size ? Math.round(Number(meta.size) / 1024) : null;

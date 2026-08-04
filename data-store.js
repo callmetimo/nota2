@@ -10,6 +10,10 @@ const DataStore = (() => {
   const LS_INVEST_GID = 'notaPublic_investSheetId';
   const LS_SPLIT_MIGRATED = 'notaPublic_splitMigratedV1';
 
+  // crypto.randomUUID is available in all modern browsers (Chrome 92+, Safari 15.4+, Firefox 95+).
+  // Centralised here so the guard/fallback doesn't have to be repeated at every call site.
+  function generateId() { return crypto.randomUUID(); }
+
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const STOCK_PRICES_SHEET = 'Stock Prices';
   const GOALS_SHEET = 'Goals';
@@ -466,7 +470,7 @@ const DataStore = (() => {
     const isIncome = action === 'income';
     const income = isIncome ? amount : '';
     const expense = isIncome ? '' : amount;
-    const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+    const id = generateId();
     await SheetsClient.appendValues(spreadsheetId, 'Opex!A:K', [[
       formatDateStr(date), month, cat, tx, pm, income, expense, notes || '', '', future ? 1 : 0, id,
     ]]);
@@ -527,18 +531,19 @@ const DataStore = (() => {
     if (data.action === 'delete') {
       const rowIndices = await findOpexRowsByTxId(data.id);
       if (!rowIndices.length) return { status: 'error', message: 'Transfer rows not found' };
+      // Sort descending so higher-index rows are deleted first — deleting a lower row
+      // first shifts subsequent row numbers, invalidating the remaining indices.
+      // All deletes are sent in a single batchUpdate to save one API call per extra row.
       const sorted = [...rowIndices].sort((a, b) => b - a);
-      for (const rowIndex of sorted) {
-        await SheetsClient.batchUpdate(spreadsheetId, [{
-          deleteDimension: {
-            range: { sheetId: opexGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex },
-          },
-        }]);
-      }
+      await SheetsClient.batchUpdate(spreadsheetId, sorted.map(rowIndex => ({
+        deleteDimension: {
+          range: { sheetId: opexGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex },
+        },
+      })));
       return { status: 'ok' };
     }
     const { date, month, fromPm, toPm, amount, notes } = data;
-    const groupId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+    const groupId = generateId();
     const txId = 'xfr_' + groupId;
     await SheetsClient.appendValues(spreadsheetId, 'Opex!A:K', [[
       formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0, txId,
@@ -712,7 +717,7 @@ const DataStore = (() => {
       return { status: 'ok' };
     }
 
-    const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+    const id = generateId();
     let opexId = '';
     if (action === 'Buy') {
       const monthKey = month || deriveMonthKey(date);

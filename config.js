@@ -16,8 +16,8 @@ const NOTA_PUBLIC_CONFIG = {
   GOOGLE_SCOPE: 'https://www.googleapis.com/auth/drive.file',
 };
 
-// Fallback for local development so the app runs out-of-the-box on localhost.
-if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+// Fallback for local development (localhost, local IPs, etc.) so it runs out-of-the-box everywhere except the production domain.
+if (location.hostname !== 'callmetimo.github.io') {
   NOTA_PUBLIC_CONFIG.GOOGLE_CLIENT_ID = '765296352533-sho2avfm5gerct9k5001stsk6d4cr4cu.apps.googleusercontent.com';
 }
 

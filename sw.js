@@ -48,8 +48,14 @@ self.addEventListener('fetch', e => {
 
   // Always bypass API and font calls — match on hostname so a URL whose *path*
   // happens to contain a hostname string does not accidentally match.
-  const reqHost = new URL(e.request.url).hostname;
-  if (BYPASS_HOSTS.has(reqHost) || [...BYPASS_HOSTS].some(h => reqHost.endsWith('.' + h))) return;
+  let reqHost = '';
+  try {
+    reqHost = new URL(e.request.url).hostname;
+  } catch (err) {
+    // Fallback if URL parsing fails on non-standard schemes
+    if (BYPASS_HOSTS.has(url) || [...BYPASS_HOSTS].some(h => url.includes(h))) return;
+  }
+  if (reqHost && (BYPASS_HOSTS.has(reqHost) || [...BYPASS_HOSTS].some(h => reqHost.endsWith('.' + h)))) return;
 
   // data.json — stale-while-revalidate (instant load, updates in background)
   if (url.includes('data.json')) {

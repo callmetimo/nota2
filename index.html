@@ -1713,8 +1713,8 @@ function renderAccountBalanceCards() {
     if (ccy !== 'IDR' && balObj?.nativeAmount != null) {
       subText = `<div style="font-size:10px;color:var(--text2);margin-top:2px">${ccy} ${balObj.nativeAmount.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})}</div>`;
     }
-    const borderStyle = a.color ? ` style="border-left: 3.5px solid ${a.color}; padding-left: 10px;"` : '';
-    return `<div class="acct-bal-card"${borderStyle} onclick="tapAccountCard('${escJsAttr(a.name)}')">
+    const highlightStyle = a.color ? ` style="border-color: ${a.color}; background: color-mix(in srgb, ${a.color} 10%, var(--bg2));"` : '';
+    return `<div class="acct-bal-card"${highlightStyle} onclick="tapAccountCard('${escJsAttr(a.name)}')">
       <div class="acct-bal-name">${esc(a.name)}</div>
       <div class="acct-bal-amount">${fRp(Math.round(bal))}</div>
       ${subText}

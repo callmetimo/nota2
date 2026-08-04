@@ -9,8 +9,15 @@
 //      under "Authorized JavaScript origins".
 //   5. Paste the generated Client ID below.
 const NOTA_PUBLIC_CONFIG = {
-  GOOGLE_CLIENT_ID: '765296352533-sho2avfm5gerct9k5001stsk6d4cr4cu.apps.googleusercontent.com',
+  // ___GOOGLE_CLIENT_ID___ is replaced at build time by GitHub Actions.
+  GOOGLE_CLIENT_ID: '___GOOGLE_CLIENT_ID___',
   // Non-sensitive scope: the app can only see/edit files it creates itself,
   // never the user's other Drive files or Sheets.
   GOOGLE_SCOPE: 'https://www.googleapis.com/auth/drive.file',
 };
+
+// Fallback for local development so the app runs out-of-the-box on localhost.
+if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+  NOTA_PUBLIC_CONFIG.GOOGLE_CLIENT_ID = '765296352533-sho2avfm5gerct9k5001stsk6d4cr4cu.apps.googleusercontent.com';
+}
+

@@ -23,6 +23,10 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
+      - name: Inject Client ID
+        run: |
+          sed -i "s/___GOOGLE_CLIENT_ID___/${{ secrets.GOOGLE_CLIENT_ID }}/g" config.js
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

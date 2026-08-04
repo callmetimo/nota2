@@ -7373,10 +7373,12 @@ async function fetchGoals() {
 }
 
 function getGoalAssetList() {
+  const accounts = CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).map(i => i.name);
   const allInvest = getAllInvestRows();
   const stocks = new Set();
-  allInvest.forEach(r => stocks.add(r.stock));
-  return ['Cash', ...Array.from(stocks)];
+  allInvest.forEach(r => { if (r.stock) stocks.add(r.stock); });
+  CONFIG_ITEMS.filter(i => i.kind === 'stock' && !i.archived).forEach(i => { if (i.name) stocks.add(i.name); });
+  return ['Cash', ...accounts, ...Array.from(stocks)];
 }
 
 function getGoalCurrentValue(goal) {
@@ -7387,6 +7389,10 @@ function getGoalCurrentValue(goal) {
   let total = 0;
   (goal.sources || []).forEach(source => {
     if (source === 'Cash') { total += computeCashBalance(); return; }
+    if (accountBalances[source]) {
+      total += accountBalances[source].amount || 0;
+      return;
+    }
     const netLot = (buyLots[source] || 0) - (sellLots[source] || 0);
     if (netLot <= 0) return;
     if (source === 'Star Stable Income Fund') {

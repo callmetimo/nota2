@@ -440,7 +440,18 @@ const DataStore = (() => {
     let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return `${m[1]}-${m[2]}-${m[3]}`;
     m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    if (m) {
+      let day = m[1], month = m[2];
+      // This app's convention for slash dates is DD/MM/YYYY, but some rows (e.g. an
+      // Invest row written by a different device/entry path) end up MM/DD/YYYY instead.
+      // An out-of-range "month" (e.g. 29) doesn't throw — it just sorts, as a string,
+      // after every valid month, so the row silently looks permanently "in the future"
+      // and is never excluded by any cutoff comparison. Self-correct the one case that's
+      // actually detectable: if the assumed month is invalid but the day position is a
+      // plausible month, the fields must be swapped.
+      if (Number(month) > 12 && Number(day) <= 12) { [day, month] = [month, day]; }
+      return `${m[3]}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
     m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\w*\s+(\d{2,4})$/);
     if (m) {
       const idx = MONTHS.findIndex(mo => mo.toLowerCase() === m[2].slice(0, 3).toLowerCase());

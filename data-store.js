@@ -50,8 +50,6 @@ const DataStore = (() => {
   const OLD_GOALS_START_ROW = 15; // pre-split location, used only during migration
   const CONFIG_SHEET = 'Config';
   const CONFIG_DATA_ROW = 2;
-  const BALANCES_SHEET = 'Balances';
-
   const CAT_COLOR_DEFAULTS = {
     'Transport':'#60a0f0','Meals':'#c8f060','Entertainment':'#ff6b6b','Groceries':'#ffaa44',
     'Household':'#a78bfa','Medical':'#34d399','Utilities':'#f472b6',
@@ -175,7 +173,6 @@ const DataStore = (() => {
         { properties: { title: STOCK_PRICES_SHEET, sheetId: 3 } },
         { properties: { title: GOALS_SHEET, sheetId: 4 } },
         { properties: { title: RECURRING_SHEET, sheetId: 5 } },
-        { properties: { title: BALANCES_SHEET, sheetId: 6 } },
       ],
     });
     spreadsheetId = created.spreadsheetId;
@@ -208,9 +205,6 @@ const DataStore = (() => {
     ]]);
     const configRows = CONFIG_DEFAULTS.map((it, idx) => serializeConfigRow(it, idx));
     await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
-    await SheetsClient.updateValues(spreadsheetId, `${BALANCES_SHEET}!A1:D1`, [[
-      'Account', 'Date', 'Amount', 'TxID',
-    ]]);
     await SheetsClient.batchUpdate(spreadsheetId, [{
       repeatCell: {
         range: { sheetId: opexGid, startColumnIndex: 1, endColumnIndex: 2 },
@@ -226,14 +220,13 @@ const DataStore = (() => {
   // drop) just re-attempts whichever blocks didn't finish, next time bootstrap() runs.
   async function migrateToSplitSheets(meta) {
     const titles = (meta.sheets || []).map(s => s.properties.title);
-    const missing = [STOCK_PRICES_SHEET, GOALS_SHEET, RECURRING_SHEET, BALANCES_SHEET].filter(t => !titles.includes(t));
+    const missing = [STOCK_PRICES_SHEET, GOALS_SHEET, RECURRING_SHEET].filter(t => !titles.includes(t));
     if (missing.length) {
       await SheetsClient.batchUpdate(spreadsheetId, missing.map(title => ({ addSheet: { properties: { title } } })));
     }
     await migratePricesBlock();
     await migrateGoalsBlock();
     await migrateRecurringBlock();
-    await migrateBalancesHeader();
   }
 
   async function sheetHasHeader(sheetName) {
@@ -278,13 +271,6 @@ const DataStore = (() => {
       await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A2:L${1 + dataRows.length}`, dataRows);
     }
     await SheetsClient.clearValues(spreadsheetId, 'Invest!R1:AC');
-  }
-
-  async function migrateBalancesHeader() {
-    if (await sheetHasHeader(BALANCES_SHEET)) return;
-    await SheetsClient.updateValues(spreadsheetId, `${BALANCES_SHEET}!A1:D1`, [[
-      'Account', 'Date', 'Amount', 'TxID',
-    ]]);
   }
 
   // One-time action (triggered from Settings) that installs live GOOGLEFINANCE formulas
@@ -1049,76 +1035,6 @@ const DataStore = (() => {
     return { status: 'ok', count: rows.length };
   }
 
-  // ── BALANCES (Balances!A2:D) ────────────────────────────────────
-  async function handleGetBalances() {
-    const res = await SheetsClient.getValues(spreadsheetId, `${BALANCES_SHEET}!A2:D`);
-    const rows = res.values || [];
-    const latestByAccount = {};
-    rows.forEach(row => {
-      const account = String(row[0] || '').trim();
-      const date    = String(row[1] || '').trim();
-      let amount = 0;
-      if (row[2] !== undefined && row[2] !== null && String(row[2]).trim() !== '') {
-        if (typeof row[2] === 'number') {
-          amount = isNaN(row[2]) ? 0 : row[2];
-        } else {
-          let str = String(row[2]).trim().replace(/^(Rp|USD|\$)\s*/i, '');
-          if (/^\d{1,3}(\.\d{3})+$/.test(str)) str = str.replace(/\./g, '');
-          else str = str.replace(/,/g, '');
-          const n = Number(str);
-          if (!isNaN(n)) amount = n;
-        }
-      }
-      const txId    = String(row[3] || '').trim();
-      if (!account || !date) return;
-      const existing = latestByAccount[account];
-      if (!existing || date > existing.date) {
-        latestByAccount[account] = { date, amount, txId };
-      }
-    });
-    return { status: 'ok', balances: latestByAccount };
-  }
-
-  async function handleSaveBalance(data) {
-    const { account, date, amount, txId } = data;
-    if (!account || !date) return { status: 'error', message: 'account and date required' };
-    await SheetsClient.appendValues(spreadsheetId, `${BALANCES_SHEET}!A:D`, [[
-      String(account).slice(0, 100),
-      String(date).slice(0, 10),
-      Number(amount) || 0,
-      String(txId || '').slice(0, 50),
-    ]]);
-
-    // Update Column I, J & K in Config sheet for matching account
-    try {
-      await ensureConfigSheetExists();
-      const configRes = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:K`);
-      const configRows = configRes.values || [];
-      let found = false;
-      for (let i = 0; i < configRows.length; i++) {
-        const row = configRows[i];
-        if (String(row[0] || '').trim() === 'account' && String(row[1] || '').trim().toLowerCase() === String(account).trim().toLowerCase()) {
-          while (row.length < 11) row.push('');
-          row[8] = Number(amount) || 0;
-          row[9] = String(date).slice(0, 10);
-          if (row[10] === '' || row[10] === undefined) row[10] = 'TRUE';
-          const rowNum = CONFIG_DATA_ROW + i;
-          await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${rowNum}:K${rowNum}`, [row]);
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        const newRow = ['account', String(account).trim(), '', '', '', 'FALSE', configRows.length, '', Number(amount) || 0, String(date).slice(0, 10), 'TRUE'];
-        await SheetsClient.appendValues(spreadsheetId, `${CONFIG_SHEET}!A:K`, [newRow]);
-      }
-    } catch (e) {
-      console.warn('[handleSaveBalance] Could not update Config sheet columns I/J/K:', e);
-    }
-
-    return { status: 'ok' };
-  }
-
   // ── REQUEST ROUTER (mirrors the old doGet/doPost dispatch) ───
   async function handleRequest(urlStr, opts) {
     await requireReady();
@@ -1134,7 +1050,6 @@ const DataStore = (() => {
       if (type === 'goals') return handleGetGoals();
       if (type === 'recurring') return handleGetRecurring();
       if (type === 'config') return handleGetConfig();
-      if (type === 'balances') return handleGetBalances();
       return { status: 'error', message: 'Unknown type' };
     }
 
@@ -1144,7 +1059,6 @@ const DataStore = (() => {
     if (data.type === 'goals') return handleGoals(data);
     if (data.type === 'recurring') return handleRecurring(data);
     if (data.type === 'config') return handleConfig(data);
-    if (data.type === 'balances') return handleSaveBalance(data);
     if (data.type === 'transfer') return handleTransfer(data);
     return { status: 'error', message: 'Unknown type' };
   }

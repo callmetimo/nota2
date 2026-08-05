@@ -2253,16 +2253,11 @@ function switchTab(tab, el) {
       const el=document.getElementById(activeSummary);
       if(el)el.innerHTML='<div class="chart-loading">Loading data…</div>';
       onHistLoaded(()=>{
-        // fetchLiveInvest() must run alongside fetchAccountBalances() — without it,
-        // opening Insights before ever opening Net Worth leaves the global `liveInvest`
-        // cache empty, so any dual-purpose FX account's Invest-derived activity is
-        // invisible here and only appears once Net Worth happens to be opened first
-        // (whichever populates `liveInvest` as a side effect), making the shown balance
-        // depend on navigation order instead of being consistent everywhere.
-        Promise.all([fetchAccountBalances(), fetchLiveInvest()]).then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
+        // fetchLiveInvest() must run so any dual-purpose FX account's Invest-derived activity is visible here
+        fetchLiveInvest().then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
       });
     } else {
-      Promise.all([fetchAccountBalances(), fetchLiveInvest()]).then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
+      fetchLiveInvest().then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
     }
   }
   if(tab==='networth'){
@@ -2273,8 +2268,7 @@ function switchTab(tab, el) {
     fetchFxRates();
     const _loadGoals = () => Promise.all([
       fetchSheetPrices(),
-      fetchLiveInvest().catch(() => {}),
-      fetchAccountBalances().catch(() => {})
+      fetchLiveInvest().catch(() => {})
     ]).then(() => {
       buildAccountBalances();
       return fetchGoals();
@@ -3729,7 +3723,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   // ACCOUNT_CCY/STOCK_TYPE from the user's Config sheet once it resolves. Any picker/lookup
   // that runs before this resolves just sees the hardcoded defaults for a moment.
   fetchConfig();
-  fetchAccountBalances();
   buildAccountBalances();
   renderAccountBalanceCards();
 

@@ -657,7 +657,7 @@ function setNWMode(mode,el){
   else renderNetWorth();
 }
 function initNetWorth() {
-  const render = () => Promise.all([fetchSheetPrices(false), fetchLiveInvest(), fetchAccountBalances()]).then(() => renderNetWorth());
+  const render = () => Promise.all([fetchSheetPrices(false), fetchLiveInvest()]).then(() => renderNetWorth());
   if (!histLoaded) onHistLoaded(render);
   else render();
 }
@@ -1003,7 +1003,9 @@ function isFxAccountMatch(acctName, ccy, stockName) {
   // presets list in ui-settings.js — USD, SGD, EUR, AUD, JPY, GBP, MYR, THB, CNY)
   // gets this matching for free, with no code change when a new one is configured.
   const ccyUpper = (ccy || '').toUpperCase();
-  const tokenAlts = /^[A-Z]{3}$/.test(ccyUpper) ? `${ccyUpper.toLowerCase()}idr|${ccyUpper.toLowerCase()}` : null;
+  const tokenAlts = (ccyUpper && ccyUpper !== 'IDR' && /^[A-Z]{3}$/.test(ccyUpper))
+    ? `${ccyUpper.toLowerCase()}idr|${ccyUpper.toLowerCase()}`
+    : null;
   if (tokenAlts) {
     const prefixRe = new RegExp(`^(${tokenAlts})\\s+`, 'i');
     const suffixRe = new RegExp(`\\s+(${tokenAlts})$`, 'i');

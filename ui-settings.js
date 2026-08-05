@@ -137,26 +137,6 @@ async function installLivePrices() {
 }
 
 // ── ACCOUNT BALANCES ──────────────────────────────────────────
-async function fetchAccountBalances() {
-  try {
-    const res = await fetch(apiGet('type=balances'), { method: 'GET' });
-    const j = await res.json();
-    if (j.status === 'ok') {
-      const incoming = j.balances || {};
-      Object.keys(incoming).forEach(k => {
-        const cur = rawAccountBalances[k];
-        if (!cur || (incoming[k].date && incoming[k].date >= cur.date)) {
-          rawAccountBalances[k] = incoming[k];
-        }
-      });
-      syncConfigToRawAccountBalances();
-      try { localStorage.setItem(LS_RAW_BAL_KEY, JSON.stringify(rawAccountBalances)); } catch(e) {}
-      buildAccountBalances();
-      renderAccountBalanceCards();
-    }
-  } catch(e) { /* offline — keep whatever we have */ }
-}
-
 function isCreditCardPM(pmName) {
   if (!pmName) return false;
   const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && i.name === pmName);
@@ -170,8 +150,21 @@ function getAccountMatchNames(acctOrPm) {
   } else if (acctOrPm && typeof acctOrPm === 'object') {
     if (acctOrPm.name) names.add(acctOrPm.name.toLowerCase().trim());
     if (acctOrPm.name) {
-      const stripped = acctOrPm.name.replace(/^(IDR|USD)\s+/i, '').toLowerCase().trim();
-      if (stripped) names.add(stripped);
+      // Strip the account's currency token (e.g. "IDR"/"USD"/any configured ccy) whether
+      // it appears as a prefix ("USD CIMB") or a suffix ("CIMB IDR") so a transaction
+      // tagged with just the bare bank name ("CIMB") still matches this account for
+      // cutoff-delta purposes. Falls back to trying IDR/USD literally when no ccy is
+      // available (legacy/plain-string callers).
+      const ccyUpper = (acctOrPm.ccy || '').toUpperCase();
+      const tokens = /^[A-Z]{3}$/.test(ccyUpper) ? [ccyUpper] : ['IDR', 'USD'];
+      const fullLower = acctOrPm.name.toLowerCase().trim();
+      tokens.forEach(tok => {
+        const stripped = acctOrPm.name
+          .replace(new RegExp(`^${tok}\\s+`, 'i'), '')
+          .replace(new RegExp(`\\s+${tok}$`, 'i'), '')
+          .toLowerCase().trim();
+        if (stripped && stripped !== fullLower) names.add(stripped);
+      });
     }
   }
   return Array.from(names);
@@ -404,11 +397,6 @@ async function saveAccountBalance() {
     renderAccountBalanceCards();
     renderSettingsLists();
     closeSetBalanceOverlay();
-
-    await fetchWithTimeout(APPS_SCRIPT_URL, {
-      method: 'POST', headers: {'Content-Type': 'text/plain'},
-      body: apiBody({ type: 'balances', action: 'saveBalance', account: item.name, date, amount, txId })
-    });
 
     // Also persist to Config sheet columns I (balance) and J (balanceDate)
     await saveConfigToServer();

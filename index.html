@@ -580,7 +580,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           <label class="form-label">Amount</label>
           <div class="amount-wrapper">
             <span class="amount-prefix">Rp</span>
-            <input type="text" class="form-input amount-input" id="inputAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
+            <input type="text" class="form-input amount-input" id="inputAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
           </div>
         </div>
         <div class="form-group autocomplete-wrapper">
@@ -673,13 +673,13 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group">
           <label class="form-label">Lot / Units</label>
-          <input type="text" class="form-input" id="inputLot" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this); calcTotal()">
+          <input type="text" class="form-input" id="inputLot" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event); calcTotal()">
         </div>
         <div class="form-group">
           <label class="form-label">Price per Unit</label>
           <div class="amount-wrapper">
             <span class="amount-prefix" id="investPricePrefix">Rp</span>
-            <input type="text" class="form-input amount-input" id="inputPrice" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this); calcTotal()">
+            <input type="text" class="form-input amount-input" id="inputPrice" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event); calcTotal()">
           </div>
         </div>
       </div>
@@ -697,7 +697,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <label class="form-label">Total (IDR)</label>
         <div class="amount-wrapper">
           <span class="amount-prefix">Rp</span>
-          <input type="text" class="form-input amount-input" id="inputTotal" placeholder="Auto-calculated" inputmode="decimal" oninput="formatAmountInput(this); updateAvgPrices()">
+          <input type="text" class="form-input amount-input" id="inputTotal" placeholder="Auto-calculated" inputmode="decimal" oninput="formatAmountInput(this, event); updateAvgPrices()">
         </div>
       </div>
       <button class="submit-btn invest" id="submitInvestBtn" onclick="submitInvest()">Save Investment</button>
@@ -732,7 +732,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <label class="form-label">Amount</label>
         <div class="amount-wrapper">
           <span class="amount-prefix">Rp</span>
-          <input type="text" class="form-input amount-input" id="xfrAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
+          <input type="text" class="form-input amount-input" id="xfrAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
         </div>
       </div>
       <div class="form-group">
@@ -1033,7 +1033,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       </div>
       <div class="form-group" id="configItemBalanceGroup" style="display:none">
         <label class="form-label">Remaining Balance</label>
-        <input type="text" class="form-input" id="configItemBalance" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
+        <input type="text" class="form-input" id="configItemBalance" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
       </div>
       <div class="form-group" id="configItemBalanceDateGroup" style="display:none">
         <label class="form-label">Input Date / As of Date</label>
@@ -1067,7 +1067,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <input type="hidden" id="setBalanceAccount">
       <div class="form-group">
         <label class="form-label">Amount (IDR)</label>
-        <input type="text" class="form-input" id="setBalanceAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
+        <input type="text" class="form-input" id="setBalanceAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
       </div>
       <div class="form-group">
         <label class="form-label">As of date</label>
@@ -1150,7 +1150,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group">
         <label class="form-label">Amount (Rp)</label>
-        <input type="text" class="form-input" id="recurringEditAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
+        <input type="text" class="form-input" id="recurringEditAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
       </div>
       <div class="form-group">
         <label class="form-label">Payment Method</label>
@@ -1241,7 +1241,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <label class="form-label">Target Amount</label>
         <div class="amount-wrapper">
           <span class="amount-prefix" id="goalCcyPrefix">Rp</span>
-          <input type="text" class="form-input amount-input" id="goalTargetAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this)">
+          <input type="text" class="form-input amount-input" id="goalTargetAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
         </div>
       </div>
       <div class="form-group">
@@ -2136,12 +2136,21 @@ function formatGroupedAmt(n) {
   return parts.length > 1 ? `${intFormatted}.${parts[1]}` : intFormatted;
 }
 
-function formatAmountInput(el) {
+function formatAmountInput(el, e) {
   if (!el) return;
   let rawVal = el.value;
   if (!rawVal) return;
 
   const cursorFromEnd = rawVal.length - (el.selectionEnd || 0);
+
+  // If the user explicitly typed a comma (common on iOS decimal keyboards in some locales),
+  // convert that specific comma into a dot before we process and strip formatting commas.
+  if (e && e.data === ',') {
+    const pos = el.selectionEnd;
+    if (pos > 0 && rawVal[pos - 1] === ',') {
+      rawVal = rawVal.substring(0, pos - 1) + '.' + rawVal.substring(pos);
+    }
+  }
 
   // Commas are only ever thousands-grouping separators inserted by this function;
   // "." is the sole decimal separator (typed explicitly on the keypad). Strip commas.
@@ -2182,8 +2191,8 @@ function formatAmountInput(el) {
   }
 }
 
-function formatDecimalAmountInput(el) {
-  formatAmountInput(el);
+function formatDecimalAmountInput(el, e) {
+  formatAmountInput(el, e);
 }
 
 function fUSD(idrAmount, rate){

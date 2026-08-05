@@ -435,32 +435,20 @@ const DataStore = (() => {
   // because '0' < '2' lexically) and was silently dropping most rows from
   // handleGetInvest — normalize to ISO first so the comparison is actually valid.
   function parseAnyDateToISO(val) {
-    const s = String(val || '').trim();
-    if (!s) return '';
-    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) {
-      let day = m[1], month = m[2];
-      // This app's convention for slash dates is DD/MM/YYYY, but some rows (e.g. an
-      // Invest row written by a different device/entry path) end up MM/DD/YYYY instead.
-      // An out-of-range "month" (e.g. 29) doesn't throw — it just sorts, as a string,
-      // after every valid month, so the row silently looks permanently "in the future"
-      // and is never excluded by any cutoff comparison. Self-correct the one case that's
-      // actually detectable: if the assumed month is invalid but the day position is a
-      // plausible month, the fields must be swapped.
-      if (Number(month) > 12 && Number(day) <= 12) { [day, month] = [month, day]; }
-      return `${m[3]}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-    }
-    m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\w*\s+(\d{2,4})$/);
-    if (m) {
-      const idx = MONTHS.findIndex(mo => mo.toLowerCase() === m[2].slice(0, 3).toLowerCase());
-      if (idx >= 0) {
-        const yr = m[3].length === 2 ? '20' + m[3] : m[3];
-        return `${yr}-${String(idx + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-      }
-    }
-    return '';
+    // Delegates to parseDateInfo() — the same parser already trusted for the entire
+    // Opex ledger — instead of maintaining a second, narrower ad-hoc parser. This gives
+    // every caller parseDateInfo's wider format coverage (dot/dash separators, 2-digit
+    // years, "YYYY/MM/DD") AND its full range validation (day 1-31, month 1-12, year
+    // 2000-2100), which the old inline regexes here lacked: an out-of-range value like
+    // "13/13/2026" used to silently produce a garbage-but-truthy ISO string with an
+    // invalid month, which then sorts, as a string, after every real month — making
+    // that row look permanently "in the future" no matter what cutoff is compared
+    // against it (this is exactly what happened with the CIMB IDR Invest-date bug).
+    // parseDateInfo() already includes the day/month swap heuristic for the ambiguous
+    // DD/MM vs MM/DD case, so that fix is preserved here too.
+    const parsed = parseDateInfo(val, null);
+    if (!parsed) return '';
+    return `${parsed.year}-${String(parsed.month).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}`;
   }
 
   // ── OPEX ──────────────────────────────────────────────────────
@@ -916,7 +904,14 @@ const DataStore = (() => {
         id, type: String(row[1] || '').trim(), tx: String(row[2] || '').trim(), cat: String(row[3] || '').trim(),
         amount: Number(row[4]) || 0, pm: String(row[5] || '').trim(), notes: String(row[6] || '').trim(),
         dayOfMonth: Number(row[7]) || 1, active: String(row[8] || '').trim().toLowerCase() === 'true',
-        lastFired: String(row[9] || '').trim(),
+        // Same class of risk as the Invest/Config date bug: an unvalidated raw string can
+        // get reformatted by Sheets if it's ever auto-detected as a date, and a corrupted
+        // value here is worse than a missing one — it can (a) make an already-fired rule
+        // look never-fired, re-prompting a transaction the user already recorded, and
+        // (b) via the raw cross-format `>` compare against a clean local "YYYY-MM" value
+        // elsewhere, let corrupted server data silently win over and overwrite a correct
+        // local lastFired stamp. Validate the same way endMonth already is on the next line.
+        lastFired: /^\d{4}-(0[1-9]|1[0-2])$/.test(String(row[9] || '').trim()) ? String(row[9] || '').trim() : '',
         endMonth: /^\d{4}-(0[1-9]|1[0-2])$/.test(endMonthVal) ? endMonthVal : null,
       });
     });

@@ -10,78 +10,20 @@ directly via the Google Sheets API. There is no backend server and no Apps
 Script deployment — everything runs client-side in the browser using the
 signed-in user's own short-lived OAuth token.
 
-## Recent Updates & Feature Additions (AI Studio Sessions Recap)
+## Project History & Timeline of Sessions
 
-### Session 11: Architecture & `handleGetAllOpex` Caching (PERF-1 & ARCH-1)
-- **PERF-1 — `handleGetAllOpex` Caching**: Addressed the main application bottleneck by implementing a stale-while-revalidate caching pattern in `data-store.js`. Navigation to Insights and History is now instant, rendering from `localStorage`, while a background fetch checks Google Sheets for updates. If new data is found, a `notaOpexUpdated` event is fired to quietly refresh the UI without reloading.
-- **ARCH-1 — Modularised `index.html`**: Extracted 4,500 lines of JavaScript from the massive `index.html` monolith into safe, domain-specific modules (`ui-insights.js`, `ui-calendar.js`, `ui-settings.js`). This significantly improves maintainability while preserving the existing top-to-bottom variable scoping.
-- **Guardrails**: Documented the Client ID environment variable fallback (see Session 9) to ensure forks and local development do not crash when the production secret is missing.
+This section provides the full chronological history of development, audit, and refactoring passes. Each session is tagged with the client used to conduct the changes: **Claude** or **AI Studio** (Antigravity/Gemini).
 
-### Session 10: Code Audit — Medium Refactors Pass
-- **RED-1 / RED-4 / RED-5 — DataStore Cleanup**: Centralized duplicate code patterns. Merged `parseConfigBalance` into a shared utility, extracted `serializeConfigRow` to deduplicate config serialization, and moved the `MONTHS` array mapping strictly into `DataStore`.
-- **RED-3 — Extracted `fetchAndCacheSheetGids`**: Eliminated redundant GID logic across bootstrap, settings, and initial fetch paths by centralizing the lookup.
-- **SYNC-1 — Aggressive Sync Pruning**: Updated `pruneStaleHistory` to automatically prune synced history older than 60 days from `localStorage`, preventing long-term storage bloat on mobile browsers. Unsynced (pending) transactions are completely immune.
-- **SYNC-3 — Optimized API Calls for Rules**: Replaced the sequential `clearValues` and `updateValues` API calls with a single `updateValues` request dynamically padded with empty rows. This cuts the network overhead of saving Config and Recurring rules by 50%.
-
-### Session 9: Code Audit — Quick Wins & Security Pass
-- **SEC-1 — GitHub Actions Secret Injection**: Moved the Google Client ID out of the public source code. The codebase now uses a placeholder (`___GOOGLE_CLIENT_ID___`) which is injected by GitHub Actions at deploy time.
-- **Client ID Local Fallback (Guardrail)**: Built a dynamic hostname detection mechanism into `config.js`. If the app runs locally (`localhost`, `127.0.0.1`, `192.168.x.x`), it falls back to a locally-defined `GOOGLE_CLIENT_ID_LOCAL` so developers don't encounter OAuth errors, while production correctly enforces the secret.
-- **Resilience Fix (`sw.js`)**: Wrapped `new URL()` in a `try...catch` inside the Service Worker fetch handler and hardened `BYPASS_HOSTS` matching. This prevents the Service Worker from crashing on non-standard request schemes (like `chrome-extension://`), which previously blocked the Google Sign-In script from loading.
-- **RED-2 / PERF-2 / PERF-4**: Grouped transfer deletions into single API batch updates, swapped `Math.random` UUIDs for `crypto.randomUUID`, and removed global state overrides (all previously noted in older logs but formally finalized here).
-
-### Session 8: Code Audit — Quick-Win Refactoring Pass
-
-A focused refactoring pass addressing the "Quick Wins" tier from a full codebase audit.
-No user-visible behaviour changed; all fixes are internal code quality, correctness, and
-performance improvements.
-
-- **RED-2 — `generateId()` helper** (`data-store.js`): Replaced three identical inline
-  `(crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random())` ternaries
-  with a single `generateId()` function. Dropped the weak `Date.now()+Math.random()` fallback —
-  `crypto.randomUUID` is supported in every browser that can run this app's OAuth flow.
-
-- **PERF-2 — Single-call transfer deletion** (`data-store.js`): Transfer deletions now send
-  all row-delete requests in one `batchUpdate` call instead of one call per row, halving the
-  API quota cost for every transfer delete operation.
-
-- **PERF-4 — Correct service-worker host bypass** (`sw.js`): Replaced
-  `BYPASS_HOSTS.some(h => url.includes(h))` (which could false-positive on URL paths that
-  happen to contain a hostname substring) with a proper `URL.hostname` check. Also converted
-  `BYPASS_HOSTS` from an array to a `Set` for O(1) lookups.
-
-- **QW-1 — Documented `fetchWithTimeout`** (`index.html`): Added an explanatory comment
-  clarifying why `fetchWithTimeout` coexists with `SheetsClient.authedFetch`'s own
-  `AbortController` timeout. They serve different purposes (HTTP abort vs. promise-chain
-  deadline) and the named wrapper is intentionally kept as the shared call site for ~15
-  POST operations.
-
-- **QW-2 — Empty global arrays** (`index.html`): Removed hardcoded seeds from
-  `allCategories`, `allPMs`, `allStocks`, and `allAccounts`. These were overwritten by
-  `applyConfigToGlobals()` within milliseconds of boot anyway. `CONFIG_DEFAULTS` in
-  `data-store.js` is now the single source of truth for default names.
-
-- **QW-3 — `APP_BUILD` surfaced in Account page** (`index.html`): Added a **Build** row to
-  the Account info card displaying `APP_VERSION (APP_BUILD)`. The constant was previously
-  defined but never shown anywhere, making remote support/diagnostics harder.
-
-- **QW-4 — Migration flag cleared on sign-out** (`auth.js`): Added
-  `localStorage.removeItem('notaPublic_splitMigratedV1')` to `signOut()` so the one-time
-  sheet-split migration flag is reset when a user signs out, preventing it from silently
-  blocking the migration if they sign in with a different Google account on the same browser.
-
----
-
-### Session 1: Multi-Tenant Architecture & Smart Autofill
-
+#### Session 1: Multi-Tenant Architecture & Smart Autofill (Claude)
 - **Client-Side Google Sheets Backend**: Replaced shared Apps Script backend with `auth.js`, `sheets-client.js`, and `data-store.js` using OAuth `drive.file` scope.
 - **Smart Autofill**: Auto-suggests **Category** & **Payment Method** (Expense/Income) and **Account** (Invest) based on rolling 30-day transaction history.
 - **Resilient Offline Sync**: Background transaction retry queue (`retryPendingQueue`) and foreground re-fetch handlers.
 
-### Session 2: Dual-Purpose Stock & Account Depletion Engine
+#### Session 2: Dual-Purpose Stock & Account Depletion Engine (Claude)
 - **Forex / Multi-Currency Asset Depletion**: Automated balance tracking for accounts that hold cash/forex *and* fund stock purchases (e.g., `USDIDR Pluang Febri`).
 - **Shared Net Lot Calculation**: Implemented `computeInvestNetLots()` so Net Worth holdings and Financial Goals progress calculate exact remaining balances without drifting out of sync.
 
-### Session 3: Weekly Insights View
+#### Session 3: Weekly Insights View (Claude)
 - **Weekly Expense Analysis**: Added a **Weekly** mode filter on the Insights page, positioned to the left of **Monthly** (`Weekly`, `Monthly`, `Yearly`, `Category`).
 - **Monday–Sunday Calendar Cycle**: Groups expenses into Monday–Sunday weeks.
 - **Multi-Level Filters**:
@@ -89,12 +31,12 @@ performance improvements.
   - **Range Filter**: `4 Wk`, `8 Wk`, `12 Wk`, `YTD`.
 - **Interactive Visual Analytics**: Week-over-week spending comparison, average weekly benchmarks, interactive weekly bar chart, and category donut breakdown with transaction-level drill-down.
 
-### Session 4: Profile Navigation & Page Renaming
+#### Session 4: Profile Navigation & Page Renaming (Claude)
 - **Financial Goals**: Renamed "Goals" to **Financial Goals** in the Profile / More menu.
 - **Recurring Transactions**: Renamed "Recurring" to **Recurring Transactions** in the Profile / More menu.
 - **Consistent Headers**: Updated the page title header on the Recurring screen to **Recurring Transactions**.
 
-### Session 5: Custom Asset Type Configuration & Dynamic Net Worth Allocation
+#### Session 5: Custom Asset Type Configuration & Dynamic Net Worth Allocation (Claude)
 - **Configurable Account & Stock Asset Types**: Added **Asset Type** selection (`Cash`, `Reksa Dana`, `Forex`, `US Stock`, `JHT`, or `Custom...`) for Accounts and Stocks under Profile → Settings → Accounts / Stocks.
 - **Google Sheets Config Sync**: Synchronized account and stock asset type configurations with Column E (`assetType`) in the Google Sheets `Config` sheet.
 - **Stock Balance Inputs**: Enabled Balance and Balance Date settings for Stock items in the Config modal, allowing non-transactional asset holdings (e.g., JHT) to maintain a static balance.
@@ -107,12 +49,12 @@ performance improvements.
   - Fixed account duplication (e.g. `BCA IDR` vs legacy `IDR BCA`) by replacing hardcoded default account names, adding token-sorted deduplication across active accounts and fallback raw balances, and auto-cleaning legacy key variations in `syncConfigToRawAccountBalances`.
   - Unified metrics calculation between `Overview` and `Holdings` so total Net Worth, Cash & Accounts, Investment totals, and Donut Chart allocations match 100%.
 
-### Session 6: Insights Transactions Subpage & Version Bump (v4.26)
-- **Transactions Subpage Renaming**: Renamed the "Credit Card Usage" toggle subpage under Insights to **Transactions**.
+#### Session 6: Insights Transactions Subpage & Version Bump (v4.26) (Claude)
+- **Transactions Subpage Renaming**: Renamed the "Credit Card Usage" toggle subpage under Insights to **Transactions**. *(Note: This subpage layout was subsequently removed and migrated to the main Search page in Session 19)*.
 - **Account Filter & Metric Labels**: Updated "Card Filter" label to **Account Filter** (with filter option **All Accounts**), "Total CC Usage" summary card to **Total Transactions**, and bottom transaction list header to **Transactions**.
 - **Application Version**: Bumped application version to **v4.26**.
 
-### Session 7: Per-Payment-Method Credit Card Billing Toggle
+#### Session 7: Per-Payment-Method Credit Card Billing Toggle (Claude)
 - **User-selectable CC accounting method**: Added a `creditCard` boolean flag on `kind: 'pm'` entries in `CONFIG_ITEMS`, editable via a **"Credit card (deferred billing)"** checkbox in the Payment Method config overlay (Profile → Settings → Payment Methods), plus an inline checkbox on each PM row in the settings list.
   - **Checked (Method 1 — deferred billing)**: charges on that payment method don't count as an expense until the bill is paid via a bank payment method. This matches how a real credit card works — the bank balance isn't touched until the statement is paid.
   - **Unchecked (default, Method 2 — real-time)**: charges count as an expense immediately, same as cash/bank/e-wallet.
@@ -120,39 +62,58 @@ performance improvements.
 - Balance calculation (`computeAccountCurrentBalance`) was already unaffected either way — it matches transactions by PM name, so a credit card PM never touches a bank account's balance directly; only a bill payment recorded against the bank PM does.
 - **Data persistence**: The flag is persisted to Google Sheets `Config` sheet Column L (see Session 9 for implementation).
 
-### Session 8: Fix Accounts Missing from Net Worth Holdings/Overview
+#### Session 8: Fix Accounts Missing from Net Worth Holdings/Overview (Claude)
 - **Bug**: Accounts with "Show on Insights" unchecked (e.g. `CIMB IDR`, `JHT`) silently disappeared from both the Net Worth **Holdings** and **Overview** pages, not just the home page's Insights cards.
 - **Root cause**: `renderHoldings()` and `renderOverview()` both filtered their account list with `showOnInsights !== false` — a flag meant only to control the home page's Insights account-balance cards (`renderAccountBalanceCards`). Once excluded there, the account was also blocked from `getNetWorthAllocations()`'s raw-balance fallback, since that fallback skips anything already present in `CONFIG_ITEMS`, leaving no path for the account to reappear.
 - **Fix**: Removed the `showOnInsights` condition from both `renderHoldings()` and `renderOverview()`'s account filters so Net Worth always reflects every non-archived configured account, independent of the Insights-tab display preference. `renderAccountBalanceCards` keeps using `showOnInsights` as before.
-- **Follow-up bug**: After the above fix, `CIMB IDR` (a plain IDR cash account) still didn't appear. Root cause: `isFxAccountMatch()` (moved to `ui-insights.js:914` by the Session 11 script split; was `index.html:4641` at the time this bug was fixed) — used by `getNetWorthAllocations()` to avoid double-counting an FX funding account (e.g. `USD CIMB`) that's already represented by its linked Forex holding (e.g. `USDIDR CIMB`) — strips currency tokens like `"IDR"`/`"USD"` from both names before comparing. Stripping `"IDR"` off `"CIMB IDR"` also collapsed it to `"cimb"`, which then coincidentally matched the unrelated `USDIDR CIMB` Forex holding (also strips to `"cimb"`), so `CIMB IDR` was wrongly treated as a duplicate and dropped.
-- **Fix**: Added a currency guard to `isFxAccountMatch()`'s token-normalization step — it only applies when the account's `ccy` is a real foreign currency (not `IDR`/blank), since a legitimate FX-linked account always carries a foreign `ccy` (per the "Dual-purpose stock/account entries" convention below), while a plain IDR cash account never should be. Also fixed the raw-balance fallback (`getNetWorthAllocations()` step 3) to look up each raw key's actual `ccy` from `CONFIG_ITEMS`/`ACCOUNT_CCY` instead of passing `null`, so the same guard applies consistently there.
+- **Follow-up bug**: After the above fix, `CIMB IDR` (a plain IDR cash account) still didn't appear. Root cause: `isFxAccountMatch()` (moved to `ui-insights.js:914` by the Session 15 script split) — used by `getNetWorthAllocations()` to avoid double-counting an FX funding account (e.g. `USD CIMB`) that's already represented by its linked Forex holding (e.g. `USDIDR CIMB`) — strips currency tokens like `"IDR"`/`"USD"` from both names before comparing. Stripping `"IDR"` off `"CIMB IDR"` also collapsed it to `"cimb"`, which then coincidentally matched the unrelated `USDIDR CIMB` Forex holding (also strips to `"cimb"`), so `CIMB IDR` was wrongly treated as a duplicate and dropped.
+- **Fix**: Added a currency guard to `isFxAccountMatch()`'s token-normalization step — it only applies when the account's `ccy` is a real foreign currency (not `IDR`/blank), since a legitimate FX-linked account always carries a foreign `ccy` (per the "Dual-purpose stock/account entries" convention), while a plain IDR cash account never should be. Also fixed the raw-balance fallback (`getNetWorthAllocations()` step 3) to look up each raw key's actual `ccy` from `CONFIG_ITEMS`/`ACCOUNT_CCY` instead of passing `null`, so the same guard applies consistently there.
 
-### Session 9: Persist Credit Card Billing Flag to Config Sheet (Column L)
+#### Session 9: Persist Credit Card Billing Flag to Config Sheet (Column L) (Claude)
 - **Bug**: The "Credit card (deferred billing)" checkbox on a Payment Method (Profile → Settings → Payment Methods) reverted back whenever the user left and returned to that settings page. The `creditCard` flag on `kind: 'pm'` items (added in Session 7) only ever lived in-memory/localStorage — it was never part of the Config sheet's read/write column mapping in `data-store.js`, so any fresh fetch of `CONFIG_ITEMS` from the Sheet wiped it out.
 - **Fix**: Added `creditCard` as **Column L** in the `Config` sheet, matching the existing pattern used for `assetType` (Column E) and `showOnInsights` (Column K):
   - `data-store.js`: extended the header row (`A1:K1` → `A1:L1`, adding `'creditCard'`), the seed/bootstrap row builders, `handleGetConfig()`'s read mapping (`r[11]` → `creditCard: boolean`), and `handleConfig()`'s `saveAll` write mapping — all four Config sheet read/write sites now round-trip column L.
   - No `index.html` changes were needed — it already stored/read `creditCard` on `CONFIG_ITEMS` entries and called `saveConfigToServer()` on every toggle; the flag just wasn't surviving the backend round-trip.
 - Column L was previously unused (grid already reserved up to column O via `gridProperties.columnCount: 15`), so no sheet resize was required.
 
-### Session 10: Autocomplete-on-Tap, Forex Net Balance Fix, and Cold-Launch Connection Fixes
+#### Session 10: Autocomplete-on-Tap, Forex Net Balance Fix, and Cold-Launch Connection Fixes (Claude)
 - **Autocomplete Not Showing on Empty Field Tap**: `showAC()` forced an empty suggestion list whenever the Category/Payment Method/Destination Account input was blank, so tapping the field before typing anything never showed suggestions. Now shows the full list on an empty tap while still substring-filtering as the user types.
 - **Pluang USD Forex Holding Showing Gross Buys Instead of Net Balance**: `computeInvestNetLots()`'s FX depletion matched an Invest row's `Account` text against Config account names verbatim. When the Config account is named differently from the Invest sheet's `Account` text (e.g. Config `Pluang` vs Invest `Pluang USD`), depletion silently skipped, leaving the gross buy total instead of the balance net of stock-funding spend. Added a fallback to the existing `isFxAccountMatch()` helper so a fuzzy match still resolves the depletion instead of dropping it.
 - **Intermittent Sign-In Failure & Empty Home Calendar on Cold Launch**: Two related bugs reported by multiple users, both caused by code assuming a script/fetch completes before it's used, with no retry when that assumption fails on a slow connection:
   - **"Can't find variable: google" on sign-in**: the GIS `<script>` tag was marked both `async` and `defer` (`async` wins per spec, so load order vs. the rest of the page was never guaranteed). `auth.js`'s `requestToken()` touched the bare `google` global with no readiness check, throwing a raw `ReferenceError` on a slow cold-launch network. Added `waitForGis()`, which polls for `google.accounts.oauth2` before any `google.*` reference, and removed the contradictory `async` from the script tag.
   - **Home calendar stuck on skeleton until visiting Net Worth**: the cold-load path's `fetchCurrentMonth()` call had no `.catch` and no retry — a transient failure (network hiccup, token refresh mid-flight, freshly-created Sheet still propagating) silently left the calendar empty. The only code path that ever retried was `switchTab('home')`, which doesn't run on first load since Home is already the active tab in markup — visiting another tab and returning "fixed" it only because that return trip finally triggered the retry. Added a bounded 2-attempt retry with backoff directly to the cold-load fetch so it self-heals without needing a tab switch.
 
-### Session 11: Fix Sheets API Hang on Stalled Connection
+#### Session 11: Fix Sheets API Hang on Stalled Connection (Claude)
 - **Bug**: App displayed a permanent skeleton calendar and "Loading…" states on Net Worth even after successful sign-in. The issue only occurred on slower or flaky network connections, appearing to correlate with visiting the Net Worth page.
 - **Root cause**: `sheets-client.js`'s `authedFetch()` — the wrapper used for every Google Sheets/Drive API call — had no timeout. If the network connection to `sheets.googleapis.com` stalled or timed out on the server side (rare but possible), the fetch promise never resolved or rejected. Every chain built on top (e.g., `loadHistData()` awaiting `handleGetAllOpex()`) hung forever with nothing left to catch or retry. The Service Worker, `sw.js`, was correctly bypassing Google API hosts, ruling out cache as a cause.
 - **Fix**: Wrapped `authedFetch()` in an `AbortController` with a 15-second timeout (`sheets-client.js:10-21`). A stalled connection now reliably throws `"Sheets API request timed out"` instead of hanging indefinitely, so the retry/fallback logic in `loadHistData()` actually triggers (showing "Couldn't load full history" toast and falling back to cached data).
 - **Impact**: Sign-in now completes and calendar populates even on flaky networks. Net Worth page no longer spins indefinitely. Users on slow connections see a recoverable error instead of an unresponsive app.
-- **Autocomplete Not Showing on Empty Field Tap**: `showAC()` forced an empty suggestion list whenever the Category/Payment Method/Destination Account input was blank, so tapping the field before typing anything never showed suggestions. Now shows the full list on an empty tap while still substring-filtering as the user types.
-- **Pluang USD Forex Holding Showing Gross Buys Instead of Net Balance**: `computeInvestNetLots()`'s FX depletion matched an Invest row's `Account` text against Config account names verbatim. When the Config account is named differently from the Invest sheet's `Account` text (e.g. Config `Pluang` vs Invest `Pluang USD`), depletion silently skipped, leaving the gross buy total instead of the balance net of stock-funding spend. Added a fallback to the existing `isFxAccountMatch()` helper so a fuzzy match still resolves the depletion instead of dropping it.
-- **Intermittent Sign-In Failure & Empty Home Calendar on Cold Launch**: Two related bugs reported by multiple users, both caused by code assuming a script/fetch completes before it's used, with no retry when that assumption fails on a slow connection:
-  - **"Can't find variable: google" on sign-in**: the GIS `<script>` tag was marked both `async` and `defer` (`async` wins per spec, so load order vs. the rest of the page was never guaranteed). `auth.js`'s `requestToken()` touched the bare `google` global with no readiness check, throwing a raw `ReferenceError` on a slow cold-launch network. Added `waitForGis()`, which polls for `google.accounts.oauth2` before any `google.*` reference, and removed the contradictory `async` from the script tag.
-  - **Home calendar stuck on skeleton until visiting Net Worth**: the cold-load path's `fetchCurrentMonth()` call had no `.catch` and no retry — a transient failure (network hiccup, token refresh mid-flight, freshly-created Sheet still propagating) silently left the calendar empty. The only code path that ever retried was `switchTab('home')`, which doesn't run on first load since Home is already the active tab in markup — visiting another tab and returning "fixed" it only because that return trip finally triggered the retry. Added a bounded 2-attempt retry with backoff directly to the cold-load fetch so it self-heals without needing a tab switch.
 
-### Session 12: Search Page Tap-to-Edit for All Transaction Types
+#### Session 12: Code Audit — Quick-Win Refactoring Pass (AI Studio)
+- **RED-2 — `generateId()` helper** (`data-store.js`): Replaced three identical inline `(crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random())` ternaries with a single `generateId()` function. Dropped the weak `Date.now()+Math.random()` fallback — `crypto.randomUUID` is supported in every browser that can run this app's OAuth flow.
+- **PERF-2 — Single-call transfer deletion** (`data-store.js`): Transfer deletions now send all row-delete requests in one `batchUpdate` call instead of one call per row, halving the API quota cost for every transfer delete operation.
+- **PERF-4 — Correct service-worker host bypass** (`sw.js`): Replaced `BYPASS_HOSTS.some(h => url.includes(h))` (which could false-positive on URL paths that happen to contain a hostname substring) with a proper `URL.hostname` check. Also converted `BYPASS_HOSTS` from an array to a `Set` for O(1) lookups.
+- **QW-1 — Documented `fetchWithTimeout`** (`index.html`): Added an explanatory comment clarifying why `fetchWithTimeout` coexists with `SheetsClient.authedFetch`'s own `AbortController` timeout. They serve different purposes (HTTP abort vs. promise-chain deadline) and the named wrapper is intentionally kept as the shared call site for ~15 POST operations.
+- **QW-2 — Empty global arrays** (`index.html`): Removed hardcoded seeds from `allCategories`, `allPMs`, `allStocks`, and `allAccounts`. These were overwritten by `applyConfigToGlobals()` within milliseconds of boot anyway. `CONFIG_DEFAULTS` in `data-store.js` is now the single source of truth for default names.
+- **QW-3 — `APP_BUILD` surfaced in Account page** (`index.html`): Added a **Build** row to the Account info card displaying `APP_VERSION (APP_BUILD)`. The constant was previously defined but never shown anywhere, making remote support/diagnostics harder.
+- **QW-4 — Migration flag cleared on sign-out** (`auth.js`): Added `localStorage.removeItem('notaPublic_splitMigratedV1')` to `signOut()` so the one-time sheet-split migration flag is reset when a user signs out, preventing it from silently blocking the migration if they sign in with a different Google account on the same browser.
+
+#### Session 13: Code Audit — Quick Wins & Security Pass (AI Studio)
+- **SEC-1 — GitHub Actions Secret Injection**: Moved the Google Client ID out of the public source code. The codebase now uses a placeholder (`___GOOGLE_CLIENT_ID___`) which is injected by GitHub Actions at deploy time.
+- **Client ID Local Fallback (Guardrail)**: Built a dynamic hostname detection mechanism into `config.js`. If the app runs locally (`localhost`, `127.0.0.1`, `192.168.x.x`), it falls back to a locally-defined `GOOGLE_CLIENT_ID_LOCAL` so developers don't encounter OAuth errors, while production correctly enforces the secret.
+- **Resilience Fix (`sw.js`)**: Wrapped `new URL()` in a `try...catch` inside the Service Worker fetch handler and hardened `BYPASS_HOSTS` matching. This prevents the Service Worker from crashing on non-standard request schemes (like `chrome-extension://`), which previously blocked the Google Sign-In script from loading.
+
+#### Session 14: Code Audit — Medium Refactors Pass (AI Studio)
+- **RED-1 / RED-4 / RED-5 — DataStore Cleanup**: Centralized duplicate code patterns. Merged `parseConfigBalance` into a shared utility, extracted `serializeConfigRow` to deduplicate config serialization, and moved the `MONTHS` array mapping strictly into `DataStore`.
+- **RED-3 — Extracted `fetchAndCacheSheetGids`**: Eliminated redundant GID logic across bootstrap, settings, and initial fetch paths by centralizing the lookup.
+- **SYNC-1 — Aggressive Sync Pruning**: Updated `pruneStaleHistory` to automatically prune synced history older than 60 days from `localStorage`, preventing long-term storage bloat on mobile browsers. Unsynced (pending) transactions are completely immune.
+- **SYNC-3 — Optimized API Calls for Rules**: Replaced the sequential `clearValues` and `updateValues` API calls with a single `updateValues` request dynamically padded with empty rows. This cuts the network overhead of saving Config and Recurring rules by 50%.
+
+#### Session 15: Architecture & `handleGetAllOpex` Caching (PERF-1 & ARCH-1) (AI Studio)
+- **PERF-1 — `handleGetAllOpex` Caching**: Addressed the main application bottleneck by implementing a stale-while-revalidate caching pattern in `data-store.js`. Navigation to Insights and History is now instant, rendering from `localStorage`, while a background fetch checks Google Sheets for updates. If new data is found, a `notaOpexUpdated` event is fired to quietly refresh the UI without reloading.
+- **ARCH-1 — Modularised `index.html`**: Extracted 4,500 lines of JavaScript from the massive `index.html` monolith into safe, domain-specific modules (`ui-insights.js`, `ui-calendar.js`, `ui-settings.js`). This significantly improves maintainability while preserving the existing top-to-bottom variable scoping.
+
+#### Session 16: Search Page Tap-to-Edit for All Transaction Types (Claude)
 - **Expense/Income & Investment Transactions**: Tapping a transaction in the Search page (or "All transactions" list) now opens the same edit/delete overlay as the home calendar. Previously, only a narrow set of synced live-investment rows were tappable; all other transaction types were inert.
   - Refactored `openEditOverlay()` → added `openEditOverlayFromRow(row, dateStr)` containing the shared core. `openEditOverlay()` now delegates to it, allowing Search-page calls from new `openSearchTxEdit()` resolver to work without coupling to the global `calCurrentTxns`/`calCurrentDateStr`.
   - Wired Search results (both query search and "All transactions") via new `openSearchTxEdit(source, idx)` and `openSearchInvestEdit(source, idx)` resolvers, using the same touch/click event delegation pattern already used on the home calendar's day panel (`#calTxList`) — necessary to avoid tap-to-edit being swallowed by iOS `-webkit-overflow-scrolling:touch` scroll layers.
@@ -164,11 +125,11 @@ performance improvements.
   - Pending/unsynced local transfers (created via `submitTransfer()` but not yet synced) now correctly display with transfer styling but remain non-tappable, consistent with the calendar's own constraint (they lack a `sheetId` until synced). This also fixes a latent bug where pending transfers were misdetected as editable plain expenses.
   - Modified `openEditTransferOverlay()` signature to accept an optional `dateStr` parameter, allowing Search calls to pass the transfer's own date instead of the global calendar date.
 
-### Session 13: Sign-In UX & Double-Click Prevention
+#### Session 17: Sign-In UX & Double-Click Prevention (Claude)
 - **Disabled State for Sign-in Button**: Updated `auth.js` `signIn()` to visually disable the "Sign in with Google" button (`btn.disabled = true; btn.textContent = 'Connecting...'`) immediately upon click to prevent accidental double-clicks and confusion while the background auth and bootstrap process is running.
 - **Error Recovery**: Automatically re-enables the button and restores its text if the Google authentication or bootstrap fails, allowing the user to try again safely.
 
-### Session 14: Credit Card Installment Options & Automatic Recurring Transactions
+#### Session 18: Credit Card Installment Options & Automatic Recurring Transactions (Claude)
 - **Credit Card Installment Toggle**: Added a brand-consistent "Installment Option" row (`#installmentRow`) to the Expense input form which is dynamically revealed only when a configured Credit Card Payment Method is selected.
   - Features two active toggle pill buttons: **Full Payment** (default) and **Installment**.
   - Selecting **Installment** reveals an inline number input to let users type the installment period (`X`) in months.
@@ -179,7 +140,7 @@ performance improvements.
   - Automatically syncs this new rule to the user's `Recurring` sheet in Google Sheets.
 - **Dynamic Installment Index Naming**: Integrated dynamic name formatting (`getInstallmentName()`) into the recurring projection engine, calendar display, and recurring prompt popup, showing progressive indexes (e.g. `(2/3)`, `(3/3)`) for subsequent monthly installments.
 
-### Session 15: Search Page Redesign & Transactions Subpage Migration
+#### Session 19: Search Page Redesign & Transactions Subpage Migration (Claude)
 - **Migrated Transactions Subpage**: Moved the entire layout and functionality of the "Transactions" subpage of the Insights page into the main "Search" page under `#searchMonitorContainer`.
 - **Deleted Original Subpage**: Deleted the "Transactions" button from the Insights subpage navigation bar and removed its layout element entirely from the Insights page.
 - **Support for All Accounts (Not Just CC)**: Expanded the monthly transaction monitor to display transactions across *all* active Payment Methods (rather than being restricted to Credit Cards). The dropdown filter was updated to list all Payment Methods, and the summary cards were enhanced to display both **Total Expenses** (with Month-over-Month comparison) and **Total Income** side-by-side.
@@ -190,54 +151,39 @@ performance improvements.
   - If the user *types* a query, it hides the monitor view and executes a global search across all history (including previous months/years), disregarding the month filter settings.
 - **Tap-to-Edit Support**: Added event delegation and tap handlers on `#searchMonitorContainer` (supporting both `.detail-item` and `.tx-item` formats), making every transaction in the monitor list fully tappable/editable. Both optimistic (local) and server-synchronized updates and deletes correctly refresh the Search tab view if it is active.
 
-### Session 16: Goals Unique IDs, Account Colors & Redirections, Search card refinements, and Settings selector Grid
+#### Session 20: Goals Unique IDs, Account Colors & Redirections, Search card refinements, and Settings selector Grid (Claude)
 - **Goals Unique IDs**: Upgraded the `Goals` sheet to support unique persistent IDs (Column H). Updated `handleGetGoals()` and `handleGoals()` in [`data-store.js`](file:///g:/My%20Drive/AI Tools/Claude Projects/Nota/data-store.js) to read/write Column H and target actions against this ID rather than fragile physical row indices. Refactored the frontend (`index.html`) client state `goalsEditId` and matching routines to fully utilize unique IDs.
 - **Account Colors & Tap Redirections**: Enabled custom color selection for accounts under Profile -> Settings -> Accounts. Account balance cards on the Insights tab now render with their selected custom color as a border-color and translucent background highlight (matching active toggle active states). Tapping an account card automatically clears the active search bar query, sets the search tab's account filter to the account's corresponding payment method, and navigates the user directly to the Search page.
 - **Search Card Refinements**: Replaced short value formatting (`fRpS`) with exact value formatting (`fRp`) on both **Total Expenses** and **Total Income** cards. Added a previous month income comparison calculation and replaced the average transaction statistics subtitle on the Total Income card with `"xx% vs prev month"` matching the Total Expenses card.
 - **Settings Selector Grid**: Redesigned the settings selector navigation bar from a scrolling flex row into a neat, fully visible 2x2 grid, making tabs like "Payment Methods" and "Accounts" fit perfectly on mobile screens without truncation.
 - **Expense Insights Account Filter**: Replaced the static, hardcoded payment source flex toggles ("All", "Flazz", "eWallet", "Bank", "CC") on the Expense Insights tab with a single dynamic **Account Filter** select dropdown at the very top of the section (matching the design in the Search tab). Synchronized all underlying chart view scopes (`wView`, `mView`, `yView`, `cView`) with the dropdown value and updated the chart summary labels dynamically. When set to "All Accounts", the scopes now correctly evaluate all transaction data, including credit cards.
 
-### Session 17: Resolve Bootstrap Hang Caused by Hoisting Order / ReferenceError
+#### Session 21: Resolve Bootstrap Hang Caused by Hoisting Order / ReferenceError (AI Studio)
 - **Bug**: Upon launching the app, the UI would remain indefinitely stuck on the Google sign-in overlay showing "Setting up your Nota spreadsheet".
-- **Root Cause**: The modularization refactor (Session 11) moved `updateHeaderHeight()` to `ui-insights.js`. However, `index.html` was invoking this function synchronously in the global scope during initial script load before the external `ui-insights.js` script tag (placed at the bottom of the body) was fetched and executed. This threw a synchronous `ReferenceError` that halted the main script before it registered the `DOMContentLoaded` listener, preventing the sign-in overlay from receiving the signal to hide (`Auth.markAppReady()`).
+- **Root Cause**: The modularization refactor (Session 15) moved `updateHeaderHeight()` to `ui-insights.js`. However, `index.html` was invoking this function synchronously in the global scope during initial script load before the external `ui-insights.js` script tag (placed at the bottom of the body) was fetched and executed. This threw a synchronous `ReferenceError` that halted the main script before it registered the `DOMContentLoaded` listener, preventing the sign-in overlay from receiving the signal to hide (`Auth.markAppReady()`).
 - **Fix**: Moved `updateHeaderHeight()` and date picker initialization functions inside the `DOMContentLoaded` event listener, guaranteeing that all deferred and synchronous modular sub-scripts (`ui-settings.js`, `ui-calendar.js`, and `ui-insights.js`) are fully loaded and defined before their contents are executed.
 
-### Session 18: Fix Persistent Login Hang — Another Cross-File Hoisting Casualty, Plus a Missed `ui-settings.js` Split Fix
-- **Bug**: Same symptom as Session 17 — the sign-in overlay stuck forever on "Setting up your Nota spreadsheet…" — but it kept happening even after the Session 17 fix, and specifically on the deployed iOS web app after a later refactor pass (done with Antigravity/Gemini) touched `ui-calendar.js`, `ui-insights.js`, and `ui-settings.js` again.
-- **Diagnosis**: No console error and no pending network request were visible at first glance — the giveaway came from manually running `Auth.markAppReady()` in the live console, which hid the overlay *instantly*. That proved `Auth.ready` had already resolved (sign-in and `DataStore.bootstrap()` succeeded fine in the background, confirmed by calling `DataStore.bootstrap()` directly from the console too) — `Auth.markAppReady()` itself was simply never being invoked automatically. A careful re-read of the console (the "Errors" filter, not "All") then surfaced the real `ReferenceError`.
-- **Root cause**: `index.html`'s inline `<script>` block calls `attachSwipeClose('goalsSheetHandle', closeGoalsOverlay)` and `attachSwipeClose('configItemSheetHandle', closeConfigItemOverlay)` at the top level, deliberately outside `DOMContentLoaded` (see the comment above them: "script runs after DOM is parsed, no DOMContentLoaded needed" — true for the DOM, not for cross-file script loading). Both `closeGoalsOverlay` and `closeConfigItemOverlay` are defined in `ui-settings.js`, which loads *after* this inline script in document order (see script tag order under **How it works**). Passing either identifier as a bare argument evaluates it immediately, throwing `ReferenceError: closeGoalsOverlay is not defined` — which halts the rest of the inline script's *top-level* execution. Function declarations later in the same script are still hoisted and safe, but any subsequent top-level *statement* — including the line that registers the `DOMContentLoaded` listener where `Auth.markAppReady()` lives — never runs. This is a direct casualty of the Session 11 script split (ARCH-1): before the split, both functions lived in the same script as this call site, so hoisting made the direct reference safe; splitting them into a separately-loaded file silently broke that assumption, and it went unnoticed because `attachSwipeClose` itself doesn't run until a user actually swipes.
-- **Fix**: Wrapped both calls in arrow functions — `attachSwipeClose('goalsSheetHandle', () => closeGoalsOverlay())` — so the identifier lookup happens at swipe time, not script-load time. `attachSwipeClose` only *calls* `closeFn()` later from inside its own `touchend` listener, so deferring the lookup this way needs no other changes.
-- **Secondary bug found and fixed in the same pass**: `ui-settings.js` still ended with stray leftover `</script>` + an unclosed `<script src="...chart.umd.js">` tag — invalid JavaScript, throwing a separate `SyntaxError: Unexpected token '<'` on every page load that silently broke `fetchConfig()` and other settings functions (`typeof fetchConfig` was `"undefined"`). The fix for this had already been made locally for `ui-calendar.js`/`ui-insights.js` weeks earlier but was never actually committed/pushed for `ui-settings.js` — landed now.
-- **Also hardened**: the Chart.js CDN `<script>` tag (added when Insights charts were introduced) was parser-blocking with no `async`/`defer`. A stalled or slow CDN request would block `DOMContentLoaded` — and therefore `Auth.markAppReady()` — the exact same way. Added `async`; `ui-insights.js` already guards every `Chart` usage with `typeof Chart === 'undefined'`, so charts just render a beat later if the CDN is slow.
-- **Prevention**: see the new rule under **Resilience & error handling patterns** and the **Don't** list below — any future script split must audit every top-level (non-`DOMContentLoaded`-deferred) statement for identifiers defined only in a later-loading file.
+#### Session 22: Fix Persistent Login Hang — Another Cross-File Hoisting Casualty, Plus a Missed `ui-settings.js` Split Fix (AI Studio)
+- **Bug**: Same symptom as Session 21 — the sign-in overlay stuck forever on "Setting up your Nota spreadsheet…" — specifically on the deployed iOS web app after a later refactor pass touched `ui-calendar.js`, `ui-insights.js`, and `ui-settings.js again.
+- **Root cause**: `index.html`'s inline `<script>` block called `attachSwipeClose('goalsSheetHandle', closeGoalsOverlay)` and `attachSwipeClose('configItemSheetHandle', closeConfigItemOverlay)` at the top level, deliberately outside `DOMContentLoaded`. Both `closeGoalsOverlay` and `closeConfigItemOverlay` are defined in `ui-settings.js`, which loads *after* this inline script. Passing either identifier as a bare argument evaluated it immediately, throwing `ReferenceError: closeGoalsOverlay is not defined` — which halted the rest of the inline script's *top-level* execution, preventing the `DOMContentLoaded` listener where `Auth.markAppReady()` lives from ever registering.
+- **Fix**: Wrapped both calls in arrow functions — `attachSwipeClose('goalsSheetHandle', () => closeGoalsOverlay())` — so the identifier lookup happens at swipe time, not script-load time.
+- **Secondary bug**: `ui-settings.js` ended with stray leftover `</script>` + an unclosed `<script src="...chart.umd.js">` tag which threw a `SyntaxError: Unexpected token '<'` on page load, breaking `fetchConfig()`. Removed these tags and correctly moved the `Chart.js` CDN import to `index.html`. Hardened the `Chart.js` CDN `<script>` tag with `async` to prevent network blocks.
 
-### Session 19: Fix Net Worth Holdings / Insights Balance Inconsistency & Generalize FX Currency Handling
+#### Session 23: Fix Net Worth Holdings / Insights Balance Inconsistency & Generalize FX Currency Handling (Claude)
+- **Bug**: Net Worth **Holdings** page showed incorrect balances for dual-purpose FX accounts (e.g., `CIMB USD` showed incorrect values), while the Insights **Accounts** cards showed the correct value. The value changed depending on page load order, and both pages disagreed after Invest transactions.
+- **Fixes**:
+  - Skip synthetic holdings entries if a matching FX account already exists in `CONFIG_ITEMS`.
+  - Skip Invest-transaction processing for non-IDR accounts inside `computeAccountCurrentBalance()` step 3.
+  - Added `fetchLiveInvest()` alongside `fetchAccountBalances()` on Insights tab initial load.
+  - Call `buildAccountBalances()` before constructing holdings and override each dual-purpose stock's value/quantity with its matched account's `accountBalances` entry.
+  - Require both sides to contain the same currency's token in `isFxAccountMatch()` before normalising bank name to avoid collision across different currencies (e.g. `CIMB USD` vs `CIMB CHF` normalizing to cimb).
+  - Generalized FX rate fetching generically for all 9 non-IDR currencies from `frankfurter.app` and `Stock Prices` parsed rows.
 
-**Bug Report**: User reported that the Net Worth **Holdings** page showed incorrect balances for dual-purpose FX accounts (e.g., `CIMB USD` showed $195.47 instead of the correct $53), while the Insights **Accounts** cards showed the correct value. Further, the shown value changed depending on which page was opened first, and both pages disagreed after any Invest transaction was entered.
+#### Session 24: Restructure & Audit README.md for Clarity (AI Studio)
+- **Restructuring**: Audited the entire `README.md` to remove duplicated "AI Studio Sessions Recap" sections, consolidated all 24 sessions into a single, contiguous chronological timeline, and tagged each session with the conductor client (`Claude` or `AI Studio`).
+- **Feature Auditing**: Removed obsolete feature paths (such as the legacy Insights "Transactions" subpage description which has been fully replaced by the Search page Transactions monitor) and verified all architecture details, guidelines, and `data-store.js` line mappings are accurate.
 
-**Root Causes** (multiple independent bugs, all fixed):
-
-1. **Holdings dedup silently hiding accounts** (`ui-insights.js:977-979`): `renderNetWorth()` created a synthetic `holdings` entry for any stock config item with a manually-set balance but no Invest-sheet activity. For a dual-purpose FX pair like `USDIDR CIMB` (stock) matching `USD CIMB` (account), this synthetic entry then caused `getNetWorthAllocations()`'s dedup logic to hide the real, live account balance — even when zero Invest transactions existed. Insight never ran this fallback, so it was unaffected. **Fix**: Skip the synthetic entry if a matching FX account already exists in CONFIG_ITEMS.
-
-2. **FX account Invest depletion double-counted in mismatched units** (`ui-settings.js:215-227`): `computeAccountCurrentBalance()`'s step 3 (handling Invest Buy/Sell) added a raw IDR-denominated delta for *every* account type, including non-IDR (FX) accounts. For FX accounts, this delta is already accounted for separately via `netLot` in `buildAccountBalances()` — a correctly-computed native-currency value. Adding the raw IDR delta on top double-counted in mismatched units, corrupting the shared `accountBalances` object both pages read. **Fix**: Skip Invest-transaction processing for non-IDR accounts; pass a new `includeInvestIdr=false` parameter from the FX call site only.
-
-3. **Insights didn't fetch live Invest data** (`index.html:2247-2250`): Only `initNetWorth()` called `fetchLiveInvest()`, so the global `liveInvest` cache (populated as a side effect when visiting Net Worth) was never populated by Insights alone. On a fresh session, Insights showed a *correct-but-blind* balance (unaware of real Invest activity) until Net Worth was visited, at which point both pages suddenly saw the real data. **Fix**: Insights now calls `fetchLiveInvest()` alongside `fetchAccountBalances()`.
-
-4. **Holdings computed FX stock value from all-time ledger, not account balance** (`ui-insights.js:783-840`): `renderNetWorth()` derived a dual-purpose FX stock's `currentValue` from the raw `buyLots - sellLots` across entire history, independent of the account's manually-set Config balance snapshot (e.g., the $53 baseline as of 2026-07-31). `buildAccountBalances()` (used by Insights) correctly layers only post-snapshot Invest activity on top of the manual baseline. Two separate calculations of the same money can only agree by coincidence. **Fix**: Call `buildAccountBalances()` *before* constructing `holdings`, and override each dual-purpose stock's value/quantity with its matched account's own `accountBalances` entry — the single source of truth.
-
-5. **FX account name matching collided across different currencies** (`ui-insights.js:1002-1008`): `isFxAccountMatch()`'s branch 2 (token normalization) stripped *any* currency token from both sides independently. So `CIMB USD` and `CIMB CHF` — different currencies, same bank name — both normalized to `"cimb"` and falsely matched each other, causing CIMB CHF's Holdings card to incorrectly inherit CIMB USD's balance. **Fix**: Branch 2 now requires both sides to actually contain the SAME currency's token (resolved from the `ccy` parameter) before stripping and comparing.
-
-6. **FX rate fetching, matching, and display were hardcoded to USD/CHF only**: Even though Settings already let users pick from 9 currencies (USD, SGD, EUR, AUD, JPY, GBP, MYR, THB, CNY), the following code paths were hardcoded for USD/CHF alone:
-   - `fetchFxRates()` (`ui-insights.js:695-726`): only fetched rates for USD and CHF from `frankfurter.app`, leaving a new EUR or AUD account with an implicit rate of 1 (treating €100 as 100 IDR). **Fix**: Generalized to fetch live rates for every non-IDR currency actually configured on an account, plus USD/CHF as a baseline.
-   - Rate lookup in `buildAccountBalances()` and `renderNetWorth()`: separate USD/CHF-specific branches. **Fix**: Extracted a shared `getCcyRate(ccy)` helper that resolves any currency via manual Stock Prices override → live fxRates → USD/CHF-only last-resort defaults.
-   - `isFxAccountMatch()` token list (added in fix #5): hardcoded to 4 currencies. **Fix**: Derived tokens generically from any 3-letter currency code (e.g., "EUR" → `"euridr|eur"` regex).
-   - Holdings per-holding display (`ui-insights.js:1238-1265`): only special-cased USD/CHF lot labels and market rates, falling back to generic "units" for anything else. **Fix**: Generalized to use the holding's resolved `ccy` field for any currency.
-
-7. **Stock Prices sheet parsing had hardcoded row range and label whitelist** (`data-store.js:810-839`): The fetch range was fixed at `A2:B8` (7 rows), and the label→key mapping recognized only those 7 hardcoded labels. A user-added "EUR IDR" row at row 9 would never be fetched, and even if it was, it would be silently dropped. **Fix**: Widened range to `A2:B200`; added generic normalization for any "XXX IDR" / "XXXIDR" label to normalize to "XXXIDR" (matching `getCcyRate()`'s lookup), with a small named-exception map for legacy labels (AAPL/JNJ/VYM/QQQ/Star Stable) and fallback to pass-through for brand-new tickers.
-
-**Verification**: Tested across the user's real account set (CIMB USD, CIMB CHF, CIMB IDR, Pluang Timo USD, Pluang Febri USD, plus US stocks QQQ/AAPL/JNJ). Confirmed no false name collisions across different-currency accounts, and simulated a future "CIMB EUR" account to verify the label parsing, matching, and rate-fetching logic all work generically with zero code changes.
-
-**Data-driven, not hardcoded**: The user can now add any currency from the Settings preset list (or even a custom one) and the entire machinery — FX rate fetching, account matching, dual-purpose FX stock dedup, per-holding display formatting, Stock Prices sheet parsing — automatically handles it with no code changes required.
+---
 
 ## Config Persistence Pattern (Best Practice)
 
@@ -340,7 +286,7 @@ spending is invisible and the balance looks like 3,365 (wrong). So for any accou
 you use this way, add `ccy = USD` in the Config sheet so the depletion logic kicks in.
 
 Both `renderNetWorth()` and `getGoalCurrentValue()` share the aggregation logic
-via `computeInvestNetLots()` (moved to `ui-insights.js:724` by the Session 11 script
+via `computeInvestNetLots()` (moved to `ui-insights.js:724` by the Session 15 script
 split) to prevent them from drifting out of sync.
 
 ## Inherited frontend knowledge (from the original Nota)
@@ -451,10 +397,10 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
   double-submit — prevents duplicate transactions from repeated taps.
 - **`visibilitychange` listener:** re-fetches the current month when the app
   returns to foreground (tabs, app switcher) — prevents stale data on iOS.
-- **Global runtime-error logging:** `window.addEventListener('error', ...)` (now at `ui-settings.js:1136`, moved there by the Session 11 script split) logs uncaught runtime errors to console for debugging on mobile devices where DevTools aren't always available. (This has always been implemented via `addEventListener('error', ...)`, never the `window.onerror` property — an old wording mismatch, not a code change.)
+- **Global runtime-error logging:** `window.addEventListener('error', ...)` (now at `ui-settings.js:1136`, moved there by the Session 15 script split) logs uncaught runtime errors to console for debugging on mobile devices where DevTools aren't always available. (This has always been implemented via `addEventListener('error', ...)`, never the `window.onerror` property — an old wording mismatch, not a code change.)
 - **Service worker:** only registers on localhost/HTTPS. Opening `index.html`
   as a `file://` URL won't activate it — use `serve.py` instead.
-- **Cross-file top-level references need a deferred lookup, not a direct one.** The app is split across several `<script src>` files that all share one global scope (`index.html`'s inline script, then `ui-settings.js`, `ui-calendar.js`, `ui-insights.js` in that order). Hoisting makes a function safely callable from anywhere *within the same file*, or from any file that loads *after* the file defining it — but a **top-level** (immediately-executed, not deferred to `DOMContentLoaded`) statement in an *earlier*-loading file can never directly reference a bare identifier defined only in a *later*-loading file. The reference is evaluated the instant that line runs, before the later file has even been fetched, and throws `ReferenceError`. This doesn't just fail that one line — it halts the rest of *that script's* top-level execution, silently skipping every subsequent top-level statement (though later `function` declarations in the same file are still hoisted and remain callable). If the skipped statement happens to be the one registering the `DOMContentLoaded` listener that calls `Auth.markAppReady()`, the sign-in overlay hangs forever with no console error and no network activity — see Sessions 17 and 18. Fixes: either move the call inside `DOMContentLoaded` (the file will have loaded by then), or — if it must run immediately, like `attachSwipeClose()`'s direct-attach calls, which need to bind their touch listeners as soon as the DOM parses — wrap the cross-file reference in a closure (`() => laterFileFn()`) so the identifier lookup happens at call time instead of script-load time.
+- **Cross-file top-level references need a deferred lookup, not a direct one.** The app is split across several `<script src>` files that all share one global scope (`index.html`'s inline script, then `ui-settings.js`, `ui-calendar.js`, `ui-insights.js` in that order). Hoisting makes a function safely callable from anywhere *within the same file*, or from any file that loads *after* the file defining it — but a **top-level** (immediately-executed, not deferred to `DOMContentLoaded`) statement in an *earlier*-loading file can never directly reference a bare identifier defined only in a *later*-loading file. The reference is evaluated the instant that line runs, before the later file has even been fetched, and throws `ReferenceError`. This doesn't just fail that one line — it halts the rest of *that script's* top-level execution, silently skipping every subsequent top-level statement (though later `function` declarations in the same file are still hoisted and remain callable). If the skipped statement happens to be the one registering the `DOMContentLoaded` listener that calls `Auth.markAppReady()`, the sign-in overlay hangs forever with no console error and no network activity — see Sessions 21 and 22. Fixes: either move the call inside `DOMContentLoaded` (the file will have loaded by then), or — if it must run immediately, like `attachSwipeClose()`'s direct-attach calls, which need to bind their touch listeners as soon as the DOM parses — wrap the cross-file reference in a closure (`() => laterFileFn()`) so the identifier lookup happens at call time instead of script-load time.
 
 ### Code style guidelines (learned from a prior refactor)
 
@@ -491,7 +437,7 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
   mark clearly why they're kept.
 - Don't comment obvious code.
 - **Don't leave `fetch()` calls to external APIs unbounded.** A stalled connection can hang forever with no error, leaving entire data-load chains pending indefinitely. Always wrap external API calls in `AbortController` with a timeout (15s for Sheets API, 8s for user-visible endpoints). See `sheets-client.js:authedFetch()` and `index.html:fetchWithTimeout()` as templates.
-- **Don't pass a bare identifier from a later-loading script into a top-level (non-`DOMContentLoaded`) call.** It throws `ReferenceError` immediately and silently kills the rest of that script's top-level execution — no visible error unless DevTools happens to be open. See **Resilience & error handling patterns** above and Sessions 17/18. When splitting a monolith into multiple `<script src>` files, grep the file you're extracting *from* for every top-level (non-function-body) statement and check whether it references anything you just moved *out* of it into a later-loading file.
+- **Don't pass a bare identifier from a later-loading script into a top-level (non-`DOMContentLoaded`) call.** It throws `ReferenceError` immediately and silently kills the rest of that script's top-level execution — no visible error unless DevTools happens to be open. See **Resilience & error handling patterns** above and Sessions 21/22. When splitting a monolith into multiple `<script src>` files, grep the file you're extracting *from* for every top-level (non-function-body) statement and check whether it references anything you just moved *out* of it into a later-loading file.
 
 ### Brand Guidelines & Design
 

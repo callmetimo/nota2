@@ -941,12 +941,8 @@ function isFxAccountMatch(acctName, ccy, stockName) {
     }
   }
 
-  // 3. Match generic FX pair names like "USDIDR" / "CHFIDR" with currency accounts
-  if (ccyUpper && ccyUpper !== 'IDR') {
-    if ((sLower === 'usdidr' || sLower === 'chfidr') && (ccyUpper === 'USD' || ccyUpper === 'CHF' || aLower.includes(ccyUpper.toLowerCase()))) {
-      return true;
-    }
-  }
+  // 3. (Removed generic FX pair matching to prevent double-counting across multiple accounts of the same currency)
+
 
   return false;
 }

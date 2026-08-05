@@ -212,9 +212,9 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm) {
     }
   });
 
-  // 3. Local unsynced Invest transactions for IDR accounts
-  (investHistory || []).forEach(r => {
-    if (r.synced) return;
+  // 3. All Invest transactions for IDR accounts (synced and unsynced)
+  const allInvest = typeof getAllInvestRows === 'function' ? getAllInvestRows() : (investHistory || []);
+  allInvest.forEach(r => {
     if (baseDate && r.date && r.date <= baseDate) return;
     const rAcct = String(r.account || '').toLowerCase().trim();
     if (!matchNames.includes(rAcct)) return;
@@ -258,20 +258,18 @@ function buildAccountBalances() {
     if (ccy !== 'IDR') {
       let netLot = 0;
       if (investNetLots) {
-        Object.keys(investNetLots.buyLots).forEach(s => {
+        const allKeys = new Set([...Object.keys(investNetLots.buyLots), ...Object.keys(investNetLots.sellLots)]);
+        allKeys.forEach(s => {
           if (isFxAccountMatch(acct.name, ccy, s)) {
             netLot += (investNetLots.buyLots[s] || 0) - (investNetLots.sellLots[s] || 0);
           }
         });
       }
 
-      if (netLot > 0) {
-        accountBalances[acct.name] = { amount: netLot * rate, nativeAmount: netLot, ccy };
-        return;
-      }
-
       const currentNative = computeAccountCurrentBalance(baseAmt, baseDate, acct);
-      accountBalances[acct.name] = { amount: currentNative * rate, nativeAmount: currentNative, ccy };
+      const totalNative = currentNative + netLot;
+      
+      accountBalances[acct.name] = { amount: totalNative * rate, nativeAmount: totalNative, ccy };
       return;
     }
 

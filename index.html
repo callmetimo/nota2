@@ -3988,5 +3988,75 @@ async function retryPendingQueue() {
 <script src="./ui-settings.js"></script>
 <script src="./ui-calendar.js"></script>
 <script src="./ui-insights.js"></script>
+<script>
+// TEMPORARY diagnostic for the CIMB IDR balance investigation — safe, read-only,
+// opt-in via ?debugAccount=<name> in the URL. Wraps computeAccountCurrentBalance
+// to show exactly which Opex/txHistory/Invest rows are being matched and summed
+// for the named account, since the bug wasn't reproducible from static analysis
+// alone. Remove once the investigation is resolved.
+(function() {
+  const DEBUG_ACCOUNT = new URLSearchParams(location.search).get('debugAccount');
+  if (!DEBUG_ACCOUNT || typeof computeAccountCurrentBalance !== 'function') return;
+  const origCompute = computeAccountCurrentBalance;
+  let shown = false;
+  computeAccountCurrentBalance = function(baseAmount, baseDate, acctOrPm, includeInvestIdr) {
+    const name = (acctOrPm && typeof acctOrPm === 'object' ? acctOrPm.name : acctOrPm) || '';
+    if (name.toLowerCase().trim() !== DEBUG_ACCOUNT.toLowerCase().trim()) {
+      return origCompute(baseAmount, baseDate, acctOrPm, includeInvestIdr);
+    }
+    const matchNames = getAccountMatchNames(acctOrPm);
+    const opex = [], tx = [], invest = [];
+    (HIST.opex || []).forEach(r => {
+      const rPm = String(r.pm || '').toLowerCase().trim();
+      if (!matchNames.includes(rPm)) return;
+      const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
+      if (baseDate && rowDate <= baseDate) return;
+      opex.push({ date: rowDate, inc: r.inc || 0, exp: r.exp || 0, tx: r.tx, pm: r.pm });
+    });
+    (txHistory || []).forEach(r => {
+      if (r.synced) return;
+      if (baseDate && r.date && r.date <= baseDate) return;
+      if (r.type === 'transfer') {
+        const fromMatch = matchNames.includes(String(r.fromPm || '').toLowerCase().trim());
+        const toMatch = matchNames.includes(String(r.toPm || '').toLowerCase().trim());
+        if (fromMatch !== toMatch) tx.push({ date: r.date, type: 'transfer', amount: r.amount, fromPm: r.fromPm, toPm: r.toPm, direction: fromMatch ? 'out' : 'in' });
+      } else {
+        const rPm = String(r.pm || '').toLowerCase().trim();
+        if (!matchNames.includes(rPm)) return;
+        tx.push({ date: r.date, type: r.type, amount: r.amount, pm: r.pm });
+      }
+    });
+    if (includeInvestIdr !== false) {
+      const allInvest = typeof getAllInvestRows === 'function' ? getAllInvestRows() : (investHistory || []);
+      allInvest.forEach(r => {
+        if (baseDate && r.date && r.date <= baseDate) return;
+        const rAcct = String(r.account || '').toLowerCase().trim();
+        if (!matchNames.includes(rAcct)) return;
+        invest.push({ date: r.date, action: r.action, totalIdr: r.totalIdr, account: r.account, stock: r.stock, source: r.source });
+      });
+    }
+    const result = origCompute(baseAmount, baseDate, acctOrPm, includeInvestIdr);
+    const opexSum = opex.reduce((s, r) => s + (r.inc || 0) - (r.exp || 0), 0);
+    const investSum = invest.reduce((s, r) => s + (r.action === 'Buy' ? -(r.totalIdr || 0) : r.action === 'Sell' ? (r.totalIdr || 0) : 0), 0);
+    const txSum = tx.reduce((s, r) => {
+      if (r.type === 'transfer') return s + (r.direction === 'out' ? -(r.amount || 0) : (r.amount || 0));
+      return s + (r.type === 'income' ? (r.amount || 0) : -(r.amount || 0));
+    }, 0);
+    const top = arr => arr.slice().sort((a, b) => Math.abs((b.inc||0)-(b.exp||0)||b.totalIdr||b.amount||0) - Math.abs((a.inc||0)-(a.exp||0)||a.totalIdr||a.amount||0)).slice(0, 5);
+    const summary = {
+      matchNames, baseAmount, baseDate, result,
+      opexCount: opex.length, opexSum, opexTop5: top(opex),
+      investCount: invest.length, investSum, investTop5: top(invest),
+      txCount: tx.length, txSum, txTop5: top(tx),
+    };
+    console.log('CIMB_IDR_DEBUG', summary);
+    if (!shown) {
+      shown = true;
+      setTimeout(() => alert('DEBUG ' + name + ':\n' + JSON.stringify(summary, null, 1).slice(0, 3800)), 500);
+    }
+    return result;
+  };
+})();
+</script>
 </body>
 </html>

@@ -238,15 +238,21 @@ function buildAccountBalances() {
     const rate = getCcyRate(ccy);
 
     const raw = rawAccountBalances[acct.name];
+    const cleanConfigBal = parseConfigBalance(acct.balance);
     let baseAmt = 0;
     let baseDate = acct.balanceDate || new Date().toISOString().slice(0, 10);
-    if (raw && (raw.amount || raw.amount === 0)) {
+    if (cleanConfigBal !== null) {
+      // Config (Config sheet columns I/J — the same balance/date shown and edited in
+      // Settings → Accounts) is the sole authoritative source now that the legacy
+      // Balances-sheet sync has been removed. rawAccountBalances is a local-only cache
+      // that can silently go stale — e.g. an earlier "Set Balance" quick-entry dated
+      // AFTER this account's current cutoff permanently blocks
+      // syncConfigToRawAccountBalances()'s own refresh heuristic (bDate >= cur.date) —
+      // so it must never override a balance/date the user can see and edit right here.
+      baseAmt = cleanConfigBal;
+    } else if (raw && (raw.amount || raw.amount === 0)) {
       baseAmt = Number(raw.amount) || 0;
       if (raw.date) baseDate = raw.date;
-    }
-    if (!baseAmt) {
-      const cleanConfigBal = parseConfigBalance(acct.balance);
-      if (cleanConfigBal) baseAmt = cleanConfigBal;
     }
 
     if (ccy !== 'IDR') {

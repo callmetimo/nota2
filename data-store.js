@@ -807,16 +807,28 @@ const DataStore = (() => {
 
   // ── PRICES ────────────────────────────────────────────────────
   async function handleGetPrices() {
-    const res = await SheetsClient.getValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A2:B8`);
+    // Read a generous range, not just the original 7 rows — a hardcoded A2:B8 would
+    // silently never even fetch a row a user adds beyond it (e.g. a new "EUR IDR"
+    // row placed at row 9). Sheets API cost for the extra empty cells is negligible.
+    const res = await SheetsClient.getValues(spreadsheetId, `${STOCK_PRICES_SHEET}!A2:B200`);
     const range = res.values || [];
-    const labelMap = {
-      'AAPL': 'AAPL', 'JNJ': 'JNJ', 'VYM': 'VYM', 'QQQ': 'QQQ',
-      'CHF IDR': 'CHFIDR', 'USD IDR': 'USDIDR', 'Star Stable': 'StarStable',
-    };
+    // A few legacy labels use a display name that differs from their internal key,
+    // kept for backward compatibility with existing sheets/Goals references. Any
+    // other label is resolved generically instead of requiring a hardcoded entry:
+    // a currency pair shaped like "EUR IDR" or "EURIDR" normalizes to "EURIDR" (so
+    // getCcyRate()'s stockPrices[ccy+'IDR'] lookup finds it for ANY currency, not
+    // just USD/CHF); anything else passes through using its own trimmed text as the
+    // key, so adding a brand-new ticker row also works with no code change.
+    const NAMED_KEYS = { 'AAPL': 'AAPL', 'JNJ': 'JNJ', 'VYM': 'VYM', 'QQQ': 'QQQ', 'Star Stable': 'StarStable' };
     const prices = {};
     range.forEach(([label, price]) => {
       if (!label) return;
-      const key = labelMap[String(label).trim()];
+      const trimmed = String(label).trim();
+      let key = NAMED_KEYS[trimmed];
+      if (!key) {
+        const ccyMatch = trimmed.toUpperCase().match(/^([A-Z]{3})\s*IDR$/);
+        key = ccyMatch ? `${ccyMatch[1]}IDR` : trimmed;
+      }
       if (key && price) {
         const num = parseFloat(String(price).replace(/[$Rp,\s]/g, ''));
         if (!isNaN(num)) prices[key] = num;

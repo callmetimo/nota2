@@ -664,19 +664,29 @@ function initNetWorth() {
 
 async function fetchFxRates(){
   const now=Date.now();
-  if(fxRates.USD && (now-fxLastFetch)<3600000)return; 
+  if(fxRates.USD && (now-fxLastFetch)<3600000)return;
+
+  // Fetch a live rate for every non-IDR currency actually configured on an account —
+  // not just USD/CHF — so adding a new account currency in Settings (e.g. EUR, AUD,
+  // GBP, MYR, ...; see the presets list in ui-settings.js) automatically gets live
+  // conversion with no code change required. USD/CHF are always included as a
+  // baseline since other features (e.g. Goals) reference them even with no matching
+  // account configured yet.
+  const configuredCcys = new Set(['USD', 'CHF']);
+  (typeof CONFIG_ITEMS !== 'undefined' ? CONFIG_ITEMS : []).forEach(i => {
+    if (i.kind === 'account' && i.ccy && i.ccy.toUpperCase() !== 'IDR') {
+      configuredCcys.add(i.ccy.toUpperCase());
+    }
+  });
+
   try {
-    const res=await fetch('https://api.frankfurter.app/latest?from=USD,CHF&to=IDR');
-    const j=await res.json();
-    fxRates.USD = j.rates?.USD?.IDR || j.rates?.IDR;
-    const [usdRes, chfRes] = await Promise.all([
-      fetch('https://api.frankfurter.app/latest?from=USD&to=IDR'),
-      fetch('https://api.frankfurter.app/latest?from=CHF&to=IDR'),
-    ]);
-    const usdJ = await usdRes.json();
-    const chfJ = await chfRes.json();
-    fxRates.USD = usdJ.rates?.IDR;
-    fxRates.CHF = chfJ.rates?.IDR;
+    const results = await Promise.all(Array.from(configuredCcys).map(ccy =>
+      fetch(`https://api.frankfurter.app/latest?from=${encodeURIComponent(ccy)}&to=IDR`)
+        .then(res => res.json())
+        .then(j => ({ ccy, rate: j.rates?.IDR }))
+        .catch(() => ({ ccy, rate: null }))
+    ));
+    results.forEach(({ ccy, rate }) => { if (rate) fxRates[ccy] = rate; });
     fxLastFetch = now;
     localStorage.setItem('notapub_fx', JSON.stringify(fxRates));
     localStorage.setItem('notapub_fx_ts', String(now));
@@ -684,6 +694,24 @@ async function fetchFxRates(){
     fxRates.USD = fxRates.USD || 16500;
     fxRates.CHF = fxRates.CHF || 19000;
   }
+}
+
+// Single source of truth for "how much is 1 unit of `ccy` worth in IDR right now",
+// used by both buildAccountBalances() and renderNetWorth() so every currency —
+// present or future, hardcoded or user-added in Settings — resolves the same way:
+// a manual override from the "Stock Prices" sheet (e.g. "EURIDR") takes priority,
+// then the live-fetched rate, then a hardcoded last-resort for USD/CHF only (kept
+// since those already shipped with a fallback; a brand-new currency with neither a
+// manual price nor a successful fetch simply has no rate yet, same as before).
+function getCcyRate(ccy) {
+  ccy = (ccy || '').toUpperCase();
+  if (!ccy || ccy === 'IDR') return 1;
+  const manual = parsePrice(stockPrices[ccy + 'IDR']);
+  if (manual > 0) return manual;
+  if (fxRates[ccy]) return fxRates[ccy];
+  if (ccy === 'USD') return 16500;
+  if (ccy === 'CHF') return 19000;
+  return 1;
 }
 
 function computeCashBalance() {
@@ -766,10 +794,8 @@ function computeInvestNetLots(allInvest) {
 
 async function renderNetWorth(){
   await fetchFxRates();
-  const manualUSD = parsePrice(stockPrices['USDIDR']);
-  const manualCHF = parsePrice(stockPrices['CHFIDR']);
-  const usdRate = manualUSD > 0 ? manualUSD : (fxRates.USD || 16500);
-  const chfRate = manualCHF > 0 ? manualCHF : (fxRates.CHF || 19000);
+  const usdRate = getCcyRate('USD');
+  const chfRate = getCcyRate('CHF');
 
   const navStar = parsePrice(stockPrices['StarStable']);
   const priceQQQ  = parsePrice(stockPrices['QQQ']);
@@ -806,7 +832,7 @@ async function renderNetWorth(){
     if (stock==='Star Stable Income Fund') currentValue = navStar > 0 ? netLot * navStar : 0;
     else if (stock.startsWith('USDIDR') || stockCcy === 'USD') currentValue = netLot * usdRate;
     else if (stock==='CHFIDR' || stockCcy === 'CHF') currentValue = netLot * chfRate;
-    else if (stockCcy && fxRates[stockCcy]) currentValue = netLot * fxRates[stockCcy];
+    else if (stockCcy && getCcyRate(stockCcy) !== 1) currentValue = netLot * getCcyRate(stockCcy);
     else if (stock==='QQQ')  currentValue = priceQQQ  > 0 ? netLot * priceQQQ  * usdRate : 0;
     else if (stock==='JNJ')  currentValue = priceJNJ  > 0 ? netLot * priceJNJ  * usdRate : 0;
     else if (stock==='VYM')  currentValue = priceVYM  > 0 ? netLot * priceVYM  * usdRate : 0;
@@ -836,7 +862,7 @@ async function renderNetWorth(){
       displayNetLot = balObj.nativeAmount;
     }
 
-    return {stock, type, netLot: displayNetLot, costBasis, currentValue, avgCostPerUnit, avgNativePrice};
+    return {stock, type, netLot: displayNetLot, costBasis, currentValue, avgCostPerUnit, avgNativePrice, ccy: stockCcy};
   }).filter(Boolean);
 
   // Also include stock items from CONFIG_ITEMS that have a balance/value configured but no Invest sheet transactions
@@ -972,9 +998,12 @@ function isFxAccountMatch(acctName, ccy, stockName) {
   // any-of-the-list from each side independently (as this used to) means two accounts
   // that only share a base name but differ in currency (e.g. "CIMB USD" and "CIMB CHF")
   // both reduce to "cimb" and falsely match each other.
+  // Derived generically from the 3-letter ccy code itself (e.g. "AUD" -> "audidr|aud")
+  // rather than a hardcoded list, so any currency addable in Settings (see the
+  // presets list in ui-settings.js — USD, SGD, EUR, AUD, JPY, GBP, MYR, THB, CNY)
+  // gets this matching for free, with no code change when a new one is configured.
   const ccyUpper = (ccy || '').toUpperCase();
-  const CCY_TOKENS = { USD: 'usdidr|usd', CHF: 'chfidr|chf', EUR: 'euridr|eur', SGD: 'sgdidr|sgd' };
-  const tokenAlts = CCY_TOKENS[ccyUpper];
+  const tokenAlts = /^[A-Z]{3}$/.test(ccyUpper) ? `${ccyUpper.toLowerCase()}idr|${ccyUpper.toLowerCase()}` : null;
   if (tokenAlts) {
     const prefixRe = new RegExp(`^(${tokenAlts})\\s+`, 'i');
     const suffixRe = new RegExp(`\\s+(${tokenAlts})$`, 'i');
@@ -1200,21 +1229,27 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
         const pnl = hasValue ? h.currentValue - h.costBasis : null;
         const pnlPct = pnl !== null && h.costBasis > 0 ? (pnl / h.costBasis * 100) : null;
         const isUSDStock = type === 'US Stock';
-        const isUSD = h.stock.toUpperCase().includes('USD') || h.stock.startsWith('USDIDR') || isUSDStock;
-        const isCHF = h.stock.toUpperCase().includes('CHF') || h.stock === 'CHFIDR';
+        // h.ccy is resolved generically in renderNetWorth() (ACCOUNT_CCY / config ccy)
+        // for any dual-purpose FX stock/account pair, so a currency added later in
+        // Settings (EUR, AUD, ...) gets its own label here instead of falling through
+        // to a generic "units" display. Falls back to the old USD/CHF name-sniffing
+        // for legacy stock names that predate that resolution (e.g. literal "USDIDR"/
+        // "CHFIDR" entries with no matching Config account).
+        const fxCcy = !isUSDStock ? (h.ccy ||
+          (h.stock.toUpperCase().includes('USD') || h.stock.startsWith('USDIDR') ? 'USD' :
+           h.stock.toUpperCase().includes('CHF') || h.stock === 'CHFIDR' ? 'CHF' : null)) : null;
+        const isUSD = fxCcy === 'USD' || isUSDStock;
+        const isCHF = fxCcy === 'CHF';
 
         const lotStr = isUSDStock ? `${h.netLot.toLocaleString('en-US')} shares` :
-                       isUSD ? `${h.netLot.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})} USD` :
-                       isCHF ? `${h.netLot.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})} CHF` :
+                       fxCcy ? `${h.netLot.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})} ${fxCcy}` :
                        `${h.netLot.toLocaleString('id-ID')} units`;
 
         const avgStr = isUSDStock
           ? `Avg $${Number(Math.round(h.avgNativePrice + 'e2') + 'e-2').toFixed(2)}`
-          : isUSD
-            ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/USD`
-            : isCHF
-              ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/CHF`
-              : `Avg ${fRp(Math.round(h.avgNativePrice))}/unit`;
+          : fxCcy
+            ? `Avg rate Rp${Math.round(h.avgNativePrice).toLocaleString('id-ID')}/${fxCcy}`
+            : `Avg ${fRp(Math.round(h.avgNativePrice))}/unit`;
 
         let mktStr = '';
         if (h.stock === 'Star Stable Income Fund' || h.stock.toLowerCase().includes('star stable')) {
@@ -1223,15 +1258,10 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
             const navUsd = usdRate > 0 ? (nav / usdRate) : 0;
             mktStr = `Mkt Rp${Math.round(nav).toLocaleString('id-ID')}/unit · $${navUsd.toFixed(2)}`;
           }
-        } else if (h.stock.startsWith('USDIDR') || (isUSD && !isUSDStock)) {
-          const mktRate = parsePrice(stockPrices['USDIDR']) || usdRate;
-          if (mktRate > 0) {
-            mktStr = `Mkt rate Rp${Math.round(mktRate).toLocaleString('id-ID')}/USD`;
-          }
-        } else if (h.stock === 'CHFIDR' || isCHF) {
-          const mktRate = parsePrice(stockPrices['CHFIDR']) || chfRate;
-          if (mktRate > 0) {
-            mktStr = `Mkt rate Rp${Math.round(mktRate).toLocaleString('id-ID')}/CHF`;
+        } else if (fxCcy) {
+          const mktRate = getCcyRate(fxCcy);
+          if (mktRate > 1) {
+            mktStr = `Mkt rate Rp${Math.round(mktRate).toLocaleString('id-ID')}/${fxCcy}`;
           }
         } else if (isUSDStock || parsePrice(stockPrices[h.stock]) > 0) {
           const p = parsePrice(stockPrices[h.stock]);

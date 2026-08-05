@@ -235,17 +235,14 @@ function buildAccountBalances() {
   syncConfigToRawAccountBalances();
 
   const allInvest = getAllInvestRows();
-  const manualUSD = parsePrice(stockPrices['USDIDR']);
-  const manualCHF = parsePrice(stockPrices['CHFIDR']);
-  const usdRate = manualUSD > 0 ? manualUSD : (fxRates.USD || 16500);
-  const chfRate = manualCHF > 0 ? manualCHF : (fxRates.CHF || 19000);
 
   CONFIG_ITEMS.filter(i => i.kind === 'account' && !i.archived).forEach(acct => {
     const ccy = (ACCOUNT_CCY[acct.name] || acct.ccy || 'IDR').toUpperCase();
-    let rate = 1;
-    if (ccy === 'USD') rate = usdRate;
-    else if (ccy === 'CHF') rate = chfRate;
-    else if (fxRates[ccy]) rate = fxRates[ccy];
+    // getCcyRate() resolves any account currency generically (manual Stock Prices
+    // override, then live-fetched fxRates, then a USD/CHF-only last-resort default) —
+    // not just USD/CHF, so a newly-added account currency (EUR, AUD, ...) works with
+    // no code change once fetchFxRates() has fetched it.
+    const rate = getCcyRate(ccy);
 
     const raw = rawAccountBalances[acct.name];
     let baseAmt = 0;

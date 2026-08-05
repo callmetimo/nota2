@@ -780,6 +780,10 @@ async function renderNetWorth(){
   const allInvest = getAllInvestRows();
   const { buyLots, sellLots, buyTotalIdr, buyPriceWeighted } = computeInvestNetLots(allInvest);
 
+  // Moved up (was after `holdings` was built): a dual-purpose FX stock's holding entry
+  // below needs to read accountBalances as the single source of truth for its account.
+  buildAccountBalances();
+
   const holdings = Object.keys(buyLots).map(stock=>{
     const netLot = buyLots[stock] - (sellLots[stock]||0);
     if(netLot <= 0) return null;
@@ -813,7 +817,26 @@ async function renderNetWorth(){
       currentValue = costBasis;
     }
 
-    return {stock, type, netLot, costBasis, currentValue, avgCostPerUnit, avgNativePrice};
+    // Dual-purpose FX stock/account pair (e.g. "CIMB USD" stock <-> "CIMB USD"
+    // account): the account's own live balance already correctly layers only
+    // post-snapshot activity on top of its manual Config baseline — reuse it as the
+    // single source of truth instead of this stock's raw all-time Invest-ledger
+    // position, so Holdings/Overview can never disagree with Insight for the same
+    // account. Cost basis/avg price stay ledger-derived (historical), only the
+    // live balance and displayed quantity are overridden.
+    let displayNetLot = netLot;
+    const matchedAcct = CONFIG_ITEMS.find(i => {
+      if (i.kind !== 'account' || i.archived) return false;
+      const iCcy = (ACCOUNT_CCY[i.name] || i.ccy || 'IDR').toUpperCase();
+      return isFxAccountMatch(i.name, iCcy, stock);
+    });
+    if (matchedAcct && accountBalances[matchedAcct.name]) {
+      const balObj = accountBalances[matchedAcct.name];
+      currentValue = balObj.amount;
+      displayNetLot = balObj.nativeAmount;
+    }
+
+    return {stock, type, netLot: displayNetLot, costBasis, currentValue, avgCostPerUnit, avgNativePrice};
   }).filter(Boolean);
 
   // Also include stock items from CONFIG_ITEMS that have a balance/value configured but no Invest sheet transactions
@@ -854,7 +877,6 @@ async function renderNetWorth(){
   });
 
   const cashBal = computeCashBalance();
-  buildAccountBalances();
 
   if(nwMode==='holdings'){
     renderHoldings(holdings, usdRate, chfRate, accountBalances);

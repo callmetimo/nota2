@@ -2244,10 +2244,16 @@ function switchTab(tab, el) {
       const el=document.getElementById(activeSummary);
       if(el)el.innerHTML='<div class="chart-loading">Loading data…</div>';
       onHistLoaded(()=>{
-        fetchAccountBalances().then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
+        // fetchLiveInvest() must run alongside fetchAccountBalances() — without it,
+        // opening Insights before ever opening Net Worth leaves the global `liveInvest`
+        // cache empty, so any dual-purpose FX account's Invest-derived activity is
+        // invisible here and only appears once Net Worth happens to be opened first
+        // (whichever populates `liveInvest` as a side effect), making the shown balance
+        // depend on navigation order instead of being consistent everywhere.
+        Promise.all([fetchAccountBalances(), fetchLiveInvest()]).then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
       });
     } else {
-      fetchAccountBalances().then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
+      Promise.all([fetchAccountBalances(), fetchLiveInvest()]).then(()=>{ buildAccountBalances(); setInsightsSubPage(insightsSubPage); });
     }
   }
   if(tab==='networth'){

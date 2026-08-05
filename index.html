@@ -2842,6 +2842,27 @@ function openEditOverlayFromRow(row, dateStr) {
   let tx = row;
   const amt = tx.amt != null ? tx.amt : (tx.amount || tx.exp || tx.inc || 0);
   const cat = tx.cat || tx.category || '';
+
+  if (tx.type === 'invest' || cat === 'Investment') {
+    const opexDate = dateStr || (tx.date ? String(tx.date).slice(0, 10) : '');
+    const opexAmt = amt;
+    const opexPm = tx.pm || '';
+    const allInvest = typeof getAllInvestRows === 'function' ? getAllInvestRows() : [];
+    
+    const invRow = allInvest.find(r => {
+      const rDate = r.date ? String(r.date).slice(0, 10) : '';
+      if (rDate !== opexDate || r.account !== opexPm) return false;
+      const isUSD = (ACCOUNT_CCY[r.account] || '').toUpperCase() === 'USD';
+      const nativeSpent = isUSD ? (r.lot * r.price) : r.totalIdr;
+      return Math.abs(nativeSpent - opexAmt) < 0.05;
+    });
+
+    if (invRow) {
+      openEditInvestOverlay(invRow);
+      return;
+    }
+  }
+
   // Try HIST.opex for a rowIndex/id (fast path; works once fresh data is cached).
   // If rowIndex is still missing the server will find the row by content via _findRowIndex.
   if (!tx.rowIndex && dateStr) {
@@ -3472,12 +3493,14 @@ function renderAllTransactions() {
   const results = [];
   const histOpex = HIST.opex || [];
   for (let i = 0; i < histOpex.length; i++) {
+    if (histOpex[i].category === 'Investment' || histOpex[i].cat === 'Investment') continue;
     results.push({source:'hist-opex', idx:i, row:histOpex[i], type:'opex'});
   }
   for (let i = 0; i < liveInvest.length; i++) {
     results.push({source:'live-invest', idx:i, row:liveInvest[i], type:'invest'});
   }
   for (let i = 0; i < txHistory.length; i++) {
+    if (txHistory[i].category === 'Investment' || txHistory[i].cat === 'Investment') continue;
     results.push({source:'local-opex', idx:i, row:txHistory[i], type:'opex'});
   }
   // Unsynced local invest rows only — once synced they're already in liveInvest (see syncInvest).

@@ -258,17 +258,9 @@ function buildAccountBalances() {
     if (ccy !== 'IDR') {
       let netLot = 0;
       if (investNetLots) {
-        const keys = new Set([
-          acct.name,
-          acct.name.replace(/^(IDR|USD|CHF|EUR|SGD)\s+/i, '').trim(),
-          ccy,
-          `${ccy}IDR`,
-          `${ccy} ${acct.name}`,
-          `${acct.name} ${ccy}`
-        ]);
-        keys.forEach(k => {
-          if (investNetLots.buyLots[k] != null || investNetLots.sellLots[k] != null) {
-            netLot += (investNetLots.buyLots[k] || 0) - (investNetLots.sellLots[k] || 0);
+        Object.keys(investNetLots.buyLots).forEach(s => {
+          if (isFxAccountMatch(acct.name, ccy, s)) {
+            netLot += (investNetLots.buyLots[s] || 0) - (investNetLots.sellLots[s] || 0);
           }
         });
       }

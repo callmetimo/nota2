@@ -753,7 +753,7 @@ function computeInvestNetLots(allInvest) {
     // but Config's account row is just "Pluang") — fuzzy-match it against known forex
     // holdings instead of silently dropping the depletion.
     if (!targetKey) {
-      targetKey = forexStockKeys.find(s => isFxAccountMatch(r.account, ACCOUNT_CCY[s] || 'USD', s));
+      targetKey = forexStockKeys.find(s => isFxAccountMatch(r.account, ACCOUNT_CCY[r.account] || 'IDR', s));
     }
     if (!targetKey) return;
 
@@ -942,8 +942,10 @@ function isFxAccountMatch(acctName, ccy, stockName) {
   }
 
   // 3. Match generic FX pair names like "USDIDR" / "CHFIDR" with currency accounts
-  if ((sLower === 'usdidr' || sLower === 'chfidr') && (ccy === 'USD' || ccy === 'CHF' || aLower.includes(ccy?.toLowerCase() || ''))) {
-    return true;
+  if (ccyUpper && ccyUpper !== 'IDR') {
+    if ((sLower === 'usdidr' || sLower === 'chfidr') && (ccyUpper === 'USD' || ccyUpper === 'CHF' || aLower.includes(ccyUpper.toLowerCase()))) {
+      return true;
+    }
   }
 
   return false;

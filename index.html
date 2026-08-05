@@ -1778,6 +1778,10 @@ function getAllInvestRows() {
       stock:r.stock, type:STOCK_TYPE[r.stock]||'',
       action:r.action, lot:r.lot, price:r.price, totalIdr:r.totalIdr,
       account:r.account||'',
+      // computeAccountCurrentBalance()'s cutoff filter reads r.date directly — without it
+      // here, an unsynced local Buy/Sell would always count toward the delta regardless
+      // of the account's cutoff date, since the `r.date &&` guard would just skip filtering.
+      date: r.date || '',
       source:'local', id:r.id
     };
   });

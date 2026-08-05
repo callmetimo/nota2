@@ -1011,7 +1011,12 @@ const DataStore = (() => {
           sortOrder: Number(r[6]) || idx,
           linkedPM: String(r[7] || '').trim(),
           balance: balVal,
-          balanceDate: String(r[9] || '').trim(),
+          // Sheets values.get defaults to FORMATTED_VALUE, so a date cell can come back
+          // locale-formatted (e.g. "02/08/2026") instead of ISO. computeAccountCurrentBalance()
+          // compares this against ISO-constructed transaction dates with plain string <=/>,
+          // so an unnormalized value silently fails to exclude any pre-cutoff row (same class
+          // of bug fixed for Invest dates above — see parseAnyDateToISO/handleGetInvest).
+          balanceDate: parseAnyDateToISO(r[9]) || String(r[9] || '').trim(),
           showOnInsights: (r[10] !== undefined && r[10] !== null && String(r[10]).trim() !== '') ? (String(r[10]).trim().toUpperCase() !== 'FALSE' && r[10] !== false) : true,
           creditCard: String(r[11] || '').trim().toUpperCase() === 'TRUE',
         };

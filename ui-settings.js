@@ -177,7 +177,7 @@ function getAccountMatchNames(acctOrPm) {
   return Array.from(names);
 }
 
-function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm) {
+function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInvestIdr = true) {
   baseAmount = Number(baseAmount) || 0;
   const matchNames = getAccountMatchNames(acctOrPm);
   if (!matchNames.length) return baseAmount;
@@ -212,15 +212,20 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm) {
     }
   });
 
-  // 3. All Invest transactions for IDR accounts (synced and unsynced)
-  const allInvest = typeof getAllInvestRows === 'function' ? getAllInvestRows() : (investHistory || []);
-  allInvest.forEach(r => {
-    if (baseDate && r.date && r.date <= baseDate) return;
-    const rAcct = String(r.account || '').toLowerCase().trim();
-    if (!matchNames.includes(rAcct)) return;
-    if (r.action === 'Buy') delta -= (Number(r.totalIdr) || 0);
-    else if (r.action === 'Sell') delta += (Number(r.totalIdr) || 0);
-  });
+  // 3. All Invest transactions for IDR accounts (synced and unsynced). FX (non-IDR)
+  // accounts already get their Invest depletion via netLot/computeInvestNetLots in
+  // buildAccountBalances — r.totalIdr is IDR-denominated, so applying it here too
+  // would double-count in mismatched units for a native-currency balance.
+  if (includeInvestIdr) {
+    const allInvest = typeof getAllInvestRows === 'function' ? getAllInvestRows() : (investHistory || []);
+    allInvest.forEach(r => {
+      if (baseDate && r.date && r.date <= baseDate) return;
+      const rAcct = String(r.account || '').toLowerCase().trim();
+      if (!matchNames.includes(rAcct)) return;
+      if (r.action === 'Buy') delta -= (Number(r.totalIdr) || 0);
+      else if (r.action === 'Sell') delta += (Number(r.totalIdr) || 0);
+    });
+  }
 
   return baseAmount + delta;
 }
@@ -266,7 +271,7 @@ function buildAccountBalances() {
         });
       }
 
-      const currentNative = computeAccountCurrentBalance(baseAmt, baseDate, acct);
+      const currentNative = computeAccountCurrentBalance(baseAmt, baseDate, acct, false);
       const totalNative = currentNative + netLot;
       
       accountBalances[acct.name] = { amount: totalNative * rate, nativeAmount: totalNative, ccy };

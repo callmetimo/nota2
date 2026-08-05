@@ -814,6 +814,17 @@ async function renderNetWorth(){
     const hasInvestLots = buyLots[sItem.name] && (buyLots[sItem.name] - (sellLots[sItem.name] || 0)) > 0;
     if (hasInvestLots) return;
 
+    // Dual-purpose FX stock/account pairs (e.g. "USDIDR CIMB" stock <-> "USD CIMB"
+    // account) get their value from the live account balance (buildAccountBalances /
+    // the Active Accounts branch of getNetWorthAllocations), not from this stock
+    // item's own separately-maintained balance, which can drift out of sync.
+    const hasMatchingAccount = CONFIG_ITEMS.some(i => {
+      if (i.kind !== 'account' || i.archived) return false;
+      const iCcy = (ACCOUNT_CCY[i.name] || i.ccy || 'IDR').toUpperCase();
+      return isFxAccountMatch(i.name, iCcy, sItem.name);
+    });
+    if (hasMatchingAccount) return;
+
     let rawBal = sItem.balance;
     if (rawBal == null && rawAccountBalances[sItem.name]) {
       rawBal = rawAccountBalances[sItem.name].amount;

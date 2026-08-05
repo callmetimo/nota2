@@ -235,7 +235,6 @@ function buildAccountBalances() {
   syncConfigToRawAccountBalances();
 
   const allInvest = getAllInvestRows();
-  const investNetLots = (allInvest && allInvest.length) ? computeInvestNetLots(allInvest) : null;
   const manualUSD = parsePrice(stockPrices['USDIDR']);
   const manualCHF = parsePrice(stockPrices['CHFIDR']);
   const usdRate = manualUSD > 0 ? manualUSD : (fxRates.USD || 16500);
@@ -261,12 +260,18 @@ function buildAccountBalances() {
     }
 
     if (ccy !== 'IDR') {
+      // netLot must only reflect Invest activity SINCE this account's balance snapshot
+      // date — baseAmt already nets out everything up to baseDate, so computing netLot
+      // from the FULL unfiltered Invest history (as before) would double-count activity
+      // already baked into baseAmt.
       let netLot = 0;
-      if (investNetLots) {
-        const allKeys = new Set([...Object.keys(investNetLots.buyLots), ...Object.keys(investNetLots.sellLots)]);
+      const investSinceBase = allInvest.filter(r => !baseDate || !r.date || r.date > baseDate);
+      const netLotsSinceBase = investSinceBase.length ? computeInvestNetLots(investSinceBase) : null;
+      if (netLotsSinceBase) {
+        const allKeys = new Set([...Object.keys(netLotsSinceBase.buyLots), ...Object.keys(netLotsSinceBase.sellLots)]);
         allKeys.forEach(s => {
           if (isFxAccountMatch(acct.name, ccy, s)) {
-            netLot += (investNetLots.buyLots[s] || 0) - (investNetLots.sellLots[s] || 0);
+            netLot += (netLotsSinceBase.buyLots[s] || 0) - (netLotsSinceBase.sellLots[s] || 0);
           }
         });
       }

@@ -791,10 +791,18 @@ async function renderNetWorth(){
     // avgNativePrice uses r.price×r.lot (native currency) — accurate for USD stocks too
     const avgNativePrice = buyLots[stock] > 0 ? buyPriceWeighted[stock] / buyLots[stock] : 0;
 
+    // Resolve this stock's own FX currency the same way accounts do (ACCOUNT_CCY is
+    // rebuilt from CONFIG_ITEMS on every config change, and a dual-purpose FX
+    // stock/account pair shares its name with its account, e.g. "CIMB USD"), so FX
+    // cash holdings get valued at the live rate regardless of naming convention
+    // ("USDIDR CIMB" vs "CIMB USD" vs "CHFIDR").
+    const stockCcy = (ACCOUNT_CCY[stock] || stockConfig?.ccy || '').toUpperCase();
+
     let currentValue = 0;
     if (stock==='Star Stable Income Fund') currentValue = navStar > 0 ? netLot * navStar : 0;
-    else if (stock.startsWith('USDIDR')) currentValue = netLot * usdRate;
-    else if (stock==='CHFIDR') currentValue = netLot * chfRate;
+    else if (stock.startsWith('USDIDR') || stockCcy === 'USD') currentValue = netLot * usdRate;
+    else if (stock==='CHFIDR' || stockCcy === 'CHF') currentValue = netLot * chfRate;
+    else if (stockCcy && fxRates[stockCcy]) currentValue = netLot * fxRates[stockCcy];
     else if (stock==='QQQ')  currentValue = priceQQQ  > 0 ? netLot * priceQQQ  * usdRate : 0;
     else if (stock==='JNJ')  currentValue = priceJNJ  > 0 ? netLot * priceJNJ  * usdRate : 0;
     else if (stock==='VYM')  currentValue = priceVYM  > 0 ? netLot * priceVYM  * usdRate : 0;

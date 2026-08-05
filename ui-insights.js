@@ -967,18 +967,27 @@ function isFxAccountMatch(acctName, ccy, stockName) {
   // foreign-currency accounts. A plain IDR cash account (ccy IDR/blank) is never an
   // FX-holding's funding account, so it must not be matched here even if stripping
   // the trailing "IDR" token happens to collide with another instrument's name.
+  //
+  // Critically, both sides must be stripped of the SAME currency's token — stripping
+  // any-of-the-list from each side independently (as this used to) means two accounts
+  // that only share a base name but differ in currency (e.g. "CIMB USD" and "CIMB CHF")
+  // both reduce to "cimb" and falsely match each other.
   const ccyUpper = (ccy || '').toUpperCase();
-  if (ccyUpper && ccyUpper !== 'IDR') {
-    const normA = aLower.replace(/^(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)\s+/i, '')
-                        .replace(/\s+(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)$/i, '')
-                        .replace(/\s+/g, ' ').trim();
+  const CCY_TOKENS = { USD: 'usdidr|usd', CHF: 'chfidr|chf', EUR: 'euridr|eur', SGD: 'sgdidr|sgd' };
+  const tokenAlts = CCY_TOKENS[ccyUpper];
+  if (tokenAlts) {
+    const prefixRe = new RegExp(`^(${tokenAlts})\\s+`, 'i');
+    const suffixRe = new RegExp(`\\s+(${tokenAlts})$`, 'i');
+    const aHasToken = prefixRe.test(aLower) || suffixRe.test(aLower);
+    const sHasToken = prefixRe.test(sLower) || suffixRe.test(sLower);
 
-    const normS = sLower.replace(/^(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)\s+/i, '')
-                        .replace(/\s+(usdidr|chfidr|euridr|sgdidr|idr|usd|chf|eur|sgd)$/i, '')
-                        .replace(/\s+/g, ' ').trim();
+    if (aHasToken && sHasToken) {
+      const normA = aLower.replace(prefixRe, '').replace(suffixRe, '').replace(/\s+/g, ' ').trim();
+      const normS = sLower.replace(prefixRe, '').replace(suffixRe, '').replace(/\s+/g, ' ').trim();
 
-    if (normA && normS && normA === normS) {
-      return true;
+      if (normA && normS && normA === normS) {
+        return true;
+      }
     }
   }
 

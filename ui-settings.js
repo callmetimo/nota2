@@ -215,7 +215,14 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInv
       if (baseDate && r.date && r.date <= baseDate) return;
       const rAcct = String(r.account || '').toLowerCase().trim();
       if (!matchNames.includes(rAcct)) return;
-      if (r.action === 'Buy') delta -= (Number(r.totalIdr) || 0);
+      if (r.action === 'Buy') {
+        // A Buy already has its outflow counted via Step 1's linked Opex 'Investment'
+        // row (handleInvest writes both, linked by opexTxId) — counting it again here
+        // would double-subtract the source account. Only Buys with no link (unsynced
+        // local rows that haven't round-tripped through sync yet) still need this.
+        if (r.opexTxId) return;
+        delta -= (Number(r.totalIdr) || 0);
+      }
       else if (r.action === 'Sell') delta += (Number(r.totalIdr) || 0);
     });
   }

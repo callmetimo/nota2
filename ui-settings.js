@@ -540,12 +540,57 @@ async function toggleAccountShowOnInsights(accountName, checked) {
 }
 
 function _configFieldsForKind(kind) {
-  document.getElementById('configItemColorGroup').style.display = (kind === 'category' || kind === 'account') ? 'block' : 'none';
-  document.getElementById('configItemAssetTypeGroup').style.display = (kind === 'stock' || kind === 'account') ? 'block' : 'none';
-  document.getElementById('configItemCcyGroup').style.display = kind === 'account' ? 'block' : 'none';
-  document.getElementById('configItemLinkedPMGroup').style.display = kind === 'account' ? 'block' : 'none';
-  if (document.getElementById('configItemBalanceGroup')) document.getElementById('configItemBalanceGroup').style.display = (kind === 'account' || kind === 'stock') ? 'block' : 'none';
-  if (document.getElementById('configItemBalanceDateGroup')) document.getElementById('configItemBalanceDateGroup').style.display = (kind === 'account' || kind === 'stock') ? 'block' : 'none';
+  const showColor = (kind === 'category' || kind === 'account');
+  const showAsset = (kind === 'stock' || kind === 'account');
+  const showCcy   = kind === 'account';
+  const showPM    = kind === 'account';
+  const showBal   = (kind === 'account' || kind === 'stock');
+
+  document.getElementById('configItemColorGroup').style.display = showColor ? 'block' : 'none';
+  document.getElementById('configItemAssetTypeGroup').style.display = showAsset ? 'block' : 'none';
+
+  const row1 = document.getElementById('configItemRow1');
+  if (row1) {
+    if (showColor && showAsset) {
+      row1.style.display = 'grid';
+      row1.style.gridTemplateColumns = '1fr 1fr';
+    } else if (showColor || showAsset) {
+      row1.style.display = 'block';
+    } else {
+      row1.style.display = 'none';
+    }
+  }
+
+  document.getElementById('configItemCcyGroup').style.display = showCcy ? 'block' : 'none';
+  document.getElementById('configItemLinkedPMGroup').style.display = showPM ? 'block' : 'none';
+
+  const row2 = document.getElementById('configItemRow2');
+  if (row2) {
+    if (showCcy && showPM) {
+      row2.style.display = 'grid';
+      row2.style.gridTemplateColumns = '1fr 1fr';
+    } else if (showCcy || showPM) {
+      row2.style.display = 'block';
+    } else {
+      row2.style.display = 'none';
+    }
+  }
+
+  if (document.getElementById('configItemBalanceGroup')) document.getElementById('configItemBalanceGroup').style.display = showBal ? 'block' : 'none';
+  if (document.getElementById('configItemBalanceDateGroup')) document.getElementById('configItemBalanceDateGroup').style.display = showBal ? 'block' : 'none';
+
+  const row3 = document.getElementById('configItemRow3');
+  if (row3) {
+    if (showBal && document.getElementById('configItemBalanceGroup') && document.getElementById('configItemBalanceDateGroup')) {
+      row3.style.display = 'grid';
+      row3.style.gridTemplateColumns = '1fr 1fr';
+    } else if (showBal) {
+      row3.style.display = 'block';
+    } else {
+      row3.style.display = 'none';
+    }
+  }
+
   if (document.getElementById('configItemShowOnInsightsGroup')) document.getElementById('configItemShowOnInsightsGroup').style.display = kind === 'account' ? 'block' : 'none';
   if (document.getElementById('configItemCreditCardGroup')) document.getElementById('configItemCreditCardGroup').style.display = kind === 'pm' ? 'block' : 'none';
   if (document.getElementById('configItemCCDetailsGroup')) document.getElementById('configItemCCDetailsGroup').style.display = 'none';

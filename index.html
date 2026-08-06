@@ -990,54 +990,60 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <label class="form-label">Name</label>
         <input type="text" class="form-input" id="configItemName" maxlength="100" autocomplete="off">
       </div>
-      <div class="form-group" id="configItemColorGroup" style="display:none">
-        <label class="form-label">Color</label>
-        <input type="color" class="form-input" id="configItemColor" style="height:44px;padding:4px;cursor:pointer">
-      </div>
-      <div class="form-group" id="configItemAssetTypeGroup" style="display:none">
-        <label class="form-label">Asset Type</label>
-        <div style="display:flex;gap:8px">
-          <select class="form-input" id="configItemAssetType" style="flex:1" onchange="_onConfigAssetTypeChange()">
-            <option value="Cash">Cash</option>
-            <option value="Reksa Dana">Reksa Dana</option>
-            <option value="Forex">Forex</option>
-            <option value="US Stock">US Stock</option>
-            <option value="JHT">JHT</option>
-            <option value="CUSTOM">Custom...</option>
-          </select>
-          <input type="text" class="form-input" id="configItemAssetTypeCustom" placeholder="e.g. Deposit, Gold" style="flex:1;display:none" maxlength="30">
+      <div id="configItemRow1" style="display:none;gap:10px">
+        <div class="form-group" id="configItemColorGroup" style="display:none">
+          <label class="form-label">Color</label>
+          <input type="color" class="form-input" id="configItemColor" style="height:44px;padding:4px;cursor:pointer">
+        </div>
+        <div class="form-group" id="configItemAssetTypeGroup" style="display:none">
+          <label class="form-label">Asset Type</label>
+          <div style="display:flex;gap:8px">
+            <select class="form-input" id="configItemAssetType" style="flex:1" onchange="_onConfigAssetTypeChange()">
+              <option value="Cash">Cash</option>
+              <option value="Reksa Dana">Reksa Dana</option>
+              <option value="Forex">Forex</option>
+              <option value="US Stock">US Stock</option>
+              <option value="JHT">JHT</option>
+              <option value="CUSTOM">Custom...</option>
+            </select>
+            <input type="text" class="form-input" id="configItemAssetTypeCustom" placeholder="e.g. Deposit, Gold" style="flex:1;display:none" maxlength="30">
+          </div>
         </div>
       </div>
-      <div class="form-group" id="configItemCcyGroup" style="display:none">
-        <label class="form-label">Currency</label>
-        <div style="display:flex;gap:8px">
-          <select class="form-input" id="configItemCcy" style="flex:1" onchange="_onConfigCcyChange()">
-            <option value="IDR">IDR (Indonesian Rupiah)</option>
-            <option value="USD">USD (US Dollar)</option>
-            <option value="SGD">SGD (Singapore Dollar)</option>
-            <option value="EUR">EUR (Euro)</option>
-            <option value="AUD">AUD (Australian Dollar)</option>
-            <option value="JPY">JPY (Japanese Yen)</option>
-            <option value="GBP">GBP (British Pound)</option>
-            <option value="MYR">MYR (Malaysian Ringgit)</option>
-            <option value="THB">THB (Thai Baht)</option>
-            <option value="CNY">CNY (Chinese Yuan)</option>
-            <option value="CUSTOM">Other...</option>
-          </select>
-          <input type="text" class="form-input" id="configItemCcyCustom" placeholder="e.g. CAD" style="flex:1;display:none;text-transform:uppercase" maxlength="10">
+      <div id="configItemRow2" style="display:none;gap:10px">
+        <div class="form-group" id="configItemCcyGroup" style="display:none">
+          <label class="form-label">Currency</label>
+          <div style="display:flex;gap:8px">
+            <select class="form-input" id="configItemCcy" style="flex:1" onchange="_onConfigCcyChange()">
+              <option value="IDR">IDR (Indonesian Rupiah)</option>
+              <option value="USD">USD (US Dollar)</option>
+              <option value="SGD">SGD (Singapore Dollar)</option>
+              <option value="EUR">EUR (Euro)</option>
+              <option value="AUD">AUD (Australian Dollar)</option>
+              <option value="JPY">JPY (Japanese Yen)</option>
+              <option value="GBP">GBP (British Pound)</option>
+              <option value="MYR">MYR (Malaysian Ringgit)</option>
+              <option value="THB">THB (Thai Baht)</option>
+              <option value="CNY">CNY (Chinese Yuan)</option>
+              <option value="CUSTOM">Other...</option>
+            </select>
+            <input type="text" class="form-input" id="configItemCcyCustom" placeholder="e.g. CAD" style="flex:1;display:none;text-transform:uppercase" maxlength="10">
+          </div>
+        </div>
+        <div class="form-group" id="configItemLinkedPMGroup" style="display:none">
+          <label class="form-label">Linked Payment Method</label>
+          <select class="form-input" id="configItemLinkedPM"></select>
         </div>
       </div>
-      <div class="form-group" id="configItemLinkedPMGroup" style="display:none">
-        <label class="form-label">Linked Payment Method</label>
-        <select class="form-input" id="configItemLinkedPM"></select>
-      </div>
-      <div class="form-group" id="configItemBalanceGroup" style="display:none">
-        <label class="form-label">Remaining Balance</label>
-        <input type="text" class="form-input" id="configItemBalance" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
-      </div>
-      <div class="form-group" id="configItemBalanceDateGroup" style="display:none">
-        <label class="form-label">Input Date / As of Date</label>
-        <input type="date" class="form-input" id="configItemBalanceDate">
+      <div id="configItemRow3" style="display:none;gap:10px">
+        <div class="form-group" id="configItemBalanceGroup" style="display:none">
+          <label class="form-label">Remaining Balance</label>
+          <input type="text" class="form-input" id="configItemBalance" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
+        </div>
+        <div class="form-group" id="configItemBalanceDateGroup" style="display:none">
+          <label class="form-label">Input Date / As of Date</label>
+          <input type="date" class="form-input" id="configItemBalanceDate">
+        </div>
       </div>
       <div class="form-group" id="configItemShowOnInsightsGroup" style="display:none;margin-top:10px">
         <label style="padding:6px 0;cursor:pointer;display:flex;align-items:center;gap:10px">

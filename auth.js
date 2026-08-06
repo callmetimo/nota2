@@ -167,6 +167,7 @@ const Auth = (() => {
       _deferredMode = false;
       readyResolve();
       tokenReadyResolve();
+      overlay.hide();
     } catch (err) {
       console.error('[auth] sign-in failed', err);
       overlay.setStatus('Sign-in failed: ' + err.message + ' — try again.');

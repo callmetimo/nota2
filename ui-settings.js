@@ -458,6 +458,15 @@ function renderSettingsLists() {
     let accountCheckHtml = '';
     if (kind === 'pm' && !it.archived) {
       const isCc = !!it.creditCard;
+      if (isCc) {
+        let ccLabelParts = ['Credit card'];
+        if (it.billingDate) ccLabelParts.push(`day ${it.billingDate}`);
+        if (it.creditLimit) {
+          const limitFmt = Number(it.creditLimit) >= 1000000 ? (Number(it.creditLimit) / 1000000) + 'M' : Number(it.creditLimit).toLocaleString();
+          ccLabelParts.push(`limit ${limitFmt}`);
+        }
+        metaStr = ccLabelParts.join(' · ');
+      }
       accountCheckHtml = `<label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);cursor:pointer;margin-left:8px" onclick="event.stopPropagation()" title="Credit card (deferred billing)">
         <input type="checkbox" ${isCc ? 'checked' : ''} style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer" onchange="togglePMCreditCard('${escJsAttr(it.name)}', this.checked)">
         <span>Credit card</span>
@@ -510,6 +519,10 @@ async function togglePMCreditCard(pmName, checked) {
   const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && i.name === pmName);
   if (!item) return;
   item.creditCard = checked;
+  if (!checked) {
+    item.billingDate = 0;
+    item.creditLimit = 0;
+  }
   try { localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS)); } catch(e) {}
   renderSettingsLists();
   await saveConfigToServer();
@@ -535,6 +548,18 @@ function _configFieldsForKind(kind) {
   if (document.getElementById('configItemBalanceDateGroup')) document.getElementById('configItemBalanceDateGroup').style.display = (kind === 'account' || kind === 'stock') ? 'block' : 'none';
   if (document.getElementById('configItemShowOnInsightsGroup')) document.getElementById('configItemShowOnInsightsGroup').style.display = kind === 'account' ? 'block' : 'none';
   if (document.getElementById('configItemCreditCardGroup')) document.getElementById('configItemCreditCardGroup').style.display = kind === 'pm' ? 'block' : 'none';
+  if (document.getElementById('configItemCCDetailsGroup')) document.getElementById('configItemCCDetailsGroup').style.display = 'none';
+}
+
+function onConfigCCChange(checked) {
+  const g = document.getElementById('configItemCCDetailsGroup');
+  if (g) g.style.display = checked ? 'block' : 'none';
+  if (!checked) {
+    const bd = document.getElementById('configItemBillingDate');
+    const cl = document.getElementById('configItemCreditLimit');
+    if (bd) bd.value = '';
+    if (cl) cl.value = '';
+  }
 }
 
 function _onConfigCcyChange() {
@@ -614,9 +639,16 @@ function openConfigItemOverlay(kind, name) {
   if (document.getElementById('configItemCreditCardCheckbox')) {
     document.getElementById('configItemCreditCardCheckbox').checked = !!(item && item.creditCard);
   }
+  if (document.getElementById('configItemBillingDate')) {
+    document.getElementById('configItemBillingDate').value = (item && item.billingDate) ? item.billingDate : '';
+  }
+  if (document.getElementById('configItemCreditLimit')) {
+    document.getElementById('configItemCreditLimit').value = (item && item.creditLimit) ? formatGroupedAmt(item.creditLimit) : '';
+  }
   document.getElementById('configItemArchiveBtn').style.display = item ? 'block' : 'none';
   document.getElementById('configItemArchiveBtn').textContent = item && item.archived ? 'Restore' : 'Delete';
   _configFieldsForKind(kind);
+  if (kind === 'pm') onConfigCCChange(!!(item && item.creditCard));
   const ov = document.getElementById('configItemOverlay');
   ov.classList.add('open');
   adjustOverlayForVisualViewport();
@@ -672,6 +704,8 @@ async function saveConfigItem() {
   const balanceDate = (document.getElementById('configItemBalanceDate')) ? (document.getElementById('configItemBalanceDate').value || '') : '';
   const showOnInsights = kind === 'account' ? (document.getElementById('configItemShowOnInsightsCheckbox') ? document.getElementById('configItemShowOnInsightsCheckbox').checked : true) : true;
   const creditCard = kind === 'pm' ? (document.getElementById('configItemCreditCardCheckbox') ? document.getElementById('configItemCreditCardCheckbox').checked : false) : false;
+  const billingDate = kind === 'pm' ? (parseInt(document.getElementById('configItemBillingDate').value) || 0) : 0;
+  const creditLimit = kind === 'pm' ? (parseAmt('configItemCreditLimit') || 0) : 0;
 
   if (existing) {
     existing.name = name; existing.color = color; existing.assetType = assetType; existing.ccy = ccy; existing.linkedPM = linkedPM;
@@ -680,10 +714,14 @@ async function saveConfigItem() {
       existing.balanceDate = balanceDate;
       if (kind === 'account') existing.showOnInsights = showOnInsights;
     }
-    if (kind === 'pm') existing.creditCard = creditCard;
+    if (kind === 'pm') {
+      existing.creditCard = creditCard;
+      existing.billingDate = billingDate;
+      existing.creditLimit = creditLimit;
+    }
   } else {
     const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === kind).map(i => i.sortOrder));
-    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, balance, balanceDate, showOnInsights, creditCard, archived: false, sortOrder: maxOrder + 1 });
+    CONFIG_ITEMS.push({ kind, name, color, ccy, assetType, linkedPM, balance, balanceDate, showOnInsights, creditCard, billingDate, creditLimit, archived: false, sortOrder: maxOrder + 1 });
   }
 
   if (kind === 'stock' && assetType) {
@@ -1733,3 +1771,23 @@ function deleteRecurringRule(id) {
   renderRecurringList();
   showToast('Recurring rule deleted', 'success');
 }
+
+function getCCBillingDate(pmName) {
+  if (!pmName) return 0;
+  const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && i.name === pmName);
+  return (item && item.creditCard && item.billingDate) ? Number(item.billingDate) : 0;
+}
+
+function getCCCreditLimit(pmName) {
+  if (!pmName) return 0;
+  const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && i.name === pmName);
+  return (item && item.creditCard && item.creditLimit) ? Number(item.creditLimit) : 0;
+}
+
+function applyBillingCycle(r) {
+  const billingDate = getCCBillingDate(r.pm);
+  if (!billingDate || !r.d || r.d <= billingDate) return r;
+  let nextM = r.m + 1, nextY = r.y;
+  if (nextM > 11) { nextM = 0; nextY++; }
+  return { ...r, y: nextY, m: nextM, mk: `${MO[nextM]} ${nextY}` };
+}

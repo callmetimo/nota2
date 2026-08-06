@@ -75,10 +75,22 @@ function renderCCMonitor() {
     return targetPms.some(t => low.includes(t) || t.includes(low));
   }
 
+  const activeBillingDate  = (ccMonitorPmFilter !== 'all') ? getCCBillingDate(ccMonitorPmFilter)  : 0;
+  const activeCreditLimit  = (ccMonitorPmFilter !== 'all') ? getCCCreditLimit(ccMonitorPmFilter)  : 0;
+
+  function getEffectiveBillingMonth(txDay, txY, txM0) {
+    if (!activeBillingDate || !txDay || txDay <= activeBillingDate) return { y: txY, m: txM0 };
+    let nm = txM0 + 1, ny = txY;
+    if (nm > 11) { nm = 0; ny++; }
+    return { y: ny, m: nm };
+  }
+
   // 2. Fetch current month opex transactions (both expenses and incomes)
   const currentTxns = [];
   (HIST.opex || []).forEach((r, i) => {
-    if (r.y === curY && r.m === (curM - 1) && isMatchPM(r.pm)) {
+    if (!isMatchPM(r.pm)) return;
+    const bm = getEffectiveBillingMonth(r.d, r.y, r.m);
+    if (bm.y === curY && bm.m === (curM - 1)) {
       const isInc = (r.inc || 0) > 0;
       currentTxns.push({
         source: 'hist-opex',
@@ -96,15 +108,20 @@ function renderCCMonitor() {
 
   const isCurrentCalMonth = (curY === new Date().getFullYear() && curM === (new Date().getMonth() + 1));
   (txHistory || []).forEach((r, i) => {
-    if (isCurrentCalMonth && r.synced) return;
+    if (r.synced) return;
     if (!r.date) return;
     const parts = r.date.split('-');
-    if (+parts[0] === curY && +parts[1] === curM && isMatchPM(r.pm)) {
+    if (!isMatchPM(r.pm)) return;
+    
+    const txDay = parseInt(parts[2], 10);
+    const bm = getEffectiveBillingMonth(txDay, +parts[0], +parts[1] - 1);
+    
+    if (bm.y === curY && bm.m === (curM - 1)) {
       const isInc = r.type === 'income';
       currentTxns.push({
         source: 'local-opex',
         idx: i,
-        day: parseInt(parts[2], 10),
+        day: txDay,
         desc: r.tx || r.notes || (isInc ? 'Income' : 'Expense'),
         category: r.category || (isInc ? 'Income' : 'Other'),
         pm: r.pm || '',
@@ -122,7 +139,9 @@ function renderCCMonitor() {
   let prevTotal = 0;
   let prevIncomeTotal = 0;
   (HIST.opex || []).forEach(r => {
-    if (r.y === prevY && r.m === (prevM - 1) && isMatchPM(r.pm)) {
+    if (!isMatchPM(r.pm)) return;
+    const bm = getEffectiveBillingMonth(r.d, r.y, r.m);
+    if (bm.y === prevY && bm.m === (prevM - 1)) {
       if ((r.exp || 0) > 0) prevTotal += Number(r.exp) || 0;
       if ((r.inc || 0) > 0) prevIncomeTotal += Number(r.inc) || 0;
     }
@@ -153,13 +172,78 @@ function renderCCMonitor() {
     compIncomeDiffHtml = 'No prev month comparison';
   }
 
+  let cycleSubtitle = '';
+  if (activeBillingDate > 0) {
+    const endDay  = activeBillingDate;
+    const endMon  = MO[curM - 1];
+    const prevCalM = curM === 1 ? 12 : curM - 1;
+    const prevCalY = curM === 1 ? curY - 1 : curY;
+    const startDay = endDay + 1;
+    const startMon = MO[prevCalM - 1];
+    cycleSubtitle = `<div style="font-size:12px;color:var(--text2);text-align:center;margin-top:2px;font-weight:500">Billing cycle: ${startDay} ${startMon} – ${endDay} ${endMon}</div>`;
+  }
+
+  let creditBarHtml = '';
+  if (activeCreditLimit > 0) {
+    let creditUsage = 0;
+    const INSTALLMENT_RE = /\(\d+\/\d+\)$/;
+
+    currentTxns.forEach(t => {
+      if (t.type === 'expense' && !INSTALLMENT_RE.test(t.desc)) {
+        creditUsage += t.amount;
+      }
+    });
+
+    const rules = loadRecurring();
+    rules.forEach(rule => {
+      if (!rule.installmentTotal || !rule.installmentStart) return;
+      if (!isMatchPM(rule.pm)) return;
+
+      const [startMonStr, startYStr] = rule.installmentStart.split('-');
+      const startY = parseInt(startYStr);
+      const startM0 = MO.indexOf(startMonStr);
+      if (startM0 < 0 || isNaN(startY)) return;
+
+      const startDay = rule.dayOfMonth || 1;
+      const startBM  = getEffectiveBillingMonth(startDay, startY, startM0);
+
+      const monthsElapsed = (curY - startBM.y) * 12 + ((curM - 1) - startBM.m);
+      if (monthsElapsed < 0) return;
+
+      const remainingMonths = rule.installmentTotal - monthsElapsed;
+      if (remainingMonths <= 0) return;
+
+      creditUsage += rule.amount * remainingMonths;
+    });
+
+    const usagePct  = Math.min(Math.round((creditUsage / activeCreditLimit) * 100), 100);
+    const isOver    = creditUsage > activeCreditLimit;
+    const barColor  = usagePct >= 90 ? 'var(--red)' : usagePct >= 70 ? 'var(--orange, #f97316)' : 'var(--accent)';
+    const usedFmt   = fRpS(creditUsage);
+    const limitFmt  = fRpS(activeCreditLimit);
+    const overCls   = isOver ? ' over' : '';
+    creditBarHtml = `
+      <div class="cal-progress-wrap" style="margin-top:12px;margin-bottom:12px">
+        <div class="cal-progress-bar">
+          <div class="cal-progress-fill${overCls}" style="width:${usagePct}%;background:${barColor}"></div>
+        </div>
+        <div class="cal-progress-right">
+          <div class="cal-progress-amount">${usedFmt} used</div>
+          <div class="cal-progress-avg">limit ${limitFmt}</div>
+        </div>
+      </div>`;
+  }
+
   let html = `
     <!-- Header Controls -->
     <div class="chart-card" style="margin-bottom:12px;padding:12px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <button class="toggle-btn" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="changeCCMonth(-1)">‹ Prev</button>
-        <div style="font-size:15px;font-weight:700;color:var(--text)">${monthNameStr}</div>
-        <button class="toggle-btn" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="changeCCMonth(1)">Next ›</button>
+      <div style="display:flex;flex-direction:column;margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <button class="toggle-btn" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="changeCCMonth(-1)">‹ Prev</button>
+          <div style="font-size:15px;font-weight:700;color:var(--text);text-align:center">${monthNameStr}</div>
+          <button class="toggle-btn" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="changeCCMonth(1)">Next ›</button>
+        </div>
+        ${cycleSubtitle}
       </div>
 
       <div style="display:flex;align-items:center;gap:8px">
@@ -169,6 +253,8 @@ function renderCCMonitor() {
           ${pmList.map(pm => `<option value="${esc(pm)}"${ccMonitorPmFilter===pm?' selected':''}>${esc(pm)}</option>`).join('')}
         </select>
       </div>
+      
+      ${creditBarHtml}
     </div>
 
     <!-- Summary Stats -->

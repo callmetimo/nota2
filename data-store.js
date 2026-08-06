@@ -82,6 +82,8 @@ const DataStore = (() => {
       String(it.balanceDate || '').slice(0, 10),
       it.showOnInsights === false ? 'FALSE' : 'TRUE',
       it.creditCard ? 'TRUE' : 'FALSE',
+      Number(it.billingDate) || '',
+      Number(it.creditLimit) || '',
     ];
   }
 
@@ -1021,8 +1023,8 @@ const DataStore = (() => {
         }]);
       }
     }
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:L1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights', 'creditCard',
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:N1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights', 'creditCard', 'billingDate', 'creditLimit'
     ]]);
     return !configSheet;
   }
@@ -1031,10 +1033,10 @@ const DataStore = (() => {
     const justCreated = await ensureConfigSheetExists();
     if (justCreated) {
       const rows = CONFIG_DEFAULTS.map((it, idx) => serializeConfigRow(it, idx));
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:N${CONFIG_DATA_ROW + rows.length - 1}`, rows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
-    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:N`);
     const rows = res.values || [];
     if (rows.length === 0) {
       // Header exists but no data rows — seed now.
@@ -1044,8 +1046,9 @@ const DataStore = (() => {
         String(it.balanceDate || '').slice(0, 10),
         it.showOnInsights === false ? 'FALSE' : 'TRUE',
         it.creditCard ? 'TRUE' : 'FALSE',
+        '', ''
       ]);
-      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
+      await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:N${CONFIG_DATA_ROW + seedRows.length - 1}`, seedRows);
       return { status: 'ok', items: CONFIG_DEFAULTS };
     }
     const items = rows
@@ -1081,6 +1084,8 @@ const DataStore = (() => {
           balanceDate: parseAnyDateToISO(r[9]) || String(r[9] || '').trim(),
           showOnInsights: (r[10] !== undefined && r[10] !== null && String(r[10]).trim() !== '') ? (String(r[10]).trim().toUpperCase() !== 'FALSE' && r[10] !== false) : true,
           creditCard: String(r[11] || '').trim().toUpperCase() === 'TRUE',
+          billingDate: Number(r[12]) || 0,
+          creditLimit: Number(r[13]) || 0,
         };
       })
       .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -1095,10 +1100,10 @@ const DataStore = (() => {
     const rows = items.map((it, idx) => serializeConfigRow(it, idx));
     
     // Pad with empty rows to overwrite deleted configs in a single API request
-    const emptyRow = Array(12).fill('');
+    const emptyRow = Array(14).fill('');
     while (rows.length < 150) rows.push(emptyRow);
 
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + rows.length - 1}`, rows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:N${CONFIG_DATA_ROW + rows.length - 1}`, rows);
     return { status: 'ok', count: rows.length };
   }
 

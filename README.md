@@ -245,6 +245,12 @@ Following Session 28's fix, ran a full audit (all `.js` files and inline `<scrip
   - **Phase 1 (Instant Launch)**: `Auth.ready` resolves immediately on load, completely bypassing the splash screen. The app paints instantly and loads the entire operational history from the local cache (`notapub_opex_cache_<spreadsheetId>` in localStorage, already implemented in Session 15).
   - **Phase 2 (Deferred Sign-In on First Tap)**: Actual Sheets API calls are blocked on a private `_tokenReady` promise. A capture-phase one-shot event listener (`touchstart` / `mousedown`) is registered globally. The user's very first interaction anywhere on the screen acts as the gesture that triggers `Auth.triggerFirstTapSync()`, opening the Google OAuth popup to silently refresh/verify the token and resolving `_tokenReady`.
 
+#### Session 33: Credit Card Billing Cycles & Credit Limit Monitoring (Antigravity/Gemini)
+- **Billing Cycles**: Added `billingDate` (1-28) to Credit Card Payment Methods in Settings, persisted in the Config sheet (Column M). `getRows()` now uses `applyBillingCycle(r)` to dynamically re-bucket CC transactions occurring after the billing date into the *next* calendar month for all Insights charts.
+- **Search Monitor Re-Bucketing**: The Search Monitor also applies this billing cycle re-bucketing dynamically, but *only* when the dropdown filter is set to a specific Credit Card Payment Method that has a billing date configured. When viewing "All Accounts", transactions remain in their strict calendar month to prevent mixed bucketing. Added a dynamic subtitle (e.g., "Billing cycle: 26 Jul – 25 Aug") when billing cycle mode is active.
+- **Credit Limit Progress Bar**: Added `creditLimit` to Credit Card PMs in Settings (Column N). When filtering the Search Monitor by a CC PM that has both a billing date and credit limit, a progress bar appears showing the current cycle's total credit usage vs. the limit.
+- **Installment Credit Usage**: The credit usage calculation automatically detects active `(N/M)` installment rules from `RECURRING_RULES`, computes the number of remaining months, and adds the total outstanding principal to the current billing cycle's usage, giving a true picture of remaining credit limit.
+
 ---
 
 ## Config Persistence Pattern (Best Practice)

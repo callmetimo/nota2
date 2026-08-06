@@ -184,7 +184,7 @@ const Auth = (() => {
   // If it fails (user genuinely signed out of Google), falls back to the
   // full sign-in overlay so they can complete sign-in manually.
   async function triggerFirstTapSync() {
-    if (!_deferredMode) return; // already have a token or not in deferred mode
+    if (!_deferredMode) return false; // already have a token or not in deferred mode
     console.log('[auth] first tap — obtaining Google token');
     try {
       // '' avoids re-showing consent for a user who already granted access;
@@ -193,12 +193,14 @@ const Auth = (() => {
       _deferredMode = false;
       tokenReadyResolve();
       console.log('[auth] token obtained on first tap');
+      return true;
     } catch (err) {
       console.warn('[auth] first-tap token request failed, showing sign-in', err);
       _deferredMode = false;
       // Show the full overlay — signIn() called from the button will resolve
       // _tokenReady (via the same tokenReadyResolve reference in signIn()).
       overlay.showSignIn();
+      return false;
     }
   }
 

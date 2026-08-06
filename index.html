@@ -3740,9 +3740,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   // on click (not touchstart) because Google's GIS popup requires a robust
   // user gesture to avoid popup blockers, and click is universally accepted.
   (function() {
-    function _onFirstTap() {
+    async function _onFirstTap() {
       document.removeEventListener('click', _onFirstTap, true);
-      Auth.triggerFirstTapSync();
+      const success = await Auth.triggerFirstTapSync();
+      if (success) {
+        window.addEventListener('notaBackgroundSyncComplete', () => {
+          showToast('Synced ✓', 'success');
+        }, { once: true });
+      }
     }
     document.addEventListener('click', _onFirstTap, { capture: true });
   })();

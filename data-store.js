@@ -687,6 +687,7 @@ const DataStore = (() => {
             window.dispatchEvent(new CustomEvent('notaOpexUpdated', { detail: payload }));
           }
         }
+        window.dispatchEvent(new CustomEvent('notaBackgroundSyncComplete'));
         return payload;
       } catch (e) {
         console.warn('[data-store] Background fetch failed for allOpex', e);

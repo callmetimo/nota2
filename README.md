@@ -239,6 +239,12 @@ Following Session 28's fix, ran a full audit (all `.js` files and inline `<scrip
 - **Follow-up audit**: checked every other function that reads Invest rows for balance/valuation math (`computeCashBalance`, `computeInvestNetLots`, `renderNetWorth`, `isFxAccountMatch`, `getAssetValue`, `getGoalCurrentValue`) for the same exposure — all safe except one: `buildAccountBalances()`'s **non-IDR/FX branch** had the same bug in a worse form. Step 1 has no category filter, so it counted the linked `cat='Investment'` Opex row *in addition to* the correct native-currency depletion already computed via `netLot`/`computeInvestNetLots` — and since that Opex row's amount (`totalIdr`) is always IDR-denominated even when the funding account is USD/other FX, it was being subtracted as if it were native-currency units (a ~16,500× unit-mismatch on top of the double-count). **Fix**: Step 1 now also skips `cat === 'Investment'` Opex rows whenever `includeInvestIdr` is `false` — the flag that, per its only two call sites, exactly identifies the FX/non-IDR branch.
 - See **[Invest ↔ Opex dual-write](#invest--opex-dual-write-avoiding-double-counting)** below for the do's/don'ts this session's fix is codified into.
 
+#### Session 32: Instant Launch & Deferred Sign-In UX (Antigravity/Gemini)
+- **Problem**: iOS PWAs cannot perform silent background OAuth token refresh (`prompt: 'none'`) because Safari isolates cookie jars between PWAs and standard Safari, and blocks background popups without a direct user gesture. This resulted in returning users being blocked by the full-screen Google sign-in splash page on every app launch.
+- **Fix**: Implemented a two-phase auth strategy for returning users (spreadsheet ID cached in localStorage):
+  - **Phase 1 (Instant Launch)**: `Auth.ready` resolves immediately on load, completely bypassing the splash screen. The app paints instantly and loads the entire operational history from the local cache (`notapub_opex_cache_<spreadsheetId>` in localStorage, already implemented in Session 15).
+  - **Phase 2 (Deferred Sign-In on First Tap)**: Actual Sheets API calls are blocked on a private `_tokenReady` promise. A capture-phase one-shot event listener (`touchstart` / `mousedown`) is registered globally. The user's very first interaction anywhere on the screen acts as the gesture that triggers `Auth.triggerFirstTapSync()`, opening the Google OAuth popup to silently refresh/verify the token and resolving `_tokenReady`.
+
 ---
 
 ## Config Persistence Pattern (Best Practice)

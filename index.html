@@ -3733,6 +3733,23 @@ window.addEventListener('DOMContentLoaded', async () => {
   // safe to call this early since it just chains onto that promise internally.
   Auth.markAppReady();
 
+  // ── ONE-SHOT FIRST-TAP LISTENER ─────────────────────────────────────────
+  // For returning users, Auth.ready resolves immediately from the localStorage
+  // cache but the Google token is deferred until the user's first physical tap.
+  // We use capture phase so this fires before any other handler, and we listen
+  // on touchstart (not touchend) because iOS's gesture-allowed popup window
+  // opens at touchstart — using touchend is too late for the popup to be
+  // considered user-initiated by Safari.
+  (function() {
+    function _onFirstTap() {
+      document.removeEventListener('touchstart', _onFirstTap, true);
+      document.removeEventListener('mousedown',  _onFirstTap, true);
+      Auth.triggerFirstTapSync();
+    }
+    document.addEventListener('touchstart', _onFirstTap, { capture: true, passive: true });
+    document.addEventListener('mousedown',  _onFirstTap, { capture: true }); // desktop/dev fallback
+  })();
+
   // Fire-and-forget: repopulates allCategories/allPMs/allStocks/allAccounts/CAT_COLORS/
   // ACCOUNT_CCY/STOCK_TYPE from the user's Config sheet once it resolves. Any picker/lookup
   // that runs before this resolves just sees the hardcoded defaults for a moment.

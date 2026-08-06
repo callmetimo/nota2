@@ -232,6 +232,13 @@ Following Session 28's fix, ran a full audit (all `.js` files and inline `<scrip
   - **`handleGetGoals()` (`data-store.js`)**: `startDate`/`endDate`/`completedDate` now route through `parseAnyDateToISO()` first (falling back to the old bare `cellToDateStr()` pass-through only if that fails to parse), instead of trusting the raw cell string unconditionally — same validate-and-normalize treatment Session 28/29 already gave Invest dates, extended here defensively even though Goals dates aren't currently known to be corrupted.
   - **`getAllInvestRows()` (`index.html`)**: guarded the `new Date(r.date)` conversion for local unsynced Invest rows — an unparseable `r.date` used to silently produce `NaN` for `y`/`m`/`d`/`mk` (the same "NaN quietly poisons a downstream comparison" class as the core bug); now falls back to `0`/`''` with a `console.warn` instead of injecting `NaN`, and the row is no longer silently corrupted (still shown, just without a usable date/month key).
 
+#### Session 31: Fixed Invest Buy Transactions Double-Subtracting the Funding Account's Balance (Claude)
+- **Bug**: reported by a user — after buying stock/FX funded from `CIMB IDR`, Insights and Net Worth → Holdings showed `CIMB IDR`'s balance dropped by *twice* the invested amount (e.g. a 1,000,000 IDR Buy showed a 2,000,000 drop).
+- **Root cause**: `handleInvest()` (`data-store.js`) intentionally dual-writes every Buy — an `Invest` sheet row *and* a linked `Opex` row (`cat='Investment'`, `pm`=funding account, `exp`=totalIdr), joined by `opexTxId`. `computeAccountCurrentBalance()` (`ui-settings.js`) summed **both**: Step 1 (`HIST.opex` deltas) counted the linked Opex row, and Step 3 (Invest-row deltas) counted the same Buy again — for any **IDR** account.
+- **Fix**: Step 3 now skips a `Buy` row whenever it carries a truthy `opexTxId` (already counted via Step 1's linked Opex row); `Sell` rows and not-yet-synced local `Buy` rows (no Opex counterpart yet) are still counted, since they're not double-represented.
+- **Follow-up audit**: checked every other function that reads Invest rows for balance/valuation math (`computeCashBalance`, `computeInvestNetLots`, `renderNetWorth`, `isFxAccountMatch`, `getAssetValue`, `getGoalCurrentValue`) for the same exposure — all safe except one: `buildAccountBalances()`'s **non-IDR/FX branch** had the same bug in a worse form. Step 1 has no category filter, so it counted the linked `cat='Investment'` Opex row *in addition to* the correct native-currency depletion already computed via `netLot`/`computeInvestNetLots` — and since that Opex row's amount (`totalIdr`) is always IDR-denominated even when the funding account is USD/other FX, it was being subtracted as if it were native-currency units (a ~16,500× unit-mismatch on top of the double-count). **Fix**: Step 1 now also skips `cat === 'Investment'` Opex rows whenever `includeInvestIdr` is `false` — the flag that, per its only two call sites, exactly identifies the FX/non-IDR branch.
+- See **[Invest ↔ Opex dual-write](#invest--opex-dual-write-avoiding-double-counting)** below for the do's/don'ts this session's fix is codified into.
+
 ---
 
 ## Config Persistence Pattern (Best Practice)
@@ -338,6 +345,61 @@ Both `renderNetWorth()` and `getGoalCurrentValue()` share the aggregation logic
 via `computeInvestNetLots()` (moved to `ui-insights.js:724` by the Session 15 script
 split) to prevent them from drifting out of sync.
 
+## Invest ↔ Opex dual-write (avoiding double-counting)
+
+Every Invest **Buy** writes to **two sheets, not one**: `handleInvest()`
+(`data-store.js`) appends the Invest row itself, and — for `action === 'Buy'`
+only — also appends a linked `Opex` row (`cat = 'Investment'`, `pm` = the
+funding account, `exp = totalIdr`), joining the two via an `opexTxId`/`opexId`
+column. This is deliberate — it's what makes an investment show up as an
+"Investment" expense in the ledger — but it means **the same real-world outflow
+now exists as two rows**, and any balance/valuation calculation that reads
+both sheets for the same account has to count it exactly once, not twice.
+Session 31 fixed two variants of this exact mistake (see above) — both were
+`computeAccountCurrentBalance()` (`ui-settings.js`) summing the linked Opex
+row *and* the Invest row for the same Buy.
+
+**Do:**
+- When writing a calculation that reads **both** `HIST.opex` and Invest rows
+  (`getAllInvestRows()`) for the same account, decide up front which sheet is
+  the "source of truth" for a linked Buy's outflow, and explicitly skip that
+  same event on the other side.
+- Use the row's `opexTxId` (Invest side) as the de-dupe key — a truthy
+  `opexTxId` on a `Buy` row means its outflow is already represented as an
+  Opex row somewhere.
+- Remember `Sell` never gets a linked Opex row (`handleInvest` only dual-writes
+  for `Buy`) — don't add a de-dupe guard that accidentally also skips Sells;
+  they're the *only* record of that inflow.
+- Remember a linked Opex row's amount (`exp`/`totalIdr`) is **always
+  IDR-denominated**, even when the funding account's own currency isn't IDR.
+  If a calculation is working in an account's native currency (as the FX
+  branch of `buildAccountBalances()` does), including that row isn't just a
+  double-count — it's also unit-mismatched (IDR treated as native currency).
+- Trace a concrete example (a specific Buy amount, from a specific account)
+  through the *entire* calculation path — both sheets, all branches — before
+  trusting a fix. The Session 31 bug had an IDR-account version and a worse
+  FX-account version; fixing only the first one you find isn't enough.
+- After changing this logic, audit every other function that reads Invest
+  rows for balance/valuation math (grep for `getAllInvestRows`, `HIST.invest`,
+  `liveInvest`, `totalIdr`, `opexTxId`) — not just the one you were asked to
+  fix — for the same exposure.
+
+**Don't:**
+- Don't sum `HIST.opex` deltas for an account without checking whether any of
+  those rows are `cat === 'Investment'` — they may already be represented on
+  the Invest side too.
+- Don't assume a fix that works for IDR accounts also covers FX/non-IDR
+  accounts — they run through different branches (`includeInvestIdr` in
+  `computeAccountCurrentBalance()`) with different assumptions about which
+  sheet already handled the outflow.
+- Don't treat `totalIdr` as native-currency for a non-IDR account — it's
+  always IDR. Native-currency depletion for FX accounts comes from
+  `lot × price` inside `computeInvestNetLots()`, never from `totalIdr`.
+- Don't add a new balance-affecting calculation that reads Invest rows
+  without first checking this section and Session 31's fix in
+  `computeAccountCurrentBalance()` (`ui-settings.js`) as the reference
+  pattern for how to de-dupe correctly.
+
 ## Inherited frontend knowledge (from the original Nota)
 
 `index.html` is a fork of the original Nota's UI/calculation code — rendering,
@@ -433,6 +495,7 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
 - **Config Balance Parsing (`parseConfigBalance` & `data-store.js`)**: Config balance strings formatted like `Rp 150.000.000` or `150,000,000` MUST NOT be parsed with naive `replace(/[^\d.-]/g, '')`. In dot-separated formats, `Number("150.000.000")` turns into `150` or `NaN`. Use `parseConfigBalance()` which handles currency prefixes, thousand dots, and commas before numeric conversion.
 - **Asset Type Fallback Priority**: Always perform keyword-based asset identification (e.g. `sUpper.includes('JHT')`) BEFORE testing generic fallbacks (`!type || type === 'Other'`). Otherwise, items configured with `Other` or missing asset types will fall back to `Cash` or `US Stock` instead of `JHT`.
 - **Net Worth Fallback Aggregation (`getNetWorthAllocations` step 3, `ui-insights.js`)**: Non-invest stock items and static account snapshots stored in `rawAccountBalances` or `CONFIG_ITEMS` (like JHT) must be included via the fallback pass inside `getNetWorthAllocations()` (called by `renderOverview()`, `ui-insights.js:952-1040`, the fallback block at line ~999), ensuring assets without Opex/Invest sheet transaction rows are still counted in total net worth and donut visualization. (There is no function literally named `renderNetWorthOverview` — that name never existed in the codebase; this bullet previously cited it in error.)
+- **Invest Buy transactions dual-write to Opex** (`handleInvest`, `data-store.js`) — a linked `cat='Investment'` row, joined via `opexTxId`. Any balance calculation reading both `HIST.opex` and Invest rows for the same account must count that outflow exactly once — see **[Invest ↔ Opex dual-write](#invest--opex-dual-write-avoiding-double-counting)** for the do's/don'ts and Session 31 for the two variants of this bug (IDR and FX accounts) already found and fixed.
 
 ### Resilience & error handling patterns
 

@@ -223,6 +223,11 @@ Following Session 28's fix, ran a full audit (all `.js` files and inline `<scrip
 
 **Process note**: no code changes in this session touch the Google Sheets API/schema (no `numberFormat` changes) — every fix here is a pure client-side JS logic change, verified directly in-browser against real and synthetic inputs, precisely because a live spreadsheet to test schema changes against wasn't available. The systemic fix (explicit column formatting) is the durable cure and is recommended as the next session's starting point.
 
+#### Session 30: Implemented Session 29's Recommended Systemic Fix — Explicit `numberFormat` on Every Date Column (Claude)
+- **Change**: added `ensureDateColumnFormats()` (`data-store.js`) — a one-time-per-browser migration (same pattern as `LS_SPLIT_MIGRATED`) that issues a single `batchUpdate` pinning `numberFormat: { type: 'DATE', pattern: 'yyyy-mm-dd' }` on every date column identified in Session 29's audit: `Opex!A`, `Invest!A`, `Config!J` (`balanceDate`), `Goals!B/C/G` (`StartDate`/`EndDate`/`CompletedDate`), `Recurring!J/L` (`lastFired`/`endMonth`). Wired into all three `bootstrap()` paths (cached spreadsheet, freshly-found existing spreadsheet, brand-new spreadsheet), guarded by a new `LS_DATE_FORMAT_MIGRATED` flag.
+- **Verified against the live spreadsheet** (`Nota Data`, the reporting user's real Drive file): confirmed `Opex!A2` is a genuine date-typed cell with no explicit number format ("Automatic"), currently rendering as `23/04/2019 07:0...` (locale-dependent `DD/MM/YYYY HH:MM:SS`) — exactly the mechanism Session 28/29 diagnosed. The fix pins the format going forward; it will apply the next time this user's browser calls `bootstrap()` (next sign-in), since the migration flag lives in `localStorage`, not a hardcoded run against production during this session.
+- **Note**: this only fixes the *read-back format*, matching Session 29's framing — it doesn't retroactively re-validate already-corrupted values (that's what Session 28/29's `parseAnyDateToISO()` hardening already covers).
+
 ---
 
 ## Config Persistence Pattern (Best Practice)

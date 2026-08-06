@@ -9,6 +9,7 @@ const DataStore = (() => {
   const LS_OPEX_GID = 'notaPublic_opexSheetId';
   const LS_INVEST_GID = 'notaPublic_investSheetId';
   const LS_SPLIT_MIGRATED = 'notaPublic_splitMigratedV1';
+  const LS_DATE_FORMAT_MIGRATED = 'notaPublic_dateFormatMigratedV1';
 
   // crypto.randomUUID is available in all modern browsers (Chrome 92+, Safari 15.4+, Firefox 95+).
   // Centralised here so the guard/fallback doesn't have to be repeated at every call site.
@@ -22,6 +23,49 @@ const DataStore = (() => {
     if (opexGid != null) localStorage.setItem(LS_OPEX_GID, String(opexGid));
     if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
     return meta;
+  }
+
+  // Session 29 audit: every date this app writes is auto-detected by Sheets as a real date
+  // cell and rendered back (FORMATTED_VALUE) according to the *spreadsheet's own locale* —
+  // which is how the Session 28 bug happened (Invest!A dates came back MM/DD/YYYY instead of
+  // this app's usual DD/MM/YYYY). Pinning an explicit locale-independent numberFormat on every
+  // date column is the durable fix; parseAnyDateToISO()/parseDateInfo() then always see a
+  // consistent 'yyyy-mm-dd' string regardless of the underlying spreadsheet's locale.
+  // One-time per browser (like LS_SPLIT_MIGRATED) — safe to re-run, just wasted API calls.
+  async function ensureDateColumnFormats(meta) {
+    if (localStorage.getItem(LS_DATE_FORMAT_MIGRATED)) return;
+    try {
+      const sheets = (meta && meta.sheets) || (await SheetsClient.getSpreadsheetMeta(spreadsheetId)).sheets || [];
+      const gidOf = (title) => sheets.find(s => s.properties.title === title)?.properties.sheetId;
+      const configGid = gidOf(CONFIG_SHEET);
+      const goalsGid = gidOf(GOALS_SHEET);
+      const recurringGid = gidOf(RECURRING_SHEET);
+
+      const requests = [];
+      const addCol = (sheetId, colIndex) => {
+        if (sheetId == null) return;
+        requests.push({
+          repeatCell: {
+            range: { sheetId, startColumnIndex: colIndex, endColumnIndex: colIndex + 1 },
+            cell: { userEnteredFormat: { numberFormat: { type: 'DATE', pattern: 'yyyy-mm-dd' } } },
+            fields: 'userEnteredFormat.numberFormat',
+          },
+        });
+      };
+      addCol(opexGid, 0);       // Opex!A Date
+      addCol(investGid, 0);     // Invest!A Date
+      addCol(configGid, 9);     // Config!J balanceDate
+      addCol(goalsGid, 1);      // Goals!B StartDate
+      addCol(goalsGid, 2);      // Goals!C EndDate
+      addCol(goalsGid, 6);      // Goals!G CompletedDate
+      addCol(recurringGid, 9);  // Recurring!J lastFired
+      addCol(recurringGid, 11); // Recurring!L endMonth
+
+      if (requests.length) await SheetsClient.batchUpdate(spreadsheetId, requests);
+      localStorage.setItem(LS_DATE_FORMAT_MIGRATED, '1');
+    } catch (e) {
+      console.warn('[bootstrap] ensureDateColumnFormats error:', e);
+    }
   }
 
   function serializeConfigRow(it, idx) {
@@ -150,6 +194,9 @@ const DataStore = (() => {
           console.warn('[bootstrap] Migration error:', e);
         }
       }
+      if (!localStorage.getItem(LS_DATE_FORMAT_MIGRATED)) {
+        await ensureDateColumnFormats();
+      }
       return;
     }
 
@@ -161,6 +208,9 @@ const DataStore = (() => {
       if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
       await migrateToSplitSheets(meta);
       localStorage.setItem(LS_SPLIT_MIGRATED, '1');
+      // Note: fetch fresh meta rather than reusing `meta` above — migrateToSplitSheets may have
+      // just created the Goals/Recurring sheets, so the pre-migration meta wouldn't have their gids.
+      await ensureDateColumnFormats();
       return;
     }
 
@@ -212,6 +262,7 @@ const DataStore = (() => {
         fields: 'userEnteredFormat.numberFormat',
       },
     }]);
+    await ensureDateColumnFormats({ sheets: created.sheets });
   }
 
   // ── MIGRATION: split Invest's prices/goals/recurring blocks into their own sheets ──

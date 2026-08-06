@@ -228,7 +228,7 @@ function renderCCMonitor() {
           <div class="cal-progress-fill${overCls}" style="width:${usagePct}%;background:${barColor}"></div>
         </div>
         <div class="cal-progress-right">
-          <div class="cal-progress-amount">${usedFmt} used</div>
+          <div class="cal-progress-amount"></div>
           <div class="cal-progress-avg">limit ${limitFmt}</div>
         </div>
       </div>`;
@@ -284,7 +284,7 @@ function renderCCMonitor() {
             const t = item.row;
             const isInc = item.type === 'income';
             const catColor = CAT_COLORS[t.cat || t.category] || 'var(--text2)';
-            const amountStr = (isInc ? '+' : '-') + fRpS(item.amount);
+            const amountStr = (isInc ? '+' : '-') + fRp(item.amount);
             const amountColor = isInc ? 'var(--green)' : 'var(--text)';
             const dispDate = monthNameStr.split(' ')[0] + ' ' + item.day;
             const tapAttrs = `data-idx="${item.idx}" data-source="${item.source}" data-type="opex" style="cursor:pointer"`;

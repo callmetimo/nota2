@@ -1772,9 +1772,17 @@ function getAllInvestRows() {
   // Only include local rows that are NOT yet synced — once synced they live in liveInvest
   const unsynced = investHistory.filter(r => !r.synced).map(r => {
     const dt = new Date(r.date);
+    // Session 29/30: r.date is normally a clean ISO string from the date-input field, but if
+    // it's ever unparseable (corrupted localStorage, a legacy cached shape), `new Date()`
+    // returns Invalid Date and getFullYear()/getMonth()/getDate() all silently produce NaN —
+    // the same "NaN quietly poisons a downstream comparison" failure class as the Invest date
+    // bug. Guard it so a bad date can't inject NaN into y/m/d/mk; the row still shows up (not
+    // silently dropped) but with a visible '' month key instead of "NaN NaN".
+    const validDt = !isNaN(dt.getTime());
+    if (!validDt) console.warn('[getAllInvestRows] Unparseable local Invest date, dropping date fields:', r.date, r.id);
     return {
-      y:dt.getFullYear(), m:dt.getMonth(), d:dt.getDate(),
-      mk:`${MO[dt.getMonth()]} ${dt.getFullYear()}`,
+      y: validDt ? dt.getFullYear() : 0, m: validDt ? dt.getMonth() : 0, d: validDt ? dt.getDate() : 0,
+      mk: validDt ? `${MO[dt.getMonth()]} ${dt.getFullYear()}` : '',
       stock:r.stock, type:STOCK_TYPE[r.stock]||'',
       action:r.action, lot:r.lot, price:r.price, totalIdr:r.totalIdr,
       account:r.account||'',

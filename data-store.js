@@ -896,12 +896,16 @@ const DataStore = (() => {
         id,
         rowNum: GOALS_START_ROW + idx,
         name,
-        startDate: cellToDateStr(row[1]),
-        endDate: cellToDateStr(row[2]),
+        // Session 30: route through parseAnyDateToISO (validated, format-tolerant) instead of
+        // the old bare cellToDateStr pass-through — a garbage/reformatted cell now normalizes
+        // to a clean ISO date or safely comes back '' instead of silently carrying through
+        // whatever Sheets happened to render, the same failure class as the Invest date bug.
+        startDate: parseAnyDateToISO(row[1]) || cellToDateStr(row[1]),
+        endDate: parseAnyDateToISO(row[2]) || cellToDateStr(row[2]),
         targetAmount: parseMoneyCell(row[3]),
         sources: row[4] ? String(row[4]).split(',').map(s => s.trim()).filter(Boolean) : [],
         completed: String(row[5] || '').toLowerCase() === 'true',
-        completedDate: cellToDateStr(row[6]) || null,
+        completedDate: (parseAnyDateToISO(row[6]) || cellToDateStr(row[6])) || null,
         ccy: String(row[8] || '').trim() || 'IDR',
       });
     }

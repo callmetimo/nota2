@@ -180,6 +180,15 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInv
   (HIST.opex || []).forEach(r => {
     const rPm = String(r.pm || '').toLowerCase().trim();
     if (!matchNames.includes(rPm)) return;
+    // A linked Opex 'Investment' row (handleInvest's dual-write for a Buy) is always
+    // IDR-denominated (r.exp = totalIdr), even when the funding account is itself
+    // FX/non-IDR. For non-IDR accounts (includeInvestIdr=false, the only other caller
+    // of this function) that depletion is already correctly counted, in native units,
+    // by netLot/computeInvestNetLots in buildAccountBalances — so counting it again
+    // here would both double-count it and apply an IDR figure as if it were native
+    // currency. IDR accounts still need this row (Step 3 below skips it there instead,
+    // via r.opexTxId, since Step 1 is its sole source of truth for that outflow).
+    if (!includeInvestIdr && r.cat === 'Investment') return;
     const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
     if (baseDate && rowDate <= baseDate) return;
     delta += (Number(r.inc) || 0) - (Number(r.exp) || 0);

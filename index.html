@@ -3171,12 +3171,14 @@ function submitInvest() {
   saveLocal();updateStatus();
   buildAccountBalances();
   renderAccountBalanceCards();
-  const investBtn = document.querySelector('#form-invest .submit-btn');
-  if (investBtn) { investBtn.disabled = true; investBtn.textContent = 'Saving…'; }
+  // Navigate back to Home immediately (closes the input overlay too), same as
+  // submitOpex/submitTransfer — leaving the overlay open after tapping Save made
+  // it unclear whether the investment had actually been saved.
+  switchTab('home', null);
+  showToast('Saving investment…', 'loading', 0);
   isSyncing = true;
   syncInvest(r).then(ok=>{
     isSyncing = false;
-    if (investBtn) { investBtn.disabled = false; investBtn.textContent = 'Save Investment'; }
     if(ok){
       queue=queue.filter(q=>q.id!==r.id);
       investHistory=investHistory.map(h=>h.id===r.id?{...h,synced:true}:h);

@@ -772,7 +772,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 
   <div class="toggle-row" id="insightsSubPageToggle" style="margin-bottom:16px">
     <div class="toggle-btn active" data-sub="accounts" onclick="setInsightsSubPage('accounts',this)">Accounts</div>
-    <div class="toggle-btn" data-sub="expense" onclick="setInsightsSubPage('expense',this)">Expense Insights</div>
+    <div class="toggle-btn" data-sub="expense" onclick="setInsightsSubPage('expense',this)">Insights</div>
   </div>
 
   <!-- Subpage 1: Accounts -->
@@ -780,7 +780,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     <div id="accountBalanceCards"></div>
   </div>
 
-  <!-- Subpage 2: Expense Insights -->
+  <!-- Subpage 2: Insights -->
   <div id="insightsSubExpense" style="display:none">
     <div class="chart-page-section">
       <div class="insights-sticky">
@@ -789,11 +789,18 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           <select class="form-input" id="insightsAccountFilter" style="padding:6px 10px;font-size:12px;border-radius:var(--radius-sm)" onchange="onInsightsAccountFilterChange(this.value)">
           </select>
         </div>
+        <!-- Row 2: Data type + Category -->
+        <div class="toggle-row" id="insightsTypeToggle" style="margin-bottom:8px">
+          <div class="toggle-btn active" data-t="expense" onclick="setIT('expense',this)">Expense</div>
+          <div class="toggle-btn" data-t="income" onclick="setIT('income',this)">Income</div>
+          <div class="toggle-btn" data-t="invest" onclick="setIT('invest',this)">Invest</div>
+          <div class="toggle-btn" data-t="category" onclick="setIT('category',this)">Category</div>
+        </div>
+        <!-- Row 3: Period mode (Weekly / Monthly / Yearly only) -->
         <div class="toggle-row" id="insightsModeToggle" style="margin-bottom:8px">
-          <div class="toggle-btn" data-m="weekly" onclick="setIM('weekly',this)">Weekly</div>
-          <div class="toggle-btn active" data-m="monthly" onclick="setIM('monthly',this)">Monthly</div>
+          <div class="toggle-btn active" data-m="weekly" onclick="setIM('weekly',this)">Weekly</div>
+          <div class="toggle-btn" data-m="monthly" onclick="setIM('monthly',this)">Monthly</div>
           <div class="toggle-btn" data-m="yearly" onclick="setIM('yearly',this)">Yearly</div>
-          <div class="toggle-btn" data-m="category" onclick="setIM('category',this)">Category</div>
         </div>
         <div id="weeklyControls" style="display:none">
           <div class="toggle-row" id="weeklyRangeToggle">
@@ -1740,7 +1747,8 @@ function _reconcileUnsyncedWithSheet(rows, y, m) {
   if (changed) saveLocal();
 }
 
-let insightsMode = 'monthly';
+let insightsMode = 'weekly';
+let insightsDataType = 'expense';
 let nwMode = 'holdings';
 let holdingsGroupFilter = null;
 
@@ -1784,6 +1792,51 @@ function getRows(view) {
   if (!view || view === 'all') return hist;
   const lowView = String(view).toLowerCase().trim();
   return hist.filter(r => r.pm && r.pm.toLowerCase().trim() === lowView);
+}
+
+function getRowsForType(view, dataType) {
+  // Expense: existing getRows() behaviour unchanged
+  if (!dataType || dataType === 'expense' || dataType === 'category') {
+    return getRows(view);
+  }
+
+  // Income: opex rows where r.inc > 0, mapped to common shape
+  if (dataType === 'income') {
+    const all = getAllOpexRows()
+      .filter(r => r.inc && Number(r.inc) > 0)
+      .map(r => ({
+        ...r,
+        exp:   Number(r.inc),
+        cat:   r.cat || 'Income',
+        _type: 'income',
+      }));
+    if (!view || view === 'all') return all;
+    const lv = String(view).toLowerCase().trim();
+    return all.filter(r => r.pm && r.pm.toLowerCase().trim() === lv);
+  }
+
+  // Invest: Buy transactions, grouped by asset type via getAssetTypeForItem
+  if (dataType === 'invest') {
+    const all = getAllInvestRows()
+      .filter(r => r.action === 'Buy' && (r.totalIdr || 0) > 0)
+      .map(r => ({
+        y:     r.y,
+        m:     r.m,
+        d:     r.d,
+        mk:    r.mk,
+        exp:   Number(r.totalIdr) || 0,
+        cat:   getAssetTypeForItem(r.stock, STOCK_TYPE[r.stock], false),
+        tx:    `${r.action} ${r.stock}`.trim(),
+        pm:    r.account || '',   // mapped to pm so account filter logic is uniform
+        _type: 'invest',
+      }));
+    if (!view || view === 'all') return all;
+    // Filter by invest account name (case-insensitive exact match on r.account)
+    const lv = String(view).toLowerCase().trim();
+    return all.filter(r => r.pm && r.pm.toLowerCase().trim() === lv);
+  }
+
+  return getRows(view); // fallback
 }
 
 function getAllInvestRows() {

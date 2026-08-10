@@ -21,8 +21,19 @@ function setInsightsSubPage(sub, el) {
   if (insightsSubPage === 'accounts') {
     renderAccountBalanceCards();
   } else if (insightsSubPage === 'expense') {
+    // Reset to defaults
+    insightsDataType = 'expense';
+    insightsMode = 'weekly';
+    insightsAccountFilterVal = 'all';
+    wSelWeek = null; mSelMonth = null; ySelYear = null; cSelCat = null;
+
+    // Sync type toggle UI
+    toggleActive('#insightsTypeToggle .toggle-btn', document.querySelector('#insightsTypeToggle .toggle-btn[data-t="expense"]'));
+    // Sync mode toggle UI
+    setIM('weekly', document.querySelector('#insightsModeToggle .toggle-btn[data-m="weekly"]'));
+
     renderInsightsAccountFilter();
-    renderChartTab(insightsMode);
+    renderChartTab('weekly');
   }
 }
 
@@ -39,9 +50,18 @@ function onCCPmChange(val) {
 function renderInsightsAccountFilter() {
   const select = document.getElementById('insightsAccountFilter');
   if (!select) return;
-  const pmList = Array.from(new Set(allPMs || []));
+
+  let options;
+  if (typeof insightsDataType !== 'undefined' && insightsDataType === 'invest') {
+    // Invest: show unique invest account names (r.account) from invest history
+    options = Array.from(new Set(getAllInvestRows().map(r => r.account).filter(Boolean))).sort();
+  } else {
+    // Expense / Income: show payment methods (allPMs) as before
+    options = Array.from(new Set(allPMs || []));
+  }
+
   let html = `<option value="all"${insightsAccountFilterVal === 'all' ? ' selected' : ''}>All Accounts</option>`;
-  html += pmList.map(pm => `<option value="${esc(pm)}"${insightsAccountFilterVal === pm ? ' selected' : ''}>${esc(pm)}</option>`).join('');
+  html += options.map(pm => `<option value="${esc(pm)}"${insightsAccountFilterVal === pm ? ' selected' : ''}>${esc(pm)}</option>`).join('');
   select.innerHTML = html;
 }
 
@@ -337,6 +357,29 @@ function setIM(mode,el){
   cEls.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=mode==='category'?'block':'none'});
   renderChartTab(mode);
 }
+
+function setIT(type, el) {
+  insightsDataType = type;
+  toggleActive('#insightsTypeToggle .toggle-btn', el);
+
+  insightsAccountFilterVal = 'all';
+  wView = 'all'; mView = 'all'; yView = 'all'; cView = 'all';
+  renderInsightsAccountFilter();
+
+  if (type === 'category') {
+    insightsMode = 'category';
+    toggleActive('#insightsModeToggle .toggle-btn', null);
+    wSelWeek = null; mSelMonth = null; ySelYear = null; cSelCat = null;
+    setIM('category', null);
+  } else {
+    if (insightsMode === 'category') {
+      insightsMode = 'weekly';
+      toggleActive('#insightsModeToggle .toggle-btn', document.querySelector('#insightsModeToggle .toggle-btn[data-m="weekly"]'));
+    }
+    wSelWeek = null; mSelMonth = null; ySelYear = null; cSelCat = null;
+    renderChartTab(insightsMode);
+  }
+}
 function setWV(v,el){wView=v;wSelWeek=null;wSelCat=null;toggleActive('#weeklySourceToggle .toggle-btn',el);renderWeekly()}
 function setWR(r,el){wRange=r;wSelWeek=null;wSelCat=null;toggleActive('#weeklyRangeToggle .toggle-btn',el);renderWeekly()}
 function setMV(v,el){mView=v;mSelMonth=null;mSelCat=null;toggleActive('#monthlySourceToggle .toggle-btn',el);renderMonthly()}
@@ -404,7 +447,7 @@ function getWeeklyKeys() {
 }
 
 function renderWeekly(){
-  const rows=getRows(wView),keys=getWeeklyKeys();
+  const rows=getRowsForType(wView, insightsDataType),keys=getWeeklyKeys();
   const {totals,catMap,rawRows}=aggregateExpenses(rows,keys,getWeekKeyOfRow);
   const selKey=wSelWeek||keys[keys.length-1];
   if(!wSelWeek)wSelWeek=selKey;
@@ -420,7 +463,7 @@ function renderWeekly(){
   const sumEl=document.getElementById('weeklySummary');
   if(sumEl)sumEl.innerHTML=`
     <div class="summary-row">
-      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${wView === 'all' ? 'All Accounts' : wView}</div></div>
+      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${wView === 'all' ? 'All Accounts' : wView} · ${insightsDataType.charAt(0).toUpperCase()+insightsDataType.slice(1)}</div></div>
       <div class="summary-card"><div class="s-label">vs Last Week</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Avg ${fRpS(Math.round(avgTotal))}/wk</div></div>
     </div>`;
 
@@ -471,7 +514,7 @@ function getMonthlyKeys(){
   return k;
 }
 function getYearlyKeys(){
-  const rows=getRows(yView),nowY=new Date().getFullYear();
+  const rows=getRowsForType(yView, insightsDataType),nowY=new Date().getFullYear();
   if(yRange==='all'){const ys=[...new Set(rows.map(r=>r.y).filter(Boolean))].sort();return ys.length?ys:[nowY]}
   const n=parseInt(yRange),ys=[];for(let i=n-1;i>=0;i--)ys.push(nowY-i);return ys;
 }
@@ -511,7 +554,7 @@ function barColHTML({label,amount,pct,selected='',onclick='',fillStyle=''}){
 // Donut legend rows; clickFnName is a global function that receives the category name
 function legendRowsHTML(sorted,total,activeCat,clickFnName){
   return sorted.map(([cat,val])=>{
-    const color=CAT_COLORS[cat]||CAT_COLORS['Other'],pct=((val/total)*100).toFixed(0);
+    const color=CAT_COLORS[cat]||getTypeColor(cat)||CAT_COLORS['Other'],pct=((val/total)*100).toFixed(0);
     return`<div class="legend-row${activeCat===cat?' active':''}" onclick="${clickFnName}('${escJsAttr(cat)}')">
       <div class="legend-dot" style="background:${color}"></div>
       <div class="legend-name">${esc(cat)}</div>
@@ -533,7 +576,7 @@ function detailSectionHTML(title,color,txList,dateFn){
 }
 
 function renderMonthly(){
-  const rows=getRows(mView),keys=getMonthlyKeys();
+  const rows=getRowsForType(mView, insightsDataType),keys=getMonthlyKeys();
   const {totals,catMap,rawRows}=aggregateExpenses(rows,keys,r=>r.mk);
   const selKey=mSelMonth||keys[keys.length-1];
   if(!mSelMonth)mSelMonth=selKey;
@@ -548,7 +591,7 @@ function renderMonthly(){
 
   document.getElementById('monthlySummary').innerHTML=`
     <div class="summary-row">
-      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${mView === 'all' ? 'All Accounts' : mView}</div></div>
+      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${mView === 'all' ? 'All Accounts' : mView} · ${insightsDataType.charAt(0).toUpperCase()+insightsDataType.slice(1)}</div></div>
       <div class="summary-card"><div class="s-label">vs Last Month</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Avg ${fRpS(Math.round(avgTotal))}/mo</div></div>
     </div>`;
 
@@ -587,7 +630,7 @@ function selectMonth(k){mSelMonth=k;mSelCat=null;renderMonthly()}
 function selectMonthlyCat(cat){mSelCat=cat;renderMonthly()}
 
 function renderYearly(){
-  const rows=getRows(yView),years=getYearlyKeys();
+  const rows=getRowsForType(yView, insightsDataType),years=getYearlyKeys();
   const {totals,catMap:cats,rawRows:rawCats}=aggregateExpenses(rows,years,r=>r.y);
   // Per-month breakdown within each year (not covered by aggregateExpenses)
   const monthBreak={};
@@ -608,7 +651,7 @@ function renderYearly(){
 
   document.getElementById('yearlySummary').innerHTML=`
     <div class="summary-row">
-      <div class="summary-card"><div class="s-label">${selY}</div><div class="s-value">${fRpS(curTotal)}</div><div class="s-sub">${yView === 'all' ? 'All Accounts' : yView}</div></div>
+      <div class="summary-card"><div class="s-label">${selY}</div><div class="s-value">${fRpS(curTotal)}</div><div class="s-sub">${yView === 'all' ? 'All Accounts' : yView} · ${insightsDataType.charAt(0).toUpperCase()+insightsDataType.slice(1)}</div></div>
       <div class="summary-card"><div class="s-label">vs Last Year</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Prev: ${fRpS(prevTotal)}</div></div>
     </div>`;
 
@@ -658,7 +701,7 @@ function selectYear(y){ySelYear=y;ySelCat=null;renderYearly()}
 function selectYearlyCat(cat){ySelCat=cat;renderYearly()}
 
 function renderCategory(){
-  const rows=getRows(cView),keys=getCatKeys();
+  const rows=getRowsForType(cView, 'expense'),keys=getCatKeys();
   const catTotals={},catMonthly={},catRaw={};
   rows.forEach(r=>{
     if(!keys.includes(r.mk))return;
@@ -724,7 +767,7 @@ function buildDonut(data,size){
   const r=size/2-10,cx=size/2,cy=size/2,circ=2*Math.PI*r;
   let offset=0,paths='';
   sorted.forEach(([cat,val])=>{
-    const pct=val/total,dash=pct*circ,color=CAT_COLORS[cat]||CAT_COLORS['Other'];
+    const pct=val/total,dash=pct*circ,color=CAT_COLORS[cat]||getTypeColor(cat)||CAT_COLORS['Other'];
     paths+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="13" stroke-dasharray="${dash} ${circ-dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
     offset+=dash;
   });

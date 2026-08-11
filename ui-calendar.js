@@ -263,7 +263,7 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
       const cellY    = isCur ? year : (cell.next ? nextYear : prevYear);
       const cellM    = isCur ? month : (cell.next ? nextMonth : prevMonth);
       const txs      = getTxByDayFor(cellY, cellM)[cell.day] || [];
-      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer' && !isCreditCardPM(r.pm || '')).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer' && (r.projected || !isCreditCardPM(r.pm || ''))).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
       const hasData  = txs.length > 0;
       const allProjected = hasData && txs.every(r => r.projected);
       const hasFuture = hasData && txs.some(r => r.future && isFuture);
@@ -345,7 +345,7 @@ function calGetRemainingWeeksHTML(year, month, today) {
       const isCur = (dy === year && dm === month);
       const isFuture = d > today;
       const txs = getTxByDayFor(dy, dm)[dd] || [];
-      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer' && !isCreditCardPM(r.pm || '')).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer' && (r.projected || !isCreditCardPM(r.pm || ''))).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
       const hasData = txs.length > 0;
 
       let cls = 'cal-day' + (isCur ? (isFuture && hasData ? ' future' : (hasData ? ' has-data' : '')) : ' other-month');
@@ -398,7 +398,7 @@ function calGetCurrentWeekHTML(year, month, today) {
     const isToday  = (dy === today.getFullYear() && dm === today.getMonth() + 1 && dd === todayD);
     const isFuture = d > today;
     const txs      = getTxByDayFor(dy, dm)[dd] || [];
-    const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && !isCreditCardPM(r.pm || '')).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+    const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.projected || !isCreditCardPM(r.pm || ''))).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
     const hasData  = txs.length > 0;
 
     let cls = 'cal-day';

@@ -1586,7 +1586,10 @@ async function fetchCurrentMonth(force, overrideY, overrideM) {
   }
 
   try {
-    const res = await fetch(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' });
+    // See loadHistData()'s comment — bound this the same way so a stuck
+    // Auth.ready/_tokenReady wait can't hang this call (and therefore
+    // initCalendar()) forever.
+    const res = await fetchWithTimeout(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' }, 10000);
     const j = await res.json();
     if (j.status === 'ok' && Array.isArray(j.rows)) {
       localStorage.setItem(cacheKey, JSON.stringify(j.rows));
@@ -3735,7 +3738,13 @@ function initSearchPage() {
 // own Sheet via ?type=allOpex instead.
 async function loadHistData(_isRetry) {
   try {
-    const res = await fetch(apiGet('type=allOpex'), { method: 'GET' });
+    // fetchWithTimeout (not a raw fetch) — this call routes through
+    // requireReady()/Auth.ready and getAccessToken()/_tokenReady, both of
+    // which can hang indefinitely with no timeout of their own (e.g. a
+    // stranded returning-user token wait). Without a bound here, initCalendar()
+    // never runs and the skeleton calendar never resolves. 12s: this payload
+    // can carry full transaction history and may be racing a first-time bootstrap.
+    const res = await fetchWithTimeout(apiGet('type=allOpex'), { method: 'GET' }, 12000);
     const j = await res.json();
     if (j.status !== 'ok' || !Array.isArray(j.rows)) throw new Error('bad allOpex response');
     HIST.opex = j.rows;

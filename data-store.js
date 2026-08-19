@@ -196,8 +196,16 @@ const DataStore = (() => {
           console.warn('[bootstrap] Migration error:', e);
         }
       }
+      // One-time formatting migration — self-guarded by LS_DATE_FORMAT_MIGRATED, safe to
+      // retry on the next bootstrap(). Must not throw out of bootstrap(): signIn()/start()
+      // only resolve Auth.ready/_tokenReady on a successful return here, so an uncaught
+      // failure in a non-essential migration step would strand sign-in forever.
       if (!localStorage.getItem(LS_DATE_FORMAT_MIGRATED)) {
-        await ensureDateColumnFormats();
+        try {
+          await ensureDateColumnFormats();
+        } catch (e) {
+          console.warn('[bootstrap] Date format migration error:', e);
+        }
       }
       return;
     }
@@ -208,11 +216,23 @@ const DataStore = (() => {
       localStorage.setItem(LS_SS_ID, spreadsheetId);
       const meta = await fetchAndCacheSheetGids(spreadsheetId);
       if (investGid != null) localStorage.setItem(LS_INVEST_GID, String(investGid));
-      await migrateToSplitSheets(meta);
-      localStorage.setItem(LS_SPLIT_MIGRATED, '1');
-      // Note: fetch fresh meta rather than reusing `meta` above — migrateToSplitSheets may have
-      // just created the Goals/Recurring sheets, so the pre-migration meta wouldn't have their gids.
-      await ensureDateColumnFormats();
+      // migrateToSplitSheets/ensureDateColumnFormats are one-time, idempotent, self-guarded
+      // (LS_SPLIT_MIGRATED/LS_DATE_FORMAT_MIGRATED) steps — not required for the app to
+      // function. Wrapped so a transient hiccup here can't throw out of bootstrap() and
+      // strand Auth.ready/_tokenReady (signIn() only resolves them once bootstrap() returns).
+      try {
+        await migrateToSplitSheets(meta);
+        localStorage.setItem(LS_SPLIT_MIGRATED, '1');
+      } catch (e) {
+        console.warn('[bootstrap] Split-sheet migration error:', e);
+      }
+      try {
+        // Note: fetch fresh meta rather than reusing `meta` above — migrateToSplitSheets may have
+        // just created the Goals/Recurring sheets, so the pre-migration meta wouldn't have their gids.
+        await ensureDateColumnFormats();
+      } catch (e) {
+        console.warn('[bootstrap] Date format migration error:', e);
+      }
       return;
     }
 
@@ -264,7 +284,14 @@ const DataStore = (() => {
         fields: 'userEnteredFormat.numberFormat',
       },
     }]);
-    await ensureDateColumnFormats({ sheets: created.sheets });
+    // Date-format pinning is a one-time nicety, not required for the sheet to work —
+    // don't let a hiccup here throw out of bootstrap() and strand Auth.ready/_tokenReady
+    // for a brand-new user who otherwise has a fully-created, working spreadsheet.
+    try {
+      await ensureDateColumnFormats({ sheets: created.sheets });
+    } catch (e) {
+      console.warn('[bootstrap] Date format migration error (new spreadsheet):', e);
+    }
   }
 
   // ── MIGRATION: split Invest's prices/goals/recurring blocks into their own sheets ──

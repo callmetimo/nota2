@@ -3742,9 +3742,13 @@ async function loadHistData(_isRetry) {
     // requireReady()/Auth.ready and getAccessToken()/_tokenReady, both of
     // which can hang indefinitely with no timeout of their own (e.g. a
     // stranded returning-user token wait). Without a bound here, initCalendar()
-    // never runs and the skeleton calendar never resolves. 12s: this payload
-    // can carry full transaction history and may be racing a first-time bootstrap.
-    const res = await fetchWithTimeout(apiGet('type=allOpex'), { method: 'GET' }, 12000);
+    // never runs and the skeleton calendar never resolves. 30s (not 8-12s like
+    // other calls): this is a one-time full-history payload that can genuinely
+    // take a while to download for an account with years of transactions — a
+    // tighter bound here was cutting the fetch off before it legitimately
+    // finished, wiping every previous month from the calendar/Insights even
+    // though sign-in and the network were both fine.
+    const res = await fetchWithTimeout(apiGet('type=allOpex'), { method: 'GET' }, 30000);
     const j = await res.json();
     if (j.status !== 'ok' || !Array.isArray(j.rows)) throw new Error('bad allOpex response');
     HIST.opex = j.rows;
@@ -3775,6 +3779,24 @@ async function loadHistData(_isRetry) {
     const cachedPm  = localStorage.getItem('notapub_txPm');
     if (cachedCat) HIST.txCat = JSON.parse(cachedCat);
     if (cachedPm)  HIST.txPm  = JSON.parse(cachedPm);
+    // HIST.opex itself was never backfilled here before — on a timeout/error this left
+    // it at its initial [], silently wiping every previous month from the calendar and
+    // Insights even though the only thing that failed was this one fetch. data-store.js's
+    // handleGetAllOpex() already keeps its own last-known-good copy of the exact same
+    // payload in localStorage (notapub_opex_cache_<spreadsheetId>) for its stale-while-
+    // revalidate path — reuse it here as a fallback instead of leaving HIST.opex empty.
+    try {
+      const ssId = DataStore.getSpreadsheetId();
+      const cachedOpex = ssId ? JSON.parse(localStorage.getItem(`notapub_opex_cache_${ssId}`) || 'null') : null;
+      if (cachedOpex && Array.isArray(cachedOpex.rows)) {
+        HIST.opex = cachedOpex.rows;
+        const now = new Date();
+        const cachedRows = JSON.parse(localStorage.getItem(curMonthCacheKey()) || 'null');
+        if (cachedRows && cachedRows.length > 0) _applyCurrentMonthRows(cachedRows, now.getFullYear(), now.getMonth()+1);
+      }
+    } catch (cacheErr) {
+      console.warn('opex cache fallback failed:', cacheErr.message);
+    }
     // Falling back to whatever's cached (often just recent months) rather than the
     // full history — mark it so the app can distinguish "loaded" from "gave up" and
     // offer to retry, instead of silently pretending history is complete.

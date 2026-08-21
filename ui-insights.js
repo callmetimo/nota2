@@ -1,7 +1,78 @@
 // ── INSIGHTS ──────────────────────────────────────────────────
 let insightsSubPage = 'accounts';
 let ccMonitorDate = new Date();
-let ccMonitorPmFilter = 'all';
+let ccMonitorPmFilter = []; // [] = "All Accounts" (no filter); otherwise array of selected PM/account names
+
+// ── Shared multi-select "Account Filter" checkbox control ─────
+// Registry keyed by container element id so the generic checkbox handlers
+// below know which options/state/onChange to use for a given rendered control.
+const acctFilterRegistry = {};
+
+function registerAcctFilter(containerId, { options, getSelected, setSelected, onChange }) {
+  acctFilterRegistry[containerId] = { options, getSelected, setSelected, onChange };
+}
+
+function acctFilterLabel(selected) {
+  if (!selected || selected.length === 0) return 'All Accounts';
+  if (selected.length === 1) return selected[0];
+  return `${selected.length} Accounts`;
+}
+
+function renderAcctFilterControl(containerId) {
+  const entry = acctFilterRegistry[containerId];
+  const container = document.getElementById(containerId);
+  if (!entry || !container) return;
+
+  const selected = entry.getSelected() || [];
+  const panelId = containerId + 'Panel';
+  const isAll = selected.length === 0;
+
+  container.innerHTML = `
+    <div class="acct-filter-wrapper">
+      <button type="button" class="acct-filter-btn" onclick="toggleAcctFilterPanel('${panelId}')">${esc(acctFilterLabel(selected))}</button>
+      <div class="acct-filter-panel" id="${panelId}" style="display:none">
+        <label class="acct-filter-row">
+          <input type="checkbox" ${isAll ? 'checked' : ''} onchange="onAcctFilterAllToggle('${containerId}')">
+          <span>All Accounts</span>
+        </label>
+        ${entry.options.map(opt => `
+        <label class="acct-filter-row">
+          <input type="checkbox" value="${esc(opt)}" ${selected.includes(opt) ? 'checked' : ''} onchange="onAcctFilterOptionToggle('${containerId}', this)">
+          <span>${esc(opt)}</span>
+        </label>`).join('')}
+      </div>
+    </div>`;
+}
+
+function toggleAcctFilterPanel(panelId) {
+  document.querySelectorAll('.acct-filter-panel').forEach(p => {
+    if (p.id !== panelId) p.style.display = 'none';
+  });
+  const panel = document.getElementById(panelId);
+  if (panel) panel.style.display = (panel.style.display === 'block') ? 'none' : 'block';
+}
+
+function onAcctFilterAllToggle(containerId) {
+  const entry = acctFilterRegistry[containerId];
+  if (!entry) return;
+  entry.setSelected([]);
+  renderAcctFilterControl(containerId);
+  document.getElementById(containerId + 'Panel').style.display = 'block';
+  entry.onChange([]);
+}
+
+function onAcctFilterOptionToggle(containerId, checkboxEl) {
+  const entry = acctFilterRegistry[containerId];
+  if (!entry) return;
+  const current = new Set(entry.getSelected() || []);
+  if (checkboxEl.checked) current.add(checkboxEl.value);
+  else current.delete(checkboxEl.value);
+  const next = Array.from(current);
+  entry.setSelected(next);
+  renderAcctFilterControl(containerId);
+  document.getElementById(containerId + 'Panel').style.display = 'block';
+  entry.onChange(next);
+}
 
 function setInsightsSubPage(sub, el) {
   insightsSubPage = sub || 'accounts';
@@ -24,7 +95,7 @@ function setInsightsSubPage(sub, el) {
     // Reset to defaults
     insightsDataType = 'expense';
     insightsMode = 'weekly';
-    insightsAccountFilterVal = 'all';
+    insightsAccountFilterVal = [];
     wSelWeek = null; mSelMonth = null; ySelYear = null; cSelCat = null;
 
     // Sync type toggle UI
@@ -42,14 +113,16 @@ function changeCCMonth(delta) {
   renderCCMonitor();
 }
 
-function onCCPmChange(val) {
-  ccMonitorPmFilter = val;
-  renderCCMonitor();
+function onCCPmChange(vals) {
+  ccMonitorPmFilter = vals;
+  renderCCMonitor(); // rebuilds #ccMonitorAccountFilterControl fresh (closed) — reopen so multi-select stays usable
+  const panel = document.getElementById('ccMonitorAccountFilterControlPanel');
+  if (panel) panel.style.display = 'block';
 }
 
 function renderInsightsAccountFilter() {
-  const select = document.getElementById('insightsAccountFilter');
-  if (!select) return;
+  const container = document.getElementById('insightsAccountFilterControl');
+  if (!container) return;
 
   let options;
   if (typeof insightsDataType !== 'undefined' && insightsDataType === 'invest') {
@@ -60,17 +133,21 @@ function renderInsightsAccountFilter() {
     options = Array.from(new Set(allPMs || []));
   }
 
-  let html = `<option value="all"${insightsAccountFilterVal === 'all' ? ' selected' : ''}>All Accounts</option>`;
-  html += options.map(pm => `<option value="${esc(pm)}"${insightsAccountFilterVal === pm ? ' selected' : ''}>${esc(pm)}</option>`).join('');
-  select.innerHTML = html;
+  registerAcctFilter('insightsAccountFilterControl', {
+    options,
+    getSelected: () => insightsAccountFilterVal,
+    setSelected: (arr) => { insightsAccountFilterVal = arr; },
+    onChange: onInsightsAccountFilterChange
+  });
+  renderAcctFilterControl('insightsAccountFilterControl');
 }
 
-function onInsightsAccountFilterChange(val) {
-  insightsAccountFilterVal = val;
-  wView = val;
-  mView = val;
-  yView = val;
-  cView = val;
+function onInsightsAccountFilterChange(vals) {
+  insightsAccountFilterVal = vals;
+  wView = vals;
+  mView = vals;
+  yView = vals;
+  cView = vals;
   renderChartTab(insightsMode);
 }
 
@@ -85,9 +162,9 @@ function renderCCMonitor() {
   // 1. Get all available payment methods (from settings/history config)
   const pmList = Array.from(new Set(allPMs || []));
 
-  const targetPms = (ccMonitorPmFilter === 'all')
+  const targetPms = (!ccMonitorPmFilter || ccMonitorPmFilter.length === 0)
     ? pmList.map(p => p.toLowerCase())
-    : [ccMonitorPmFilter.toLowerCase()];
+    : ccMonitorPmFilter.map(p => p.toLowerCase());
 
   function isMatchPM(pmVal) {
     if (!pmVal) return false;
@@ -95,8 +172,10 @@ function renderCCMonitor() {
     return targetPms.some(t => low.includes(t) || t.includes(low));
   }
 
-  const activeBillingDate  = (ccMonitorPmFilter !== 'all') ? getCCBillingDate(ccMonitorPmFilter)  : 0;
-  const activeCreditLimit  = (ccMonitorPmFilter !== 'all') ? getCCCreditLimit(ccMonitorPmFilter)  : 0;
+  // Billing date/credit limit lookups only make sense for exactly one selected account
+  const singlePmFilter    = (ccMonitorPmFilter && ccMonitorPmFilter.length === 1) ? ccMonitorPmFilter[0] : null;
+  const activeBillingDate  = singlePmFilter ? getCCBillingDate(singlePmFilter)  : 0;
+  const activeCreditLimit  = singlePmFilter ? getCCCreditLimit(singlePmFilter)  : 0;
 
   function getEffectiveBillingMonth(txDay, txY, txM0) {
     if (!activeBillingDate || !txDay || txDay <= activeBillingDate) return { y: txY, m: txM0 };
@@ -268,10 +347,7 @@ function renderCCMonitor() {
 
       <div style="display:flex;align-items:center;gap:8px">
         <span style="font-size:12px;color:var(--text2);white-space:nowrap">Account Filter:</span>
-        <select class="form-input" style="padding:6px 10px;font-size:12px;border-radius:var(--radius-sm)" onchange="onCCPmChange(this.value)">
-          <option value="all"${ccMonitorPmFilter==='all'?' selected':''}>All Accounts</option>
-          ${pmList.map(pm => `<option value="${esc(pm)}"${ccMonitorPmFilter===pm?' selected':''}>${esc(pm)}</option>`).join('')}
-        </select>
+        <div id="ccMonitorAccountFilterControl"></div>
       </div>
       
       ${creditBarHtml}
@@ -338,6 +414,14 @@ function renderCCMonitor() {
   `;
 
   container.innerHTML = html;
+
+  registerAcctFilter('ccMonitorAccountFilterControl', {
+    options: pmList,
+    getSelected: () => ccMonitorPmFilter,
+    setSelected: (arr) => { ccMonitorPmFilter = arr; },
+    onChange: onCCPmChange
+  });
+  renderAcctFilterControl('ccMonitorAccountFilterControl');
 }
 
 function setIM(mode,el){
@@ -463,7 +547,7 @@ function renderWeekly(){
   const sumEl=document.getElementById('weeklySummary');
   if(sumEl)sumEl.innerHTML=`
     <div class="summary-row">
-      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${wView === 'all' ? 'All Accounts' : wView} · ${insightsDataType.charAt(0).toUpperCase()+insightsDataType.slice(1)}</div></div>
+      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${acctFilterLabel(wView)} · ${insightsDataType.charAt(0).toUpperCase()+insightsDataType.slice(1)}</div></div>
       <div class="summary-card"><div class="s-label">vs Last Week</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Avg ${fRpS(Math.round(avgTotal))}/wk</div></div>
     </div>`;
 
@@ -591,7 +675,7 @@ function renderMonthly(){
 
   document.getElementById('monthlySummary').innerHTML=`
     <div class="summary-row">
-      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${mView === 'all' ? 'All Accounts' : mView} · ${insightsDataType.charAt(0).toUpperCase()+insightsDataType.slice(1)}</div></div>
+      <div class="summary-card"><div class="s-label">${selKey}</div><div class="s-value" style="font-size:15px">${'Rp'+Math.round(curTotal).toLocaleString('id-ID')}</div><div class="s-sub">${acctFilterLabel(mView)} · ${insightsDataType.charAt(0).toUpperCase()+insightsDataType.slice(1)}</div></div>
       <div class="summary-card"><div class="s-label">vs Last Month</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Avg ${fRpS(Math.round(avgTotal))}/mo</div></div>
     </div>`;
 
@@ -651,7 +735,7 @@ function renderYearly(){
 
   document.getElementById('yearlySummary').innerHTML=`
     <div class="summary-row">
-      <div class="summary-card"><div class="s-label">${selY}</div><div class="s-value">${fRpS(curTotal)}</div><div class="s-sub">${yView === 'all' ? 'All Accounts' : yView} · ${insightsDataType.charAt(0).toUpperCase()+insightsDataType.slice(1)}</div></div>
+      <div class="summary-card"><div class="s-label">${selY}</div><div class="s-value">${fRpS(curTotal)}</div><div class="s-sub">${acctFilterLabel(yView)} · ${insightsDataType.charAt(0).toUpperCase()+insightsDataType.slice(1)}</div></div>
       <div class="summary-card"><div class="s-label">vs Last Year</div><div class="s-value" style="color:${trendColor}">${trendStr}</div><div class="s-sub">Prev: ${fRpS(prevTotal)}</div></div>
     </div>`;
 

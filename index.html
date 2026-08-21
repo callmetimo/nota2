@@ -143,6 +143,14 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .autocomplete-item:last-child{border-bottom:none}
 .autocomplete-item:active{background:var(--accent-dim);color:var(--accent)}
 .ac-hint{font-size:10px;color:var(--text2)}
+.acct-filter-wrapper{position:relative;display:inline-block}
+.acct-filter-btn{padding:6px 10px;font-size:12px;border-radius:var(--radius-sm);background:var(--bg3);border:0.5px solid var(--border);color:var(--text);cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.acct-filter-btn:after{content:'';width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid var(--text2)}
+.acct-filter-panel{position:absolute;top:100%;left:0;right:auto;min-width:180px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--radius-sm);z-index:200;max-height:240px;overflow-y:auto;overscroll-behavior:contain;margin-top:3px;padding:4px 12px}
+.acct-filter-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid var(--border);cursor:pointer}
+.acct-filter-row:last-child{border-bottom:none}
+.acct-filter-row input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);flex-shrink:0}
+.acct-filter-row span{font-size:13px}
 .date-input-hidden{position:absolute;opacity:0;inset:0;width:100%;height:100%;cursor:pointer;z-index:1}
 .date-display{width:100%;background:var(--bg3);border:0.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:11px 12px;font-size:16px;font-family:inherit;cursor:pointer;display:flex;align-items:center;justify-content:space-between;transition:border-color 0.2s}
 .date-display svg{opacity:0.35;flex-shrink:0}
@@ -786,8 +794,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <div class="insights-sticky">
         <div class="chart-card" style="margin-bottom:8px;padding:8px 12px;display:flex;align-items:center;gap:8px" id="insightsAccountFilterGroup">
           <span style="font-size:12px;color:var(--text2);white-space:nowrap">Account Filter:</span>
-          <select class="form-input" id="insightsAccountFilter" style="padding:6px 10px;font-size:12px;border-radius:var(--radius-sm)" onchange="onInsightsAccountFilterChange(this.value)">
-          </select>
+          <div id="insightsAccountFilterControl"></div>
         </div>
         <!-- Row 2: Data type + Category -->
         <div class="toggle-row" id="insightsTypeToggle" style="margin-bottom:8px">
@@ -1760,11 +1767,11 @@ function setHoldingsGroupFilter(type, el) {
   toggleActive('.holdings-group-btn', el);
   renderNetWorth();
 }
-let wView='all', wRange=4, wSelWeek=null, wSelCat=null;
-let mView='all', mRange=3, mSelMonth=null, mSelCat=null;
-let yView='all', yRange=3, ySelYear=null, ySelCat=null;
-let cView='all', cRange=3, cSelCat=null;
-let insightsAccountFilterVal = 'all';
+let wView=[], wRange=4, wSelWeek=null, wSelCat=null;
+let mView=[], mRange=3, mSelMonth=null, mSelCat=null;
+let yView=[], yRange=3, ySelYear=null, ySelCat=null;
+let cView=[], cRange=3, cSelCat=null;
+let insightsAccountFilterVal = [];
 
 // ── COMBINED DATA ROWS ────────────────────────────────────────
 function getAllOpexRows() {
@@ -1788,13 +1795,21 @@ function getAllOpexRows() {
   return [...hist, ...local];
 }
 
+// Multi-select account filter: `view` is an array of selected account/PM names
+// (case-insensitive); an empty/falsy array means "All Accounts" (no filtering).
+function accountFilterSet(view) {
+  if (!view || (Array.isArray(view) && view.length === 0)) return null;
+  const arr = Array.isArray(view) ? view : [view];
+  return new Set(arr.map(v => String(v).toLowerCase().trim()));
+}
+
 function getRows(view) {
   const hist = getAllOpexRows()
     .filter(r => r.exp && r.cat !== 'Investment' && r.cat !== 'Transfer')
     .map(r => isCreditCardPM(r.pm) ? applyBillingCycle(r) : r);
-  if (!view || view === 'all') return hist;
-  const lowView = String(view).toLowerCase().trim();
-  return hist.filter(r => r.pm && r.pm.toLowerCase().trim() === lowView);
+  const wanted = accountFilterSet(view);
+  if (!wanted) return hist;
+  return hist.filter(r => r.pm && wanted.has(r.pm.toLowerCase().trim()));
 }
 
 function getRowsForType(view, dataType) {
@@ -1813,9 +1828,9 @@ function getRowsForType(view, dataType) {
         cat:   r.cat || 'Income',
         _type: 'income',
       }));
-    if (!view || view === 'all') return all;
-    const lv = String(view).toLowerCase().trim();
-    return all.filter(r => r.pm && r.pm.toLowerCase().trim() === lv);
+    const wanted = accountFilterSet(view);
+    if (!wanted) return all;
+    return all.filter(r => r.pm && wanted.has(r.pm.toLowerCase().trim()));
   }
 
   // Invest: Buy transactions, grouped by asset type via getAssetTypeForItem
@@ -1833,10 +1848,10 @@ function getRowsForType(view, dataType) {
         pm:    r.account || '',   // mapped to pm so account filter logic is uniform
         _type: 'invest',
       }));
-    if (!view || view === 'all') return all;
-    // Filter by invest account name (case-insensitive exact match on r.account)
-    const lv = String(view).toLowerCase().trim();
-    return all.filter(r => r.pm && r.pm.toLowerCase().trim() === lv);
+    // Filter by invest account name(s) (case-insensitive exact match on r.account)
+    const wanted = accountFilterSet(view);
+    if (!wanted) return all;
+    return all.filter(r => r.pm && wanted.has(r.pm.toLowerCase().trim()));
   }
 
   return getRows(view); // fallback
@@ -1950,6 +1965,8 @@ function selectAC(fid,val){
 document.addEventListener('click',e=>{
   if(!e.target.closest('.autocomplete-wrapper'))
     document.querySelectorAll('.autocomplete-list').forEach(d=>d.style.display='none');
+  if(!e.target.closest('.acct-filter-wrapper'))
+    document.querySelectorAll('.acct-filter-panel').forEach(d=>d.style.display='none');
 });
 
 // ── CC INSTALLMENT OPTIONS ────────────────────────────────────

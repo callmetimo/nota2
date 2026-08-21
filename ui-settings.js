@@ -345,7 +345,7 @@ function goToHoldings() {
 
 function tapAccountCard(accountName) {
   const account = CONFIG_ITEMS.find(i => i.kind === 'account' && i.name === accountName);
-  let pmToFilter = 'all';
+  let pmToFilter = null;
   if (account) {
     if (account.linkedPM) {
       const exactPm = (allPMs || []).find(p => p.toLowerCase() === account.linkedPM.toLowerCase());
@@ -355,7 +355,7 @@ function tapAccountCard(accountName) {
       pmToFilter = exactPm || account.name;
     }
   }
-  ccMonitorPmFilter = pmToFilter;
+  ccMonitorPmFilter = pmToFilter ? [pmToFilter] : [];
   ccMonitorDate = new Date();
   
   // Clear search input query

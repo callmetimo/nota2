@@ -1201,7 +1201,10 @@ async function fetchCurrentMonthFresh() {
   const m = today.getMonth() + 1;
   const cacheKey = curMonthCacheKey(y, m);
   try {
-    const res = await fetch(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' });
+    // Bound this the same way as fetchCurrentMonth()/loadHistData() (index.html) —
+    // a raw fetch() here routes through requireReady()/Auth.getAccessToken() and can
+    // hang forever if a stuck token wait is never resolved (see auth.js _tokenReady).
+    const res = await fetchWithTimeout(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' }, 10000);
     const j = await res.json();
     if (j.status === 'ok' && Array.isArray(j.rows)) {
       const prev = localStorage.getItem(cacheKey);

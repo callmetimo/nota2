@@ -22,6 +22,19 @@
 //
 // New users (no cached spreadsheetId) still get the classic flow:
 //   splash → silent attempt → Sign in with Google button.
+//
+// ── INSTALLED iOS HOME SCREEN APP (STANDALONE) CAVEAT ──────────────────────
+// On an installed "Add to Home Screen" iOS app, the interactive Google popup
+// can open and then close on its own without ever completing — a known
+// WebKit/GIS limitation of the standalone webclip runtime (broken
+// window.opener/postMessage relay, and/or Google's own embedded-user-agent
+// policy), not something fixable purely from this app's JS. Since that can
+// leave _tokenReady permanently unresolved, every path that can strand it
+// (triggerFirstTapSync()'s catch, getAccessToken()'s deferred-mode wait)
+// rejects/re-arms it and fires a `notaTokenStuck` window event instead of
+// hanging forever — index.html listens for this to surface a Home-page retry
+// banner (with an "open in Safari" escape hatch on standalone) well before
+// any network-level timeout would otherwise expire.
 
 const Auth = (() => {
   let tokenClient = null;
@@ -37,8 +50,20 @@ const Auth = (() => {
   // Phase 2: unblocks getAccessToken() / actual Sheets API calls. Resolves
   // only once a real Google access token has been obtained (on first tap for
   // returning users; immediately after sign-in for new users).
-  let tokenReadyResolve;
-  const _tokenReady = new Promise(res => { tokenReadyResolve = res; });
+  //
+  // Re-armable: a failed token attempt (e.g. the popup opens and closes on its
+  // own — seen on iOS installed-PWA/standalone launches) rejects the current
+  // promise, unblocking anything already waiting on it, then arms a fresh one
+  // so a later retry (via the Home page's stuck-recovery banner, or the sign-in
+  // overlay) can still resolve cleanly. See getAccessToken() and
+  // triggerFirstTapSync()'s catch branch below.
+  let tokenReadyResolve, tokenReadyReject;
+  function _armTokenReady() {
+    const p = new Promise((res, rej) => { tokenReadyResolve = res; tokenReadyReject = rej; });
+    p.catch(() => {}); // avoid "unhandled rejection" console noise before anyone awaits it
+    return p;
+  }
+  let _tokenReady = _armTokenReady();
 
   // Whether we are in "deferred token" mode — i.e. Auth.ready has resolved
   // but we are still waiting for the first tap to get a Google token.
@@ -69,10 +94,18 @@ const Auth = (() => {
     },
     showSignIn() {
       this.ensure();
+      // A returning user (spreadsheet already exists) landing here means a token
+      // attempt failed and needs a retry — "create your own spreadsheet" copy
+      // would be confusing/wrong for them, so show reconnect-appropriate text.
+      const returning = !!localStorage.getItem('notaPublic_spreadsheetId');
+      const intro = returning
+        ? `<p>Reconnecting to Google — tap below to finish signing in and pick
+             up right where you left off.</p>`
+        : `<p>Sign in with Google to create your own private Nota spreadsheet.
+             Your data stays in a Google Sheet in your own Drive — this app
+             never sees your other files.</p>`;
       this.el.querySelector('#notaAuthBody').innerHTML = `
-        <p>Sign in with Google to create your own private Nota spreadsheet.
-           Your data stays in a Google Sheet in your own Drive — this app
-           never sees your other files.</p>
+        ${intro}
         <button id="notaSignInBtn" type="button">Sign in with Google</button>
         <p class="nota-auth-status" id="notaAuthStatus"></p>
         <p class="nota-auth-links"><a href="privacy.html" target="_blank">Privacy</a> · <a href="terms.html" target="_blank">Terms</a></p>`;
@@ -146,9 +179,11 @@ const Auth = (() => {
     });
   }
 
-  // Full sign-in flow used for new users and when the overlay sign-in button
-  // is tapped. Shows the overlay, opens Google OAuth, then bootstraps the
-  // spreadsheet before resolving both ready and _tokenReady.
+  // Full sign-in flow used for new users, when the overlay sign-in button is
+  // tapped, and by the Home page's stuck-recovery banner. Shows the overlay,
+  // opens Google OAuth, then bootstraps the spreadsheet before resolving both
+  // ready and _tokenReady. Returns true/false so callers (like the recovery
+  // banner) can tell whether it actually succeeded — it never throws.
   async function signIn() {
     overlay.showSignIn();
     const btn = document.getElementById('notaSignInBtn');
@@ -168,6 +203,7 @@ const Auth = (() => {
       readyResolve();
       tokenReadyResolve();
       overlay.hide();
+      return true;
     } catch (err) {
       console.error('[auth] sign-in failed', err);
       overlay.setStatus('Sign-in failed: ' + err.message + ' — try again.');
@@ -175,6 +211,7 @@ const Auth = (() => {
         btn.disabled = false;
         btn.textContent = 'Sign in with Google';
       }
+      return false;
     }
   }
 
@@ -197,8 +234,17 @@ const Auth = (() => {
     } catch (err) {
       console.warn('[auth] first-tap token request failed, showing sign-in', err);
       _deferredMode = false;
+      // Unblock anything already waiting on the old _tokenReady (e.g. a concurrent
+      // fetchCurrentMonthFresh() call stuck inside getAccessToken()), then arm a
+      // fresh one so a later retry can still resolve cleanly instead of staying
+      // permanently stranded for the rest of this page load.
+      tokenReadyReject(err);
+      _tokenReady = _armTokenReady();
+      // Let the Home page know immediately, rather than only after a fetch's own
+      // timeout expires — Nota's stuck-recovery banner listens for this.
+      window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: 'first-tap-failed' } }));
       // Show the full overlay — signIn() called from the button will resolve
-      // _tokenReady (via the same tokenReadyResolve reference in signIn()).
+      // _tokenReady (via the same tokenReadyResolve reference captured above).
       overlay.showSignIn();
       return false;
     }
@@ -211,9 +257,26 @@ const Auth = (() => {
   async function getAccessToken() {
     if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
 
-    // In deferred mode, patiently wait for the first-tap sync to provide a token.
+    // In deferred mode, wait for the first-tap sync to provide a token — but
+    // bounded. A failed first-tap attempt already rejects/re-arms _tokenReady
+    // itself (see triggerFirstTapSync()'s catch above); this timeout is
+    // defense-in-depth for any other caller that reaches this await mid-attempt.
     if (_deferredMode) {
-      await _tokenReady;
+      const TOKEN_WAIT_TIMEOUT_MS = 10000;
+      try {
+        await Promise.race([
+          _tokenReady,
+          new Promise((_, rej) => setTimeout(() => rej(new Error('token wait timed out')), TOKEN_WAIT_TIMEOUT_MS))
+        ]);
+      } catch (err) {
+        window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: err.message } }));
+        // Don't auto-retry the popup from here — this call may be deep inside a
+        // background fetch with no real user gesture behind it, and GIS popups
+        // need one (iOS blocks/kills gesture-less popups). Let the caller's
+        // existing error handling degrade gracefully, same as any failed fetch;
+        // recovery happens when the user taps the Home page's retry banner.
+        throw err;
+      }
       if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
     }
 

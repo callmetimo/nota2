@@ -520,6 +520,17 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 
 <!-- HOME (CALENDAR) -->
 <div class="page active" id="page-home">
+  <!-- Shown when sign-in/data-loading gets stuck (e.g. an iOS installed-PWA
+       OAuth popup that opened and closed without completing) so recovery is
+       always reachable in-app — no reinstall required. Hidden by default;
+       wired up in the DOMContentLoaded handler below. -->
+  <div class="stuck-recovery-banner" id="stuckRecoveryBanner" style="display:none">
+    <span class="stuck-recovery-msg">Still connecting to Google…</span>
+    <div class="stuck-recovery-actions">
+      <button id="stuckRecoveryBtn" type="button">Retry sign-in</button>
+      <a id="stuckRecoveryEscape" href="#">Reload the page</a>
+    </div>
+  </div>
   <div class="cal-scroll" id="calScroll">
     <div class="cal-scroll-hint" id="calScrollHint" onclick="calRevealOlder()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 15l-6-6-6 6"/></svg>
@@ -1301,6 +1312,14 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .nota-auth-status{min-height:18px;font-size:13px;opacity:0.8}
 .nota-auth-links{font-size:12px;opacity:0.6}
 .nota-auth-links a{color:inherit}
+.stuck-recovery-banner{position:sticky;top:0;z-index:500;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;background:#3a2f0f;color:#fff;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.1)}
+.stuck-recovery-msg{flex:1 1 auto;min-width:140px}
+.stuck-recovery-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+#stuckRecoveryBtn{padding:6px 14px;font-size:13px;font-weight:600;border:none;border-radius:8px;
+  background:#1a73e8;color:#fff;cursor:pointer}
+#stuckRecoveryBtn:disabled{opacity:0.6}
+#stuckRecoveryEscape{color:#8ab4f8;font-size:13px;text-decoration:underline;white-space:nowrap}
 </style>
 <script src="https://accounts.google.com/gsi/client" defer></script>
 <script src="config.js"></script>
@@ -3871,6 +3890,88 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
     }
     document.addEventListener('click', _onFirstTap, { capture: true });
+  })();
+
+  // ── STUCK-SIGN-IN RECOVERY BANNER ───────────────────────────────────────
+  // Surfaces a tappable retry affordance if sign-in/data-loading is still
+  // stuck a few seconds after launch (e.g. an iOS installed-PWA OAuth popup
+  // that opened and closed without completing — see auth.js's standalone
+  // caveat). Two independent triggers, whichever fires first:
+  //   1. auth.js's `notaTokenStuck` event — fired as soon as it knows for
+  //      certain a token attempt failed or timed out.
+  //   2. A fixed watchdog delay that re-checks the actual visible symptom
+  //      (skeleton never replaced, or the persistent "Loading data…" toast
+  //      never cleared) so it never fires on a merely-slow-but-fine load.
+  // Deliberately one generic mechanism for every platform — not iOS-only —
+  // so it also covers e.g. a desktop browser blocking the popup. Standalone
+  // detection is used for exactly one thing: the escape-hatch link's label.
+  (function() {
+    const STUCK_WATCHDOG_MS = 9000;
+    const banner = document.getElementById('stuckRecoveryBanner');
+    const btn = document.getElementById('stuckRecoveryBtn');
+    const escapeLink = document.getElementById('stuckRecoveryEscape');
+    let shown = false;
+
+    function isStandalone() {
+      return navigator.standalone === true ||
+        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    }
+
+    function isStillStuck() {
+      const skeletonVisible = isHome() && !calInited;
+      const toastEl = document.getElementById('toast');
+      const toastStuck = toastEl && toastEl.classList.contains('show') && toastEl.classList.contains('loading');
+      return skeletonVisible || toastStuck;
+    }
+
+    function showBanner() {
+      if (shown) return;
+      shown = true;
+      if (isStandalone()) {
+        escapeLink.textContent = 'Open Nota in Safari instead';
+        escapeLink.href = location.href;
+        escapeLink.target = '_blank';
+        escapeLink.rel = 'noopener';
+        escapeLink.onclick = null;
+      } else {
+        escapeLink.textContent = 'Reload the page';
+        escapeLink.href = '#';
+        escapeLink.removeAttribute('target');
+        escapeLink.onclick = (e) => { e.preventDefault(); location.reload(); };
+      }
+      banner.style.display = 'flex';
+    }
+
+    function hideBanner() {
+      shown = false;
+      banner.style.display = 'none';
+    }
+
+    window.addEventListener('notaTokenStuck', showBanner);
+    setTimeout(() => { if (isStillStuck()) showBanner(); }, STUCK_WATCHDOG_MS);
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Retrying…';
+      try {
+        // Gesture-driven: invoked synchronously from this click, so the popup
+        // it opens isn't blocked. signIn() never throws — check its result.
+        const ok = await Auth.signIn();
+        if (!ok) return; // signIn() already re-enabled its own button/status
+        hideBanner();
+        showToast('Loading data…', 'loading', 0);
+        const [, freshMonth] = await Promise.all([loadHistData(), fetchCurrentMonthFresh()]);
+        patchCurMonthCache();
+        calInited = false;
+        if (isHome()) initCalendar();
+        showToast(freshMonth ? '✓ Updated' : 'Connected ✓', 'success', 3000);
+      } catch (err) {
+        console.warn('[home] stuck-recovery retry failed', err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Retry sign-in';
+      }
+    });
   })();
 
   // Fire-and-forget: repopulates allCategories/allPMs/allStocks/allAccounts/CAT_COLORS/

@@ -1911,6 +1911,18 @@ function todayISO(){const d=new Date();return`${d.getFullYear()}-${String(d.getM
 function isoDisp(iso){if(!iso)return'';const[y,m,d]=iso.split('-');return`${parseInt(d)} ${MO[parseInt(m)-1]} ${y}`}
 function isoSheetDate(iso){const[y,m,d]=iso.split('-');return`${parseInt(d)} ${MO[parseInt(m)-1]} ${y.slice(-2)}`}
 function isoMonthKey(iso){const[y,m]=iso.split('-');return`${MO[parseInt(m)-1]} ${y}`}
+// Billing-cycle-aware Month for opex rows: CC PMs with a configured billing date roll
+// transactions after that day into the next month's bucket (mirrors applyBillingCycle()
+// in ui-settings.js / getEffectiveBillingMonth() in ui-insights.js, but at write time).
+function getBillingMonthKey(iso, pm) {
+  const billingDate = (typeof getCCBillingDate === 'function') ? getCCBillingDate(pm) : 0;
+  if (!billingDate) return isoMonthKey(iso);
+  const [y, m, d] = iso.split('-').map(Number); // m is 1-12
+  if (d <= billingDate) return isoMonthKey(iso);
+  let nextM0 = m, nextY = y; // m (1-12) is already "next month" 0-indexed
+  if (nextM0 > 11) { nextM0 = 0; nextY++; }
+  return `${MO[nextM0]} ${nextY}`;
+}
 function isFutureTransaction(txDateISO){return txDateISO && txDateISO > todayISO()}
 function curMonthBounds(){return{min:'2019-01-01',max:'2099-12-31'}}
 
@@ -3001,7 +3013,7 @@ function openEditOverlayFromRow(row, dateStr) {
   // Store original identifying info so the server can find the row by content
   // when rowIndex is unavailable (old Apps Script cache / stale response).
   overlayEditOrigDate  = dateStr ? isoSheetDate(dateStr) : '';
-  overlayEditOrigMonth = dateStr ? isoMonthKey(dateStr)  : '';
+  overlayEditOrigMonth = dateStr ? getBillingMonthKey(dateStr, tx.pm) : '';
   overlayEditOrigTx    = tx.tx  || '';
   overlayEditOrigAmt   = amt || 0;
   overlayEditOrigInc   = (tx.inc || 0) > 0;
@@ -3083,7 +3095,7 @@ async function updateTransaction() {
 
   const payload = {
     type: 'opex', action: 'edit', rowIndex, id,
-    date: isoSheetDate(date), month: isoMonthKey(date),
+    date: isoSheetDate(date), month: getBillingMonthKey(date, pm),
     cat, tx, pm, amount, notes, isIncome: isInc, future: isFuture,
     origDate, origMonth, origTx, origAmt, origIsIncome: origInc
   };
@@ -3318,7 +3330,7 @@ async function syncOpex(r) {
   try {
     const sheetDate = isoSheetDate(r.date);
     const monthHeader = isoMonthKey(r.date);
-    const month = isoMonthKey(r.date);
+    const month = getBillingMonthKey(r.date, r.pm);
     const payload = {
       type:'opex', action:r.type,
       date:sheetDate, month, monthHeader,

@@ -76,6 +76,14 @@ const Auth = (() => {
   // the difference.
   let _firstTapAttempted = false;
 
+  // Detects an installed "Add to Home Screen" iOS app (vs. a normal Safari tab).
+  // Single source of truth — index.html's stuck-recovery banner uses the exported
+  // Auth.isStandalone() below instead of keeping its own duplicate copy.
+  function isStandaloneMode() {
+    return navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  }
+
   // Two content modes share one full-screen card: a bare "splash" (logo +
   // loading text, no button) shown while we check for an existing session,
   // and the full interactive sign-in prompt shown only when needed.
@@ -230,11 +238,25 @@ const Auth = (() => {
   async function triggerFirstTapSync() {
     if (!_deferredMode) return false; // already have a token or not in deferred mode
     _firstTapAttempted = true;
-    console.log('[auth] first tap — obtaining Google token');
+    // EXPERIMENTAL (installed iOS PWA only): prompt:'' (silent reuse) has been
+    // reported to reliably fail on the very first popup attempt of a fresh
+    // standalone launch — a known WebKit/GIS limitation of the standalone
+    // webclip runtime (see the caveat at the top of this file) — always
+    // requiring an explicit second tap via the stuck-recovery banner, whose
+    // retry uses this exact same requestToken('') call and succeeds. Working
+    // theory: Google's SDK only falls back to a lighter interactive flow after
+    // a first silent attempt fails within the same page load, and the broken
+    // relay specifically affects the silent path. Forcing that interactive-style
+    // prompt on the very first attempt (standalone only) skips the doomed silent
+    // step outright. Untested trade-off: can occasionally show a visible
+    // account-chooser needing a tap even on a single-account device, in exchange
+    // for likely not needing a second tap in the common case. Left as '' for
+    // every other context, where the silent-reuse flow already works invisibly
+    // and reliably.
+    const promptMode = isStandaloneMode() ? 'select_account' : '';
+    console.log('[auth] first tap — obtaining Google token', { promptMode });
     try {
-      // '' avoids re-showing consent for a user who already granted access;
-      // Google will resolve without a visible prompt if the session is active.
-      await requestToken('');
+      await requestToken(promptMode);
       _deferredMode = false;
       tokenReadyResolve();
       console.log('[auth] token obtained on first tap');
@@ -395,7 +417,8 @@ const Auth = (() => {
     // hand — e.g. the first tap succeeded fine and the only real problem was a
     // slow background data fetch. Without this, retrying always reopened a
     // redundant Google popup and restarted DataStore.bootstrap() for no reason.
-    hasValidToken: () => !!(accessToken && Date.now() < tokenExpiresAt - 60000) };
+    hasValidToken: () => !!(accessToken && Date.now() < tokenExpiresAt - 60000),
+    isStandalone: isStandaloneMode };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

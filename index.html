@@ -12,7 +12,18 @@
 <title>Nota</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- Non-blocking font load: a plain rel=stylesheet link here would hold up the
+     very first paint (including the static boot splash below) until Google
+     Fonts responds, which on a slow/cold connection was a real contributor to
+     several blank seconds before anything appeared. media="print" makes the
+     browser fetch it at low priority without blocking render; the onload swap
+     applies it once it's actually ready. &display=swap in the URL already makes
+     DM Sans itself swap in over the system-font fallback (see body{font-family})
+     rather than blocking text from rendering, so there's no FOIT risk either
+     way — this just also stops it blocking the *page's* first paint. -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
 <style>
 :root{
   --bg:#000;--bg2:#111;--bg3:#1c1c1e;--bg4:#2c2c2e;
@@ -505,9 +516,30 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .recurring-prompt-tx{font-size:14px;font-weight:600;color:var(--text)}
 .recurring-prompt-meta{font-size:12px;color:var(--text2)}
 .recurring-prompt-amt{font-size:14px;font-weight:700;white-space:nowrap}
+
+/* Static, JS-free boot splash — see #notaBootSplash below for why this exists.
+   Pure CSS/system fonts only: it must be able to paint before any external
+   resource (webfont, script) has necessarily finished loading. */
+#notaBootSplash{position:fixed;inset:0;z-index:100000;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;background:var(--bg)}
+#notaBootSplash img{width:64px;height:64px;border-radius:16px;animation:notaBootPulse 1.6s ease-in-out infinite}
+#notaBootSplash span{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;
+  font-size:13px;color:var(--text2);letter-spacing:0.2px}
+@keyframes notaBootPulse{0%,100%{opacity:1}50%{opacity:0.45}}
 </style>
 </head>
 <body>
+<!-- Static boot splash: plain HTML/CSS with no JS or external-resource
+     dependency, so it's the earliest thing that can possibly paint on a cold
+     launch — before webfonts or the app's own scripts have loaded, and well
+     before Auth.js's own (JS-driven, blank-until-ready) splash overlay can run.
+     Without this, a slow connection could show a bare black rectangle (the
+     page's own --bg color, correctly applied, just with nothing on top of it
+     yet) for several real seconds, reading as frozen/broken rather than
+     loading. Removed at the very top of the DOMContentLoaded handler below,
+     the moment real content (the calendar skeleton, or Auth's own overlay for
+     a brand-new user) is about to take over. -->
+<div id="notaBootSplash"><img src="icon.png" alt=""><span>Nota</span></div>
 
 <div class="header" id="appHeader">
   <div class="header-top">
@@ -3881,6 +3913,11 @@ async function loadHistData(_isRetry) {
 
 // ── INIT v3.5: Render from cache instantly, fetch in background ──
 window.addEventListener('DOMContentLoaded', async () => {
+  // Real content is about to take over (the calendar skeleton below, or Auth's
+  // own overlay for a brand-new user) — drop the static pre-JS boot splash
+  // first so there's no visible gap or double-flash between the two.
+  document.getElementById('notaBootSplash')?.remove();
+
   updateHeaderHeight();
   window.addEventListener('resize', updateHeaderHeight);
   initDatePicker('inputDateRaw', 'inputDateDisplay', 'inputDateText');
@@ -3946,11 +3983,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     let stuckAnyTapArmed = false;
     let recovering = false;
 
-    function isStandalone() {
-      return navigator.standalone === true ||
-        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-    }
-
     function isStillStuck() {
       // Only the calendar's own render state counts as "stuck" — a lingering
       // "Loading data…" toast for a background full-history sync (which can
@@ -3984,7 +4016,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     function showBanner() {
       if (shown) return;
       shown = true;
-      if (isStandalone()) {
+      if (Auth.isStandalone()) {
         escapeLink.textContent = 'Open Nota in Safari instead';
         escapeLink.href = location.href;
         escapeLink.target = '_blank';

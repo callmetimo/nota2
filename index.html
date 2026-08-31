@@ -1327,6 +1327,38 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 <script src="data-store.js"></script>
 <script src="auth.js"></script>
 
+<!-- ── ONE-SHOT FIRST-TAP LISTENER ──────────────────────────────────────────
+     Deliberately its own tiny script, placed immediately after auth.js rather
+     than inside the DOMContentLoaded handler further down. That handler can't
+     run until every remaining <script> tag below (the rest of this inline
+     block, then ui-settings.js/ui-calendar.js/ui-insights.js) has finished
+     loading and executing — but the calendar skeleton (plain HTML, already
+     parsed by this point) paints well before that. A tap in that gap used to
+     land on nothing listening yet and be silently lost — confirmed directly
+     from a screen recording showing a real ~5s dead window between the
+     skeleton appearing and a tap having any effect. Kept minimal and
+     self-contained (no dependency on showToast()/hideToast() or other
+     helpers defined later in the document, other than inside a callback that
+     only fires long after the full page has loaded) so it's safe to run this
+     early. We use capture phase so this fires before any other handler, and
+     we listen on click (not touchstart) because Google's GIS popup requires a
+     robust user gesture to avoid popup blockers, and click is universally
+     accepted. -->
+<script>
+(function() {
+  async function _onFirstTap() {
+    document.removeEventListener('click', _onFirstTap, true);
+    const success = await Auth.triggerFirstTapSync();
+    if (success) {
+      window.addEventListener('notaBackgroundSyncComplete', () => {
+        if (typeof showToast === 'function') showToast('Synced ✓', 'success');
+      }, { once: true });
+    }
+  }
+  document.addEventListener('click', _onFirstTap, { capture: true });
+})();
+</script>
+
 <script>
 // ── HTTPS ENFORCEMENT ─────────────────────────────────────────
 // Redirect http → https in production (localhost is exempt for dev)
@@ -3873,24 +3905,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   // safe to call this early since it just chains onto that promise internally.
   Auth.markAppReady();
 
-  // ── ONE-SHOT FIRST-TAP LISTENER ─────────────────────────────────────────
-  // For returning users, Auth.ready resolves immediately from the localStorage
-  // cache but the Google token is deferred until the user's first physical tap.
-  // We use capture phase so this fires before any other handler, and we listen
-  // on click (not touchstart) because Google's GIS popup requires a robust
-  // user gesture to avoid popup blockers, and click is universally accepted.
-  (function() {
-    async function _onFirstTap() {
-      document.removeEventListener('click', _onFirstTap, true);
-      const success = await Auth.triggerFirstTapSync();
-      if (success) {
-        window.addEventListener('notaBackgroundSyncComplete', () => {
-          showToast('Synced ✓', 'success');
-        }, { once: true });
-      }
-    }
-    document.addEventListener('click', _onFirstTap, { capture: true });
-  })();
+  // The one-shot first-tap listener used to be set up here, but that meant it
+  // wasn't attached until DOMContentLoaded — which can't fire until several
+  // blocking <script> tags below finish loading, even though the calendar
+  // skeleton (plain HTML) already paints well before that. Confirmed directly
+  // from a screen recording: an early tap landed on nothing listening yet and
+  // was silently lost, adding a real ~5s dead window before anything visibly
+  // happened. It's now registered immediately after auth.js's own <script>
+  // tag instead — see there for the actual listener.
 
   // ── STUCK-SIGN-IN RECOVERY BANNER ───────────────────────────────────────
   // Surfaces a tappable retry affordance if sign-in/data-loading is still

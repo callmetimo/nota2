@@ -1346,13 +1346,45 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
      accepted. -->
 <script>
 (function() {
+  // Sets the shared #toast element directly (same element/classes showToast()
+  // itself uses — top-right corner, per .header-right's existing placement —
+  // just not calling that function, since it's defined later in the document
+  // and this listener is deliberately attached before that's guaranteed to
+  // exist). Between the first tap and either success or the recovery banner
+  // showing, the calendar sits on its skeleton with nothing explaining why —
+  // this gives the user a persistent, accurate "something is happening"
+  // message instead of silence.
+  function setToast(msg) {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.className = 'toast show loading';
+  }
+  function clearToast() {
+    const t = document.getElementById('toast');
+    if (t) t.className = 'toast';
+  }
   async function _onFirstTap() {
     document.removeEventListener('click', _onFirstTap, true);
+    setToast('Connecting to Google…');
     const success = await Auth.triggerFirstTapSync();
     if (success) {
+      // Token obtained — the boot-time data fetch (kicked off separately,
+      // independent of this tap) may still be running, especially with no
+      // warm cache. Update the message instead of clearing it so the user
+      // isn't left looking at a stale "Connecting…" during what's now
+      // actually a data-loading wait; the cold-load sequence further down
+      // (DOMContentLoaded) still owns clearing/replacing this toast once
+      // data actually finishes, via its own showToast()/hideToast() calls.
+      setToast('Loading data…');
       window.addEventListener('notaBackgroundSyncComplete', () => {
         if (typeof showToast === 'function') showToast('Synced ✓', 'success');
       }, { once: true });
+    } else {
+      // Failed — the recovery banner (shown separately via the notaTokenStuck
+      // event this dispatches) is the primary explanation now; clear the
+      // toast rather than leave "Connecting…" lingering alongside it.
+      clearToast();
     }
   }
   document.addEventListener('click', _onFirstTap, { capture: true });

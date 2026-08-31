@@ -3952,10 +3952,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     function isStillStuck() {
-      const skeletonVisible = isHome() && !calInited;
-      const toastEl = document.getElementById('toast');
-      const toastStuck = toastEl && toastEl.classList.contains('show') && toastEl.classList.contains('loading');
-      return skeletonVisible || toastStuck;
+      // Only the calendar's own render state counts as "stuck" — a lingering
+      // "Loading data…" toast for a background full-history sync (which can
+      // legitimately run for HIST_LOAD_TIMEOUT_MS+ once initCalendar() has
+      // already shown real current-month data) is not evidence of a real
+      // problem. Treating it as one was the same false-positive pattern already
+      // fixed once for this watchdog's timing (Session 36) — the toast-based
+      // signal was still separately exposed to it. A genuine failure (bad/expired
+      // token, blocked popup) is still caught immediately via notaTokenStuck,
+      // independent of this check.
+      return isHome() && !calInited;
     }
 
     // Tap-anywhere recovery: once the banner is showing for a genuine reason (the
@@ -4009,10 +4015,18 @@ window.addEventListener('DOMContentLoaded', async () => {
       recovering = true;
       if (triggerEl) { triggerEl.disabled = true; triggerEl.textContent = 'Retrying…'; }
       try {
-        // Gesture-driven: invoked synchronously from a click (button or tap-anywhere),
-        // so the popup it opens isn't blocked. signIn() never throws — check its result.
-        const ok = await Auth.signIn();
-        if (!ok) return; // signIn() already re-enabled its own overlay button/status
+        // Skip the OAuth popup entirely if a valid token is already in hand — the
+        // first tap may well have succeeded fine, with the actual problem being a
+        // slow background data fetch, not sign-in. Auth.signIn() would otherwise
+        // reopen a redundant Google popup and restart DataStore.bootstrap() for no
+        // reason (this is the "second flash popup" that used to appear on retry).
+        // Gesture-driven when it IS needed: invoked synchronously from a click
+        // (button or tap-anywhere), so the popup it opens isn't blocked. signIn()
+        // never throws — check its result.
+        if (!Auth.hasValidToken()) {
+          const ok = await Auth.signIn();
+          if (!ok) return; // signIn() already re-enabled its own overlay button/status
+        }
         hideBanner();
         showToast('Loading data…', 'loading', 0);
         const [, freshMonth] = await Promise.all([loadHistData(), fetchCurrentMonthFresh()]);
@@ -4125,22 +4139,38 @@ window.addEventListener('DOMContentLoaded', async () => {
       hideToast();
     }
   } else {
-    // No cache — sequential load (first visit)
+    // No cache. Not just brand-new users — onInactive() (below) deliberately
+    // clears curMonthCacheKey() on the 30-min idle timeout but leaves
+    // notapub_txCat alone, so this is also the path taken on effectively every
+    // "reopen the app after a break" launch for a returning user. Fetch the
+    // current month and the full multi-year history concurrently instead of
+    // sequentially: the current month is what initCalendar() actually needs to
+    // show a real calendar, and it's bounded far faster (race against 15s below)
+    // than a full history sync (HIST_LOAD_TIMEOUT_MS = 30s+). Previously
+    // loadHistData() ran first and fully blocked initCalendar() behind it,
+    // leaving users staring at a bare skeleton for 30+ seconds even though their
+    // current month was ready in a few.
     showToast('Loading data…', 'loading', 0);
-    await loadHistData();
-    // Race fetchCurrentMonth against a 8s timeout so a hung network never
-    // prevents initCalendar from running (e.g. no internet, sandboxed preview).
+    const _histFetch = loadHistData(); // continues in the background; re-render below once it settles
     const _monthFetch = fetchCurrentMonth();
     await Promise.race([_monthFetch, new Promise(r => setTimeout(r, 15000))]);
     patchCurMonthCache();
-    hideToast();
-    hideStuckBanner(); // load finished on its own — don't leave a stale banner up
     calInited = false;
     if (isHome()) initCalendar();
-    // If Apps Script was cold and timed out above, re-render when it eventually finishes.
-    // If it instead failed outright (transient network/auth hiccup on cold launch),
-    // retry a couple times with backoff instead of leaving the calendar empty until
-    // the user happens to revisit the Home tab (which re-triggers fetchCurrentMonth).
+    // Full history is likely still loading in the background — re-render once it
+    // resolves so older months and any HIST.opex-derived aggregates (Insights, Net
+    // Worth) reflect complete data, then clear the toast/banner. loadHistData()
+    // never actually rejects (it self-catches and falls back to cache), so this
+    // always eventually fires.
+    _histFetch.then(() => {
+      patchCurMonthCache();
+      calInited = false;
+      if (isHome()) initCalendar();
+      hideToast();
+      hideStuckBanner();
+    });
+    // If the current-month fetch itself hadn't resolved by the race above (very
+    // slow network), keep retrying it in the background same as before.
     _monthFetch
       .then(() => { patchCurMonthCache(); calInited = false; if (isHome()) initCalendar(); })
       .catch(async (err) => {

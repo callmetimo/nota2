@@ -361,7 +361,13 @@ const Auth = (() => {
   }
 
   return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, ready, markAppReady,
-    hasAttemptedFirstTap: () => _firstTapAttempted };
+    hasAttemptedFirstTap: () => _firstTapAttempted,
+    // Lets a manual retry (the Home page's stuck-recovery banner/tap-anywhere)
+    // skip Auth.signIn()'s OAuth popup entirely when a valid token is already in
+    // hand — e.g. the first tap succeeded fine and the only real problem was a
+    // slow background data fetch. Without this, retrying always reopened a
+    // redundant Google popup and restarted DataStore.bootstrap() for no reason.
+    hasValidToken: () => !!(accessToken && Date.now() < tokenExpiresAt - 60000) };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

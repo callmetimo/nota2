@@ -1379,6 +1379,56 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 <script src="data-store.js"></script>
 <script src="auth.js"></script>
 
+<!-- ── ONE-SHOT FIRST-TAP LISTENER ──────────────────────────────────────────
+     Deliberately its own tiny script, placed immediately after auth.js rather
+     than inside the DOMContentLoaded handler further down. That handler can't
+     run until every remaining <script> tag below (the rest of this inline
+     block, then ui-settings.js/ui-calendar.js/ui-insights.js) has finished
+     loading and executing — but the boot splash and calendar skeleton (plain
+     HTML, already parsed by this point) paint well before that. A tap in that
+     gap used to land on nothing listening yet and be silently lost, adding a
+     real, confusing few-second delay before anything visibly happened. Kept
+     minimal and self-contained (direct DOM style toggles, no dependency on
+     showToast()/hideToast() or other helpers defined later in the document)
+     so it's safe to run this early — everything it does touch (auth.js, and
+     #connectingIndicator/#toast which are static markup near the top of
+     <body>, already parsed) is guaranteed available by this point.
+     We use capture phase so this fires before any other handler, and we
+     listen on click (not touchstart) because Google's GIS popup requires a
+     robust user gesture to avoid popup blockers, and click is universally
+     accepted. -->
+<script>
+(function() {
+  async function _onFirstTap() {
+    document.removeEventListener('click', _onFirstTap, true);
+    // Immediate visible feedback: requestToken() (auth.js) silently awaits
+    // Google's sign-in script finishing loading before it can even open a
+    // popup, and the popup itself takes a moment — without this, that wait
+    // looks exactly like nothing happened.
+    const indicator = document.getElementById('connectingIndicator');
+    if (indicator) { indicator.textContent = 'Connecting to Google…'; indicator.style.display = 'block'; }
+    const success = await Auth.triggerFirstTapSync();
+    if (success) {
+      // Sign-in succeeded, but the boot-time data fetch (kicked off
+      // separately once DOMContentLoaded runs, further down) may well still
+      // be in flight — especially with no warm cache. Keep the indicator up
+      // with updated text instead of hiding it and leaving the user staring
+      // at a blank/skeleton calendar with no explanation; the main script's
+      // cold-load sequence hides it once data actually finishes loading (see
+      // hideConnectingIndicator() there), or notaBackgroundSyncComplete does.
+      if (indicator) indicator.textContent = 'Syncing your data…';
+      window.addEventListener('notaBackgroundSyncComplete', () => {
+        if (indicator) indicator.style.display = 'none';
+        if (typeof showToast === 'function') showToast('Synced ✓', 'success');
+      }, { once: true });
+    } else if (indicator) {
+      indicator.style.display = 'none'; // the overlay/recovery banner take over on failure
+    }
+  }
+  document.addEventListener('click', _onFirstTap, { capture: true });
+})();
+</script>
+
 <script>
 // ── HTTPS ENFORCEMENT ─────────────────────────────────────────
 // Redirect http → https in production (localhost is exempt for dev)
@@ -3469,6 +3519,16 @@ function showToast(msg,type,duration){
 function hideToast(){
   const t=document.getElementById('toast');t.className='toast';
 }
+// Dismisses the "Connecting to Google…"/"Syncing your data…" indicator shown
+// by the early first-tap listener (see the small <script> right after
+// auth.js's tag). A plain style toggle, not a closure-tracked show/hide pair
+// like hideStuckBanner() — #connectingIndicator has no armed listeners or
+// other state to unwind, so any caller can safely call this directly once
+// data has actually finished loading.
+function hideConnectingIndicator(){
+  const el = document.getElementById('connectingIndicator');
+  if (el) el.style.display = 'none';
+}
 
 // ── SEARCH FUNCTIONS ──────────────────────────────────────────
 let searchTimeout;
@@ -3969,37 +4029,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   // can dismiss the banner on a normal successful load without needing a tap.
   let hideStuckBanner = () => {};
 
-  // ── ONE-SHOT FIRST-TAP LISTENER ─────────────────────────────────────────
-  // For returning users, Auth.ready resolves immediately from the localStorage
-  // cache but the Google token is deferred until the user's first physical tap.
-  // We use capture phase so this fires before any other handler, and we listen
-  // on click (not touchstart) because Google's GIS popup requires a robust
-  // user gesture to avoid popup blockers, and click is universally accepted.
-  (function() {
-    async function _onFirstTap() {
-      document.removeEventListener('click', _onFirstTap, true);
-      // Immediate visible feedback: requestToken() (auth.js) silently awaits
-      // Google's sign-in script finishing loading before it can even open a
-      // popup — normally fast, but can now be a real, user-visible wait since
-      // the calendar itself renders much sooner than it used to (the
-      // boot-splash/font fixes), so a tap can land before that script has
-      // necessarily finished loading in the background. Without this, that
-      // wait looks exactly like nothing happened.
-      const indicator = document.getElementById('connectingIndicator');
-      indicator.style.display = 'block';
-      try {
-        const success = await Auth.triggerFirstTapSync();
-        if (success) {
-          window.addEventListener('notaBackgroundSyncComplete', () => {
-            showToast('Synced ✓', 'success');
-          }, { once: true });
-        }
-      } finally {
-        indicator.style.display = 'none';
-      }
-    }
-    document.addEventListener('click', _onFirstTap, { capture: true });
-  })();
+  // The one-shot first-tap listener used to be set up here, but that meant it
+  // wasn't attached until DOMContentLoaded — which can't fire until several
+  // blocking <script> tags finish loading, even though the boot splash and
+  // calendar skeleton (plain HTML) already paint well before that. An early
+  // tap landed on nothing listening yet and was silently lost. It's now
+  // registered immediately after auth.js's own <script> tag instead — see
+  // there for the actual listener.
 
   // ── STUCK-SIGN-IN RECOVERY BANNER ───────────────────────────────────────
   // Surfaces a tappable retry affordance if sign-in/data-loading is still
@@ -4115,6 +4151,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           if (!ok) return; // signIn() already re-enabled its own overlay button/status
         }
         hideBanner();
+        hideConnectingIndicator(); // in case it was still up from the original first tap
         showToast('Loading data…', 'loading', 0);
         const [, freshMonth] = await Promise.all([loadHistData(), fetchCurrentMonthFresh()]);
         patchCurMonthCache();
@@ -4217,6 +4254,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     patchCurMonthCache();
     calInited = false;
     hideStuckBanner(); // load finished on its own — don't leave a stale banner up
+    hideConnectingIndicator();
     if (isHome()) {
       if (calOlderShown) calRefreshOlderMonths();
       initCalendar();
@@ -4260,6 +4298,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (isHome()) initCalendar();
       hideToast();
       hideStuckBanner();
+      hideConnectingIndicator();
     });
     // If the current-month fetch itself failed, keep retrying it in the
     // background same as before.

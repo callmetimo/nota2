@@ -343,8 +343,17 @@ const Auth = (() => {
     // bounded. A failed first-tap attempt already rejects/re-arms _tokenReady
     // itself (see triggerFirstTapSync()'s catch above); this timeout is
     // defense-in-depth for any other caller that reaches this await mid-attempt.
+    //
+    // Must be at least as long as requestToken()'s own INTERACTIVE_PROMPT_TIMEOUT_MS
+    // — otherwise this gives up on a token that's still legitimately in-flight
+    // (e.g. the user genuinely still reading/tapping an account-chooser popup),
+    // showing the recovery banner and falling loadHistData()/fetchCurrentMonth()
+    // back to degraded/cached data seconds before the real sign-in succeeds on
+    // its own. Same class of bug as the STUCK_WATCHDOG_MS/HIST_LOAD_TIMEOUT_MS
+    // mismatch fixed in an earlier session — derive one from the other so they
+    // can't drift apart again, rather than picking two independent numbers.
     if (_deferredMode) {
-      const TOKEN_WAIT_TIMEOUT_MS = 10000;
+      const TOKEN_WAIT_TIMEOUT_MS = INTERACTIVE_PROMPT_TIMEOUT_MS + 2000;
       try {
         await Promise.race([
           _tokenReady,

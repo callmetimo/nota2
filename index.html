@@ -12,27 +12,7 @@
 <title>Nota</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<!-- Hints the browser to fetch Google's sign-in script early/at higher priority,
-     even though the actual <script defer> tag for it is much further down the
-     body. Since the boot-splash/font fixes above made the calendar itself
-     interactive much sooner, a user can now tap before this script has
-     necessarily finished loading in the background — requestToken() silently
-     awaits it (waitForGis()), which on a slow connection can now be a real,
-     user-visible wait that didn't used to be reachable before those fixes. This
-     doesn't guarantee it's ready in time, but gives it a head start. -->
-<link rel="preload" as="script" href="https://accounts.google.com/gsi/client">
-<!-- Non-blocking font load: a plain rel=stylesheet link here would hold up the
-     very first paint (including the static boot splash below) until Google
-     Fonts responds, which on a slow/cold connection was a real contributor to
-     several blank seconds before anything appeared. media="print" makes the
-     browser fetch it at low priority without blocking render; the onload swap
-     applies it once it's actually ready. &display=swap in the URL already makes
-     DM Sans itself swap in over the system-font fallback (see body{font-family})
-     rather than blocking text from rendering, so there's no FOIT risk either
-     way — this just also stops it blocking the *page's* first paint. -->
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap">
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-<noscript><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#000;--bg2:#111;--bg3:#1c1c1e;--bg4:#2c2c2e;
@@ -525,30 +505,9 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .recurring-prompt-tx{font-size:14px;font-weight:600;color:var(--text)}
 .recurring-prompt-meta{font-size:12px;color:var(--text2)}
 .recurring-prompt-amt{font-size:14px;font-weight:700;white-space:nowrap}
-
-/* Static, JS-free boot splash — see #notaBootSplash below for why this exists.
-   Pure CSS/system fonts only: it must be able to paint before any external
-   resource (webfont, script) has necessarily finished loading. */
-#notaBootSplash{position:fixed;inset:0;z-index:100000;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:14px;background:var(--bg)}
-#notaBootSplash img{width:64px;height:64px;border-radius:16px;animation:notaBootPulse 1.6s ease-in-out infinite}
-#notaBootSplash span{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;
-  font-size:13px;color:var(--text2);letter-spacing:0.2px}
-@keyframes notaBootPulse{0%,100%{opacity:1}50%{opacity:0.45}}
 </style>
 </head>
 <body>
-<!-- Static boot splash: plain HTML/CSS with no JS or external-resource
-     dependency, so it's the earliest thing that can possibly paint on a cold
-     launch — before webfonts or the app's own scripts have loaded, and well
-     before Auth.js's own (JS-driven, blank-until-ready) splash overlay can run.
-     Without this, a slow connection could show a bare black rectangle (the
-     page's own --bg color, correctly applied, just with nothing on top of it
-     yet) for several real seconds, reading as frozen/broken rather than
-     loading. Removed at the very top of the DOMContentLoaded handler below,
-     the moment real content (the calendar skeleton, or Auth's own overlay for
-     a brand-new user) is about to take over. -->
-<div id="notaBootSplash"><img src="icon.png" alt=""><span>Nota</span></div>
 
 <div class="header" id="appHeader">
   <div class="header-top">
@@ -572,14 +531,6 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <a id="stuckRecoveryEscape" href="#">Reload the page</a>
     </div>
   </div>
-  <!-- Purely informational, non-actionable — shown the instant the first tap
-       fires and hidden once it settles either way. requestToken() silently
-       awaits Google's sign-in script finishing loading before it can even open
-       a popup; without this, a tap that's waiting on that looks exactly like
-       nothing happened. Deliberately separate from #stuckRecoveryBanner (which
-       is actionable and only appears on a real failure) so the two states
-       don't get confused with each other. -->
-  <div class="connecting-indicator" id="connectingIndicator" style="display:none">Connecting to Google…</div>
   <div class="cal-scroll" id="calScroll">
     <div class="cal-scroll-hint" id="calScrollHint" onclick="calRevealOlder()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 15l-6-6-6 6"/></svg>
@@ -1369,65 +1320,12 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
   background:#1a73e8;color:#fff;cursor:pointer}
 #stuckRecoveryBtn:disabled{opacity:0.6}
 #stuckRecoveryEscape{color:#8ab4f8;font-size:13px;text-decoration:underline;white-space:nowrap}
-.connecting-indicator{position:sticky;top:0;z-index:499;padding:8px 14px;
-  background:var(--bg2);color:var(--text2);font-size:12px;text-align:center;
-  border-bottom:0.5px solid var(--border)}
 </style>
 <script src="https://accounts.google.com/gsi/client" defer></script>
 <script src="config.js"></script>
 <script src="sheets-client.js"></script>
 <script src="data-store.js"></script>
 <script src="auth.js"></script>
-
-<!-- ── ONE-SHOT FIRST-TAP LISTENER ──────────────────────────────────────────
-     Deliberately its own tiny script, placed immediately after auth.js rather
-     than inside the DOMContentLoaded handler further down. That handler can't
-     run until every remaining <script> tag below (the rest of this inline
-     block, then ui-settings.js/ui-calendar.js/ui-insights.js) has finished
-     loading and executing — but the boot splash and calendar skeleton (plain
-     HTML, already parsed by this point) paint well before that. A tap in that
-     gap used to land on nothing listening yet and be silently lost, adding a
-     real, confusing few-second delay before anything visibly happened. Kept
-     minimal and self-contained (direct DOM style toggles, no dependency on
-     showToast()/hideToast() or other helpers defined later in the document)
-     so it's safe to run this early — everything it does touch (auth.js, and
-     #connectingIndicator/#toast which are static markup near the top of
-     <body>, already parsed) is guaranteed available by this point.
-     We use capture phase so this fires before any other handler, and we
-     listen on click (not touchstart) because Google's GIS popup requires a
-     robust user gesture to avoid popup blockers, and click is universally
-     accepted. -->
-<script>
-(function() {
-  async function _onFirstTap() {
-    document.removeEventListener('click', _onFirstTap, true);
-    // Immediate visible feedback: requestToken() (auth.js) silently awaits
-    // Google's sign-in script finishing loading before it can even open a
-    // popup, and the popup itself takes a moment — without this, that wait
-    // looks exactly like nothing happened.
-    const indicator = document.getElementById('connectingIndicator');
-    if (indicator) { indicator.textContent = 'Connecting to Google…'; indicator.style.display = 'block'; }
-    const success = await Auth.triggerFirstTapSync();
-    if (success) {
-      // Sign-in succeeded, but the boot-time data fetch (kicked off
-      // separately once DOMContentLoaded runs, further down) may well still
-      // be in flight — especially with no warm cache. Keep the indicator up
-      // with updated text instead of hiding it and leaving the user staring
-      // at a blank/skeleton calendar with no explanation; the main script's
-      // cold-load sequence hides it once data actually finishes loading (see
-      // hideConnectingIndicator() there), or notaBackgroundSyncComplete does.
-      if (indicator) indicator.textContent = 'Syncing your data…';
-      window.addEventListener('notaBackgroundSyncComplete', () => {
-        if (indicator) indicator.style.display = 'none';
-        if (typeof showToast === 'function') showToast('Synced ✓', 'success');
-      }, { once: true });
-    } else if (indicator) {
-      indicator.style.display = 'none'; // the overlay/recovery banner take over on failure
-    }
-  }
-  document.addEventListener('click', _onFirstTap, { capture: true });
-})();
-</script>
 
 <script>
 // ── HTTPS ENFORCEMENT ─────────────────────────────────────────
@@ -1692,15 +1590,6 @@ let curMonthLastFetch = 0;
 // time this one resolves, its result is discarded instead of applied.
 let curMonthFetchSeq = 0;
 
-// Same reasoning as HIST_LOAD_TIMEOUT_MS further down: this fetch can also
-// start before sign-in has actually finished, so it must budget for
-// Auth.REQUEST_TOKEN_TIMEOUT_MS on top of its own actual network budget
-// (10000 was the whole timeout before deferred-mode auth existed — kept here
-// as just the network-fetch component). An outer timeout shorter than the
-// token wait alone is what repeatedly made this fetch give up before sign-in
-// could finish.
-const MONTH_FETCH_TIMEOUT_MS = Auth.REQUEST_TOKEN_TIMEOUT_MS + 10000;
-
 async function fetchCurrentMonth(force, overrideY, overrideM) {
   const mySeq = ++curMonthFetchSeq;
   const now = Date.now();
@@ -1726,7 +1615,7 @@ async function fetchCurrentMonth(force, overrideY, overrideM) {
     // See loadHistData()'s comment — bound this the same way so a stuck
     // Auth.ready/_tokenReady wait can't hang this call (and therefore
     // initCalendar()) forever.
-    const res = await fetchWithTimeout(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' }, MONTH_FETCH_TIMEOUT_MS);
+    const res = await fetchWithTimeout(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' }, 10000);
     const j = await res.json();
     if (j.status === 'ok' && Array.isArray(j.rows)) {
       localStorage.setItem(cacheKey, JSON.stringify(j.rows));
@@ -2022,18 +1911,6 @@ function todayISO(){const d=new Date();return`${d.getFullYear()}-${String(d.getM
 function isoDisp(iso){if(!iso)return'';const[y,m,d]=iso.split('-');return`${parseInt(d)} ${MO[parseInt(m)-1]} ${y}`}
 function isoSheetDate(iso){const[y,m,d]=iso.split('-');return`${parseInt(d)} ${MO[parseInt(m)-1]} ${y.slice(-2)}`}
 function isoMonthKey(iso){const[y,m]=iso.split('-');return`${MO[parseInt(m)-1]} ${y}`}
-// Billing-cycle-aware Month for opex rows: CC PMs with a configured billing date roll
-// transactions after that day into the next month's bucket (mirrors applyBillingCycle()
-// in ui-settings.js / getEffectiveBillingMonth() in ui-insights.js, but at write time).
-function getBillingMonthKey(iso, pm) {
-  const billingDate = (typeof getCCBillingDate === 'function') ? getCCBillingDate(pm) : 0;
-  if (!billingDate) return isoMonthKey(iso);
-  const [y, m, d] = iso.split('-').map(Number); // m is 1-12
-  if (d <= billingDate) return isoMonthKey(iso);
-  let nextM0 = m, nextY = y; // m (1-12) is already "next month" 0-indexed
-  if (nextM0 > 11) { nextM0 = 0; nextY++; }
-  return `${MO[nextM0]} ${nextY}`;
-}
 function isFutureTransaction(txDateISO){return txDateISO && txDateISO > todayISO()}
 function curMonthBounds(){return{min:'2019-01-01',max:'2099-12-31'}}
 
@@ -3124,7 +3001,7 @@ function openEditOverlayFromRow(row, dateStr) {
   // Store original identifying info so the server can find the row by content
   // when rowIndex is unavailable (old Apps Script cache / stale response).
   overlayEditOrigDate  = dateStr ? isoSheetDate(dateStr) : '';
-  overlayEditOrigMonth = dateStr ? getBillingMonthKey(dateStr, tx.pm) : '';
+  overlayEditOrigMonth = dateStr ? isoMonthKey(dateStr)  : '';
   overlayEditOrigTx    = tx.tx  || '';
   overlayEditOrigAmt   = amt || 0;
   overlayEditOrigInc   = (tx.inc || 0) > 0;
@@ -3206,7 +3083,7 @@ async function updateTransaction() {
 
   const payload = {
     type: 'opex', action: 'edit', rowIndex, id,
-    date: isoSheetDate(date), month: getBillingMonthKey(date, pm),
+    date: isoSheetDate(date), month: isoMonthKey(date),
     cat, tx, pm, amount, notes, isIncome: isInc, future: isFuture,
     origDate, origMonth, origTx, origAmt, origIsIncome: origInc
   };
@@ -3441,7 +3318,7 @@ async function syncOpex(r) {
   try {
     const sheetDate = isoSheetDate(r.date);
     const monthHeader = isoMonthKey(r.date);
-    const month = getBillingMonthKey(r.date, r.pm);
+    const month = isoMonthKey(r.date);
     const payload = {
       type:'opex', action:r.type,
       date:sheetDate, month, monthHeader,
@@ -3518,16 +3395,6 @@ function showToast(msg,type,duration){
 }
 function hideToast(){
   const t=document.getElementById('toast');t.className='toast';
-}
-// Dismisses the "Connecting to Google…"/"Syncing your data…" indicator shown
-// by the early first-tap listener (see the small <script> right after
-// auth.js's tag). A plain style toggle, not a closure-tracked show/hide pair
-// like hideStuckBanner() — #connectingIndicator has no armed listeners or
-// other state to unwind, so any caller can safely call this directly once
-// data has actually finished loading.
-function hideConnectingIndicator(){
-  const el = document.getElementById('connectingIndicator');
-  if (el) el.style.display = 'none';
 }
 
 // ── SEARCH FUNCTIONS ──────────────────────────────────────────
@@ -3905,19 +3772,6 @@ function initSearchPage() {
 // Nota Public has no data.json bulk-history snapshot (unlike the original Nota app
 // this was forked from) — full Opex history is fetched directly from the user's
 // own Sheet via ?type=allOpex instead.
-// Deliberately generous budget for a full-history sync. Must cover BOTH: (a)
-// Auth.REQUEST_TOKEN_TIMEOUT_MS — this fetch can start before sign-in has
-// actually finished (deferred mode), so getAccessToken() may legitimately make
-// it wait that long first — and (b) the actual sheet download/parse afterward,
-// which can itself take a while for an account with years of transactions.
-// 30000 was that budget for (b) alone, from before deferred-mode auth existed;
-// kept as the "actual fetch" component, not the whole budget. An outer timeout
-// here shorter than (a) alone was the recurring bug across several sessions —
-// derive, don't pick an independent number.
-// The stuck-recovery watchdog (further down) derives its own delay from this
-// constant so the two can never drift apart from each other either.
-const HIST_LOAD_TIMEOUT_MS = Auth.REQUEST_TOKEN_TIMEOUT_MS + 30000;
-
 async function loadHistData(_isRetry) {
   try {
     // fetchWithTimeout (not a raw fetch) — this call routes through
@@ -3930,7 +3784,7 @@ async function loadHistData(_isRetry) {
     // tighter bound here was cutting the fetch off before it legitimately
     // finished, wiping every previous month from the calendar/Insights even
     // though sign-in and the network were both fine.
-    const res = await fetchWithTimeout(apiGet('type=allOpex'), { method: 'GET' }, HIST_LOAD_TIMEOUT_MS);
+    const res = await fetchWithTimeout(apiGet('type=allOpex'), { method: 'GET' }, 30000);
     const j = await res.json();
     if (j.status !== 'ok' || !Array.isArray(j.rows)) throw new Error('bad allOpex response');
     HIST.opex = j.rows;
@@ -4007,11 +3861,6 @@ async function loadHistData(_isRetry) {
 
 // ── INIT v3.5: Render from cache instantly, fetch in background ──
 window.addEventListener('DOMContentLoaded', async () => {
-  // Real content is about to take over (the calendar skeleton below, or Auth's
-  // own overlay for a brand-new user) — drop the static pre-JS boot splash
-  // first so there's no visible gap or double-flash between the two.
-  document.getElementById('notaBootSplash')?.remove();
-
   updateHeaderHeight();
   window.addEventListener('resize', updateHeaderHeight);
   initDatePicker('inputDateRaw', 'inputDateDisplay', 'inputDateText');
@@ -4024,18 +3873,24 @@ window.addEventListener('DOMContentLoaded', async () => {
   // safe to call this early since it just chains onto that promise internally.
   Auth.markAppReady();
 
-  // Bound to the stuck-recovery banner's real hideBanner() once that IIFE (below)
-  // runs. Exists so the cold-load code further down — outside that IIFE's scope —
-  // can dismiss the banner on a normal successful load without needing a tap.
-  let hideStuckBanner = () => {};
-
-  // The one-shot first-tap listener used to be set up here, but that meant it
-  // wasn't attached until DOMContentLoaded — which can't fire until several
-  // blocking <script> tags finish loading, even though the boot splash and
-  // calendar skeleton (plain HTML) already paint well before that. An early
-  // tap landed on nothing listening yet and was silently lost. It's now
-  // registered immediately after auth.js's own <script> tag instead — see
-  // there for the actual listener.
+  // ── ONE-SHOT FIRST-TAP LISTENER ─────────────────────────────────────────
+  // For returning users, Auth.ready resolves immediately from the localStorage
+  // cache but the Google token is deferred until the user's first physical tap.
+  // We use capture phase so this fires before any other handler, and we listen
+  // on click (not touchstart) because Google's GIS popup requires a robust
+  // user gesture to avoid popup blockers, and click is universally accepted.
+  (function() {
+    async function _onFirstTap() {
+      document.removeEventListener('click', _onFirstTap, true);
+      const success = await Auth.triggerFirstTapSync();
+      if (success) {
+        window.addEventListener('notaBackgroundSyncComplete', () => {
+          showToast('Synced ✓', 'success');
+        }, { once: true });
+      }
+    }
+    document.addEventListener('click', _onFirstTap, { capture: true });
+  })();
 
   // ── STUCK-SIGN-IN RECOVERY BANNER ───────────────────────────────────────
   // Surfaces a tappable retry affordance if sign-in/data-loading is still
@@ -4051,57 +3906,28 @@ window.addEventListener('DOMContentLoaded', async () => {
   // so it also covers e.g. a desktop browser blocking the popup. Standalone
   // detection is used for exactly one thing: the escape-hatch link's label.
   (function() {
-    // Derived from HIST_LOAD_TIMEOUT_MS (loadHistData()'s own fetch budget, which
-    // itself budgets for a possible deferred-mode token wait — see its own
-    // comment) plus a fixed margin for one retry-backoff (1.5s) and scheduling
-    // slack — covers a single normal (even slow) load without falsely
-    // tripping, while still catching a truly hung load reasonably promptly.
-    // This is a true last resort, not the primary detector: the immediate
-    // #connectingIndicator feedback on tap, and the independent notaTokenStuck
-    // event (below, fired the moment a token attempt actually fails) both
-    // surface far sooner for any real problem.
-    const STUCK_WATCHDOG_MS = HIST_LOAD_TIMEOUT_MS + 1500 + 8500;
+    const STUCK_WATCHDOG_MS = 9000;
     const banner = document.getElementById('stuckRecoveryBanner');
     const btn = document.getElementById('stuckRecoveryBtn');
     const escapeLink = document.getElementById('stuckRecoveryEscape');
     let shown = false;
-    let stuckAnyTapArmed = false;
-    let recovering = false;
 
-    function isStillStuck() {
-      // Only the calendar's own render state counts as "stuck" — a lingering
-      // "Loading data…" toast for a background full-history sync (which can
-      // legitimately run for HIST_LOAD_TIMEOUT_MS+ once initCalendar() has
-      // already shown real current-month data) is not evidence of a real
-      // problem. Treating it as one was the same false-positive pattern already
-      // fixed once for this watchdog's timing (Session 36) — the toast-based
-      // signal was still separately exposed to it. A genuine failure (bad/expired
-      // token, blocked popup) is still caught immediately via notaTokenStuck,
-      // independent of this check.
-      return isHome() && !calInited;
+    function isStandalone() {
+      return navigator.standalone === true ||
+        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
     }
 
-    // Tap-anywhere recovery: once the banner is showing for a genuine reason (the
-    // user already tried once — see the Auth.hasAttemptedFirstTap() guard below),
-    // the user's very next tap anywhere on screen retries, instead of requiring a
-    // precisely-aimed hit on the small button. Guarded so it never fires before a
-    // first tap actually happened — in that (rare/edge) case the existing global
-    // first-tap listener above is already the correct single-tap recovery path, and
-    // letting both listeners act on the same click could fire two concurrent Google
-    // token requests (tokenClient.callback in auth.js is overwritten per-request, so
-    // a second concurrent requestToken() call can strand the first one's promise).
-    function onStuckAnyTap(e) {
-      if (e.target.closest('#stuckRecoveryBanner')) return; // let the button's own click handle it
-      if (!Auth.hasAttemptedFirstTap()) return; // defer to the original first-tap listener instead
-      document.removeEventListener('click', onStuckAnyTap, true);
-      stuckAnyTapArmed = false;
-      attemptRecovery(btn);
+    function isStillStuck() {
+      const skeletonVisible = isHome() && !calInited;
+      const toastEl = document.getElementById('toast');
+      const toastStuck = toastEl && toastEl.classList.contains('show') && toastEl.classList.contains('loading');
+      return skeletonVisible || toastStuck;
     }
 
     function showBanner() {
       if (shown) return;
       shown = true;
-      if (Auth.isStandalone()) {
+      if (isStandalone()) {
         escapeLink.textContent = 'Open Nota in Safari instead';
         escapeLink.href = location.href;
         escapeLink.target = '_blank';
@@ -4114,44 +3940,25 @@ window.addEventListener('DOMContentLoaded', async () => {
         escapeLink.onclick = (e) => { e.preventDefault(); location.reload(); };
       }
       banner.style.display = 'flex';
-      if (!stuckAnyTapArmed) { stuckAnyTapArmed = true; document.addEventListener('click', onStuckAnyTap, true); }
     }
 
     function hideBanner() {
       shown = false;
       banner.style.display = 'none';
-      if (stuckAnyTapArmed) { document.removeEventListener('click', onStuckAnyTap, true); stuckAnyTapArmed = false; }
     }
-    hideStuckBanner = hideBanner; // expose to the cold-load code further down
 
     window.addEventListener('notaTokenStuck', showBanner);
-    // A token can be obtained via paths this banner doesn't itself trigger —
-    // the full overlay's own "Sign in with Google" button, or the brand-new-user
-    // flow — none of which know this banner exists. Without this, completing
-    // sign-in through one of those left the banner stale: hidden under the
-    // higher z-index overlay while it was up, then re-exposed once it closed.
-    window.addEventListener('notaTokenObtained', hideBanner);
     setTimeout(() => { if (isStillStuck()) showBanner(); }, STUCK_WATCHDOG_MS);
 
-    async function attemptRecovery(triggerEl) {
-      if (recovering) return;
-      recovering = true;
-      if (triggerEl) { triggerEl.disabled = true; triggerEl.textContent = 'Retrying…'; }
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Retrying…';
       try {
-        // Skip the OAuth popup entirely if a valid token is already in hand — the
-        // first tap may well have succeeded fine, with the actual problem being a
-        // slow background data fetch, not sign-in. Auth.signIn() would otherwise
-        // reopen a redundant Google popup and restart DataStore.bootstrap() for no
-        // reason (this is the "second flash popup" that used to appear on retry).
-        // Gesture-driven when it IS needed: invoked synchronously from a click
-        // (button or tap-anywhere), so the popup it opens isn't blocked. signIn()
-        // never throws — check its result.
-        if (!Auth.hasValidToken()) {
-          const ok = await Auth.signIn();
-          if (!ok) return; // signIn() already re-enabled its own overlay button/status
-        }
+        // Gesture-driven: invoked synchronously from this click, so the popup
+        // it opens isn't blocked. signIn() never throws — check its result.
+        const ok = await Auth.signIn();
+        if (!ok) return; // signIn() already re-enabled its own button/status
         hideBanner();
-        hideConnectingIndicator(); // in case it was still up from the original first tap
         showToast('Loading data…', 'loading', 0);
         const [, freshMonth] = await Promise.all([loadHistData(), fetchCurrentMonthFresh()]);
         patchCurMonthCache();
@@ -4161,12 +3968,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       } catch (err) {
         console.warn('[home] stuck-recovery retry failed', err);
       } finally {
-        recovering = false;
-        if (triggerEl) { triggerEl.disabled = false; triggerEl.textContent = 'Retry sign-in'; }
+        btn.disabled = false;
+        btn.textContent = 'Retry sign-in';
       }
-    }
-
-    btn.addEventListener('click', () => attemptRecovery(btn));
+    });
   })();
 
   // Fire-and-forget: repopulates allCategories/allPMs/allStocks/allAccounts/CAT_COLORS/
@@ -4253,8 +4058,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     // current-month total and any pre-loaded older months reflect full data.
     patchCurMonthCache();
     calInited = false;
-    hideStuckBanner(); // load finished on its own — don't leave a stale banner up
-    hideConnectingIndicator();
     if (isHome()) {
       if (calOlderShown) calRefreshOlderMonths();
       initCalendar();
@@ -4264,44 +4067,21 @@ window.addEventListener('DOMContentLoaded', async () => {
       hideToast();
     }
   } else {
-    // No cache. Not just brand-new users — onInactive() (below) deliberately
-    // clears curMonthCacheKey() on the 30-min idle timeout but leaves
-    // notapub_txCat alone, so this is also the path taken on effectively every
-    // "reopen the app after a break" launch for a returning user.
-    //
-    // Render as soon as EITHER fetch below resolves — not specifically once
-    // fetchCurrentMonth() does. handleGetMonth() (data-store.js) has no
-    // server-side cache of its own and always re-fetches the ENTIRE Opex sheet
-    // (the exact same cost as the full-history fetch, just filtered down
-    // afterward) — it is NOT reliably the faster of the two, so racing
-    // specifically against its own timeout (the previous version of this fix)
-    // still left the first render gated on whichever fetch happened to be
-    // slower. loadHistData(), by contrast, goes through handleGetAllOpex()'s own
-    // stale-while-revalidate localStorage cache and can resolve almost instantly
-    // for a returning user even with no client-side month/history cache at all —
-    // and since it fetches the whole sheet too, it already contains a correct
-    // current month by itself.
+    // No cache — sequential load (first visit)
     showToast('Loading data…', 'loading', 0);
-    const _histFetch = loadHistData(); // often near-instant via its own cache; never rejects
-    const _monthFetch = fetchCurrentMonth(); // no server-side cache — can genuinely take a while, and can reject
-    await Promise.race([_histFetch, _monthFetch.catch(() => {})]); // a real fetchCurrentMonth() failure is handled by its own retry chain below, not this race
+    await loadHistData();
+    // Race fetchCurrentMonth against a 8s timeout so a hung network never
+    // prevents initCalendar from running (e.g. no internet, sandboxed preview).
+    const _monthFetch = fetchCurrentMonth();
+    await Promise.race([_monthFetch, new Promise(r => setTimeout(r, 15000))]);
     patchCurMonthCache();
+    hideToast();
     calInited = false;
     if (isHome()) initCalendar();
-    // Whichever of the two hadn't resolved yet keeps going in the background —
-    // re-render once both settle so older months, the current month, and any
-    // HIST.opex-derived aggregates (Insights, Net Worth) all reflect complete
-    // data, then clear the toast/banner.
-    Promise.all([_histFetch, _monthFetch.catch(() => {})]).then(() => {
-      patchCurMonthCache();
-      calInited = false;
-      if (isHome()) initCalendar();
-      hideToast();
-      hideStuckBanner();
-      hideConnectingIndicator();
-    });
-    // If the current-month fetch itself failed, keep retrying it in the
-    // background same as before.
+    // If Apps Script was cold and timed out above, re-render when it eventually finishes.
+    // If it instead failed outright (transient network/auth hiccup on cold launch),
+    // retry a couple times with backoff instead of leaving the calendar empty until
+    // the user happens to revisit the Home tab (which re-triggers fetchCurrentMonth).
     _monthFetch
       .then(() => { patchCurMonthCache(); calInited = false; if (isHome()) initCalendar(); })
       .catch(async (err) => {

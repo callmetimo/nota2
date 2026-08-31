@@ -65,36 +65,9 @@ const Auth = (() => {
   }
   let _tokenReady = _armTokenReady();
 
-  // Resolves _tokenReady AND lets index.html know a token was obtained,
-  // regardless of which of the three flows (new-user sign-in, first-tap sync,
-  // or a later signIn() retry) got there — so the Home page's stuck-recovery
-  // banner can hide itself on any successful path, not just the one it itself
-  // triggered. Without this, completing sign-in via the full overlay's own
-  // button (rather than the banner's) left a stale banner behind, hidden under
-  // the overlay while it was up and re-exposed once the overlay closed.
-  function _resolveTokenReady() {
-    tokenReadyResolve();
-    window.dispatchEvent(new CustomEvent('notaTokenObtained'));
-  }
-
   // Whether we are in "deferred token" mode — i.e. Auth.ready has resolved
   // but we are still waiting for the first tap to get a Google token.
   let _deferredMode = false;
-
-  // True once the user's first tap has actually attempted a token request (whether
-  // it succeeds or fails). Distinguishes "genuinely stuck after trying" from "just
-  // hasn't tapped the screen yet" — the latter is normal and not evidence of a
-  // failure, but getAccessToken()'s deferred-wait timeout below can't otherwise tell
-  // the difference.
-  let _firstTapAttempted = false;
-
-  // Detects an installed "Add to Home Screen" iOS app (vs. a normal Safari tab).
-  // Single source of truth — index.html's stuck-recovery banner uses the exported
-  // Auth.isStandalone() below instead of keeping its own duplicate copy.
-  function isStandaloneMode() {
-    return navigator.standalone === true ||
-      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-  }
 
   // Two content modes share one full-screen card: a bare "splash" (logo +
   // loading text, no button) shown while we check for an existing session,
@@ -183,65 +156,24 @@ const Auth = (() => {
   // prompt:'none'/no-gesture calls, it can log an error and never invoke the
   // token client's callback at all — leaving the caller's promise hanging
   // forever. A bounded timeout is the only way to guarantee this resolves.
-  //
-  // A single, short default for every prompt mode this app actually uses
-  // ('' and 'none') — both resolve silently in practice (a fast successful
-  // reuse, or a fast failure) in every real launch observed, so a short bound
-  // is safe and correct for both. A prior session tried a much longer bound
-  // here specifically to accommodate an experimental interactive prompt
-  // (prompt:'select_account') that needed real human time to read/tap an
-  // account chooser — that experiment was reverted (see triggerFirstTapSync()'s
-  // comment) because it made the overall flow slower and less predictable, and
-  // the long timeout it required cascaded into every layer above this one that
-  // waits on a token. If a genuinely interactive prompt is ever reintroduced,
-  // pass an explicit larger timeoutMs at that call site rather than growing
-  // this default again.
-  const REQUEST_TOKEN_TIMEOUT_MS = 6000;
-
-  async function requestToken(promptMode, timeoutMs = REQUEST_TOKEN_TIMEOUT_MS) {
+  async function requestToken(promptMode, timeoutMs = 6000) {
     await waitForGis();
     return new Promise((resolve, reject) => {
       let settled = false;
-      const startedAt = Date.now();
-      function cleanup() {
-        clearTimeout(timer);
-        document.removeEventListener('visibilitychange', onRefocusCheck);
-        window.removeEventListener('focus', onRefocusCheck);
-      }
-      function fail(err) {
+      const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        cleanup();
-        reject(err);
-      }
-      function succeed(token) {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve(token);
-      }
-      const timer = setTimeout(() => fail(new Error('timeout')), timeoutMs);
-      // Defense-in-depth against WebKit throttling or fully pausing this page's
-      // JS timers while the popup has focus (the installed-iOS-PWA caveat
-      // documented at the top of this file) — the setTimeout above can sit
-      // un-fired well past timeoutMs with nothing left to notice, stranding
-      // every caller of requestToken() (first-tap, the overlay's own button,
-      // the recovery banner's retry) on a promise that never settles. Regaining
-      // page visibility is a reliable signal independent of the timer queue —
-      // check real elapsed time directly against it rather than trusting the
-      // timer to have fired on schedule.
-      function onRefocusCheck() {
-        if (settled || document.visibilityState !== 'visible') return;
-        if (Date.now() - startedAt >= timeoutMs) fail(new Error('timeout'));
-      }
-      document.addEventListener('visibilitychange', onRefocusCheck);
-      window.addEventListener('focus', onRefocusCheck);
+        reject(new Error('timeout'));
+      }, timeoutMs);
       const client = initTokenClient();
       client.callback = (resp) => {
-        if (resp.error) { fail(new Error(resp.error)); return; }
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (resp.error) { reject(new Error(resp.error)); return; }
         accessToken = resp.access_token;
         tokenExpiresAt = Date.now() + (Number(resp.expires_in || 3300) * 1000);
-        succeed(accessToken);
+        resolve(accessToken);
       };
       client.requestAccessToken({ prompt: promptMode });
     });
@@ -269,7 +201,7 @@ const Auth = (() => {
       await DataStore.bootstrap();
       _deferredMode = false;
       readyResolve();
-      _resolveTokenReady();
+      tokenReadyResolve();
       overlay.hide();
       return true;
     } catch (err) {
@@ -290,26 +222,13 @@ const Auth = (() => {
   // full sign-in overlay so they can complete sign-in manually.
   async function triggerFirstTapSync() {
     if (!_deferredMode) return false; // already have a token or not in deferred mode
-    _firstTapAttempted = true;
-    // REVERTED (see this file's changelog of sessions): a prior session tried
-    // forcing an interactive prompt:'select_account' here for installed iOS PWA
-    // specifically, hoping to skip a WebKit/GIS popup-relay quirk that made the
-    // silent prompt:'' attempt reliably fail on the very first tap there. It
-    // made things worse in practice — an account chooser needs real,
-    // unpredictable human time to read and tap, which then needed a large
-    // timeout to accommodate, which cascaded into every layer above it that
-    // waits on a token, and the overall flow ended up slower and less
-    // predictable than the plain silent flow it replaced. Reverted back to ''
-    // for every context: in every real report gathered, '' resolves within a
-    // few seconds either way (fast successful reuse, or a fast failure) — the
-    // stuck-recovery banner (via notaTokenStuck below) already handles the
-    // failure case with a one-tap retry, which is the simpler, faster,
-    // more-predictable flow this reverts back to.
     console.log('[auth] first tap — obtaining Google token');
     try {
+      // '' avoids re-showing consent for a user who already granted access;
+      // Google will resolve without a visible prompt if the session is active.
       await requestToken('');
       _deferredMode = false;
-      _resolveTokenReady();
+      tokenReadyResolve();
       console.log('[auth] token obtained on first tap');
       return true;
     } catch (err) {
@@ -338,51 +257,25 @@ const Auth = (() => {
   async function getAccessToken() {
     if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
 
-    // In deferred mode, wait for the first-tap sync to provide a token.
-    //
-    // Two cases, deliberately handled differently instead of one shared
-    // timeout — a single fixed number here has now drifted out of sync with
-    // requestToken()'s own (correct, larger) bound three times in a row
-    // (Sessions 37/38, 41, 42), each fix just re-tuning the same fragile
-    // duplication instead of removing it:
+    // In deferred mode, wait for the first-tap sync to provide a token — but
+    // bounded. A failed first-tap attempt already rejects/re-arms _tokenReady
+    // itself (see triggerFirstTapSync()'s catch above); this timeout is
+    // defense-in-depth for any other caller that reaches this await mid-attempt.
     if (_deferredMode) {
-      if (_firstTapAttempted) {
-        // A real attempt is already in flight. requestToken() itself is already
-        // bounded (REQUEST_TOKEN_TIMEOUT_MS, with its own refocus-based rescue)
-        // and is guaranteed to settle _tokenReady
-        // one way or another by then — directly on success, or via
-        // triggerFirstTapSync()'s catch rejecting and re-arming it (which
-        // already dispatches notaTokenStuck itself). Racing an independent
-        // timeout here on top of that guarantee is exactly what kept going
-        // stale relative to it — just trust the lower layer instead of
-        // duplicating its bound.
-        await _tokenReady;
-      } else {
-        // No tap yet — don't wait indefinitely for one that might never come.
-        // This bound is purely "how long is it OK to silently wait before
-        // giving up", not a race against a slow popup (there isn't one in
-        // flight yet).
-        const NO_TAP_WAIT_TIMEOUT_MS = 10000;
-        try {
-          await Promise.race([
-            _tokenReady,
-            new Promise((_, rej) => setTimeout(() => rej(new Error('token wait timed out')), NO_TAP_WAIT_TIMEOUT_MS))
-          ]);
-        } catch (err) {
-          // _firstTapAttempted is false in this branch by construction, so
-          // this is genuinely "nobody has tapped yet" (e.g. glancing at the
-          // already-cached calendar before touching it) — normal, not a real
-          // failure, so no notaTokenStuck dispatch (that was the actual bug
-          // behind a much earlier session: firing it here unconditionally made
-          // the recovery banner appear on almost every launch).
-          //
-          // Don't auto-retry the popup from here — this call may be deep
-          // inside a background fetch with no real user gesture behind it,
-          // and GIS popups need one (iOS blocks/kills gesture-less popups).
-          // Let the caller's existing error handling degrade gracefully, same
-          // as any failed fetch.
-          throw err;
-        }
+      const TOKEN_WAIT_TIMEOUT_MS = 10000;
+      try {
+        await Promise.race([
+          _tokenReady,
+          new Promise((_, rej) => setTimeout(() => rej(new Error('token wait timed out')), TOKEN_WAIT_TIMEOUT_MS))
+        ]);
+      } catch (err) {
+        window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: err.message } }));
+        // Don't auto-retry the popup from here — this call may be deep inside a
+        // background fetch with no real user gesture behind it, and GIS popups
+        // need one (iOS blocks/kills gesture-less popups). Let the caller's
+        // existing error handling degrade gracefully, same as any failed fetch;
+        // recovery happens when the user taps the Home page's retry banner.
+        throw err;
       }
       if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
     }
@@ -422,7 +315,7 @@ const Auth = (() => {
         await DataStore.bootstrap();
         _deferredMode = false;
         readyResolve();
-        _resolveTokenReady(); // token already in hand
+        tokenReadyResolve(); // token already in hand
       } catch (err) {
         overlay.showSignIn();
       }
@@ -451,32 +344,7 @@ const Auth = (() => {
     location.reload();
   }
 
-  // Note: the refocus-based rescue for WebKit throttling/pausing this page's
-  // timers while a popup has focus (the installed-iOS-PWA caveat documented at
-  // the top of this file) used to live here as a module-level watchdog scoped
-  // only to the first deferred-mode tap. It's now built directly into
-  // requestToken() itself instead, so it applies uniformly to every caller
-  // (first tap, the overlay's own "Sign in with Google" button, the recovery
-  // banner's retry) rather than only the one path this watchdog used to cover —
-  // a retry via signIn() could freeze the exact same way and nothing here would
-  // have noticed. See requestToken()'s onRefocusCheck() above.
-
-  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, ready, markAppReady,
-    hasAttemptedFirstTap: () => _firstTapAttempted,
-    // Lets a manual retry (the Home page's stuck-recovery banner/tap-anywhere)
-    // skip Auth.signIn()'s OAuth popup entirely when a valid token is already in
-    // hand — e.g. the first tap succeeded fine and the only real problem was a
-    // slow background data fetch. Without this, retrying always reopened a
-    // redundant Google popup and restarted DataStore.bootstrap() for no reason.
-    hasValidToken: () => !!(accessToken && Date.now() < tokenExpiresAt - 60000),
-    isStandalone: isStandaloneMode,
-    // Exposed so any outer fetchWithTimeout() call that can run while sign-in
-    // might still be in deferred mode (loadHistData(), fetchCurrentMonth(),
-    // fetchCurrentMonthFresh()) can derive its own timeout from this single
-    // source instead of picking an independent number — an outer timeout
-    // shorter than this has been the recurring bug across Sessions 37/38, 41,
-    // 42, and 43. Derive, don't duplicate.
-    REQUEST_TOKEN_TIMEOUT_MS };
+  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, ready, markAppReady };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

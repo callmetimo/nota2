@@ -360,6 +360,34 @@ const Auth = (() => {
     location.reload();
   }
 
+  // ── REFOCUS WATCHDOG ────────────────────────────────────────────────────
+  // On an installed iOS PWA specifically, a GIS popup can open and close on its
+  // own without ever invoking its callback (the standalone caveat documented at
+  // the top of this file) — and while that popup has focus, WebKit can throttle
+  // or fully pause the parent page's JS timers, including the plain setTimeout()
+  // inside requestToken() and everything chained after it (the stuck-recovery
+  // banner's own watchdog). The result: the app can sit completely frozen, with
+  // nothing even scheduled to check anything, for an unpredictable stretch (users
+  // have reported 25-35s) until some later event happens to resume the timer
+  // queue — which is why a second, unrelated tap was what "fixed" it: it wasn't
+  // retrying anything, it just happened to be what unfroze the page.
+  //
+  // Regaining page visibility is a far more immediate and reliable signal that
+  // "the popup is gone, check now" than waiting on a timer that may itself have
+  // been paused during that exact window. A short delay after refocusing lets any
+  // now-unthrottled callback that's about to succeed on its own (the common,
+  // healthy case) finish first, before treating a still-pending token as stuck.
+  function _onRefocus() {
+    if (document.visibilityState !== 'visible') return;
+    setTimeout(() => {
+      if (_deferredMode && _firstTapAttempted) {
+        window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: 'refocus-still-deferred' } }));
+      }
+    }, 750);
+  }
+  document.addEventListener('visibilitychange', _onRefocus);
+  window.addEventListener('focus', _onRefocus); // redundant trigger for older/quirkier WebKit visibilitychange behavior
+
   return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, ready, markAppReady,
     hasAttemptedFirstTap: () => _firstTapAttempted,
     // Lets a manual retry (the Home page's stuck-recovery banner/tap-anywhere)

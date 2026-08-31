@@ -4142,35 +4142,40 @@ window.addEventListener('DOMContentLoaded', async () => {
     // No cache. Not just brand-new users — onInactive() (below) deliberately
     // clears curMonthCacheKey() on the 30-min idle timeout but leaves
     // notapub_txCat alone, so this is also the path taken on effectively every
-    // "reopen the app after a break" launch for a returning user. Fetch the
-    // current month and the full multi-year history concurrently instead of
-    // sequentially: the current month is what initCalendar() actually needs to
-    // show a real calendar, and it's bounded far faster (race against 15s below)
-    // than a full history sync (HIST_LOAD_TIMEOUT_MS = 30s+). Previously
-    // loadHistData() ran first and fully blocked initCalendar() behind it,
-    // leaving users staring at a bare skeleton for 30+ seconds even though their
-    // current month was ready in a few.
+    // "reopen the app after a break" launch for a returning user.
+    //
+    // Render as soon as EITHER fetch below resolves — not specifically once
+    // fetchCurrentMonth() does. handleGetMonth() (data-store.js) has no
+    // server-side cache of its own and always re-fetches the ENTIRE Opex sheet
+    // (the exact same cost as the full-history fetch, just filtered down
+    // afterward) — it is NOT reliably the faster of the two, so racing
+    // specifically against its own timeout (the previous version of this fix)
+    // still left the first render gated on whichever fetch happened to be
+    // slower. loadHistData(), by contrast, goes through handleGetAllOpex()'s own
+    // stale-while-revalidate localStorage cache and can resolve almost instantly
+    // for a returning user even with no client-side month/history cache at all —
+    // and since it fetches the whole sheet too, it already contains a correct
+    // current month by itself.
     showToast('Loading data…', 'loading', 0);
-    const _histFetch = loadHistData(); // continues in the background; re-render below once it settles
-    const _monthFetch = fetchCurrentMonth();
-    await Promise.race([_monthFetch, new Promise(r => setTimeout(r, 15000))]);
+    const _histFetch = loadHistData(); // often near-instant via its own cache; never rejects
+    const _monthFetch = fetchCurrentMonth(); // no server-side cache — can genuinely take a while, and can reject
+    await Promise.race([_histFetch, _monthFetch.catch(() => {})]); // a real fetchCurrentMonth() failure is handled by its own retry chain below, not this race
     patchCurMonthCache();
     calInited = false;
     if (isHome()) initCalendar();
-    // Full history is likely still loading in the background — re-render once it
-    // resolves so older months and any HIST.opex-derived aggregates (Insights, Net
-    // Worth) reflect complete data, then clear the toast/banner. loadHistData()
-    // never actually rejects (it self-catches and falls back to cache), so this
-    // always eventually fires.
-    _histFetch.then(() => {
+    // Whichever of the two hadn't resolved yet keeps going in the background —
+    // re-render once both settle so older months, the current month, and any
+    // HIST.opex-derived aggregates (Insights, Net Worth) all reflect complete
+    // data, then clear the toast/banner.
+    Promise.all([_histFetch, _monthFetch.catch(() => {})]).then(() => {
       patchCurMonthCache();
       calInited = false;
       if (isHome()) initCalendar();
       hideToast();
       hideStuckBanner();
     });
-    // If the current-month fetch itself hadn't resolved by the race above (very
-    // slow network), keep retrying it in the background same as before.
+    // If the current-month fetch itself failed, keep retrying it in the
+    // background same as before.
     _monthFetch
       .then(() => { patchCurMonthCache(); calInited = false; if (isHome()) initCalendar(); })
       .catch(async (err) => {

@@ -12,6 +12,15 @@
 <title>Nota</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Hints the browser to fetch Google's sign-in script early/at higher priority,
+     even though the actual <script defer> tag for it is much further down the
+     body. Since the boot-splash/font fixes above made the calendar itself
+     interactive much sooner, a user can now tap before this script has
+     necessarily finished loading in the background — requestToken() silently
+     awaits it (waitForGis()), which on a slow connection can now be a real,
+     user-visible wait that didn't used to be reachable before those fixes. This
+     doesn't guarantee it's ready in time, but gives it a head start. -->
+<link rel="preload" as="script" href="https://accounts.google.com/gsi/client">
 <!-- Non-blocking font load: a plain rel=stylesheet link here would hold up the
      very first paint (including the static boot splash below) until Google
      Fonts responds, which on a slow/cold connection was a real contributor to
@@ -563,6 +572,14 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <a id="stuckRecoveryEscape" href="#">Reload the page</a>
     </div>
   </div>
+  <!-- Purely informational, non-actionable — shown the instant the first tap
+       fires and hidden once it settles either way. requestToken() silently
+       awaits Google's sign-in script finishing loading before it can even open
+       a popup; without this, a tap that's waiting on that looks exactly like
+       nothing happened. Deliberately separate from #stuckRecoveryBanner (which
+       is actionable and only appears on a real failure) so the two states
+       don't get confused with each other. -->
+  <div class="connecting-indicator" id="connectingIndicator" style="display:none">Connecting to Google…</div>
   <div class="cal-scroll" id="calScroll">
     <div class="cal-scroll-hint" id="calScrollHint" onclick="calRevealOlder()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 15l-6-6-6 6"/></svg>
@@ -1352,6 +1369,9 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
   background:#1a73e8;color:#fff;cursor:pointer}
 #stuckRecoveryBtn:disabled{opacity:0.6}
 #stuckRecoveryEscape{color:#8ab4f8;font-size:13px;text-decoration:underline;white-space:nowrap}
+.connecting-indicator{position:sticky;top:0;z-index:499;padding:8px 14px;
+  background:var(--bg2);color:var(--text2);font-size:12px;text-align:center;
+  border-bottom:0.5px solid var(--border)}
 </style>
 <script src="https://accounts.google.com/gsi/client" defer></script>
 <script src="config.js"></script>
@@ -1622,6 +1642,15 @@ let curMonthLastFetch = 0;
 // time this one resolves, its result is discarded instead of applied.
 let curMonthFetchSeq = 0;
 
+// Same reasoning as HIST_LOAD_TIMEOUT_MS further down: this fetch can also
+// start before sign-in has actually finished, so it must budget for
+// Auth.INTERACTIVE_PROMPT_TIMEOUT_MS on top of its own actual network budget
+// (10000 was the whole timeout before deferred-mode auth existed — kept here
+// as just the network-fetch component). An outer timeout shorter than the
+// token wait alone is what repeatedly made this fetch give up before a
+// slow-but-legitimate interactive sign-in could finish.
+const MONTH_FETCH_TIMEOUT_MS = Auth.INTERACTIVE_PROMPT_TIMEOUT_MS + 10000;
+
 async function fetchCurrentMonth(force, overrideY, overrideM) {
   const mySeq = ++curMonthFetchSeq;
   const now = Date.now();
@@ -1647,7 +1676,7 @@ async function fetchCurrentMonth(force, overrideY, overrideM) {
     // See loadHistData()'s comment — bound this the same way so a stuck
     // Auth.ready/_tokenReady wait can't hang this call (and therefore
     // initCalendar()) forever.
-    const res = await fetchWithTimeout(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' }, 10000);
+    const res = await fetchWithTimeout(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' }, MONTH_FETCH_TIMEOUT_MS);
     const j = await res.json();
     if (j.status === 'ok' && Array.isArray(j.rows)) {
       localStorage.setItem(cacheKey, JSON.stringify(j.rows));
@@ -3816,13 +3845,19 @@ function initSearchPage() {
 // Nota Public has no data.json bulk-history snapshot (unlike the original Nota app
 // this was forked from) — full Opex history is fetched directly from the user's
 // own Sheet via ?type=allOpex instead.
-// Deliberately generous budget for a full-history sync (loadHistData() below can
-// legitimately take this long on real network). The stuck-recovery watchdog
-// (further down) derives its own delay from this constant so the two can never
-// drift apart again — that drift (a 9s watchdog checking a fetch budgeted for 30s)
-// is exactly what made the "Retry sign-in" banner show up on almost every normal
-// launch even though sign-in itself had succeeded.
-const HIST_LOAD_TIMEOUT_MS = 30000;
+// Deliberately generous budget for a full-history sync. Must cover BOTH: (a)
+// Auth.INTERACTIVE_PROMPT_TIMEOUT_MS — this fetch can start before sign-in has
+// actually finished (deferred mode), so getAccessToken() may legitimately make
+// it wait that long first — and (b) the actual sheet download/parse afterward,
+// which can itself take a while for an account with years of transactions. An
+// outer timeout here shorter than (a) alone has been the recurring bug across
+// several sessions (most recently: a 3rd sign-in tap was needed because this
+// fetch gave up before a slow-but-legitimate account-chooser interaction could
+// finish) — 30000 was that budget for (b) alone, from before deferred-mode
+// auth existed; kept as the "actual fetch" component, not the whole budget.
+// The stuck-recovery watchdog (further down) derives its own delay from this
+// constant so the two can never drift apart from each other either.
+const HIST_LOAD_TIMEOUT_MS = Auth.INTERACTIVE_PROMPT_TIMEOUT_MS + 30000;
 
 async function loadHistData(_isRetry) {
   try {
@@ -3944,11 +3979,24 @@ window.addEventListener('DOMContentLoaded', async () => {
   (function() {
     async function _onFirstTap() {
       document.removeEventListener('click', _onFirstTap, true);
-      const success = await Auth.triggerFirstTapSync();
-      if (success) {
-        window.addEventListener('notaBackgroundSyncComplete', () => {
-          showToast('Synced ✓', 'success');
-        }, { once: true });
+      // Immediate visible feedback: requestToken() (auth.js) silently awaits
+      // Google's sign-in script finishing loading before it can even open a
+      // popup — normally fast, but can now be a real, user-visible wait since
+      // the calendar itself renders much sooner than it used to (the
+      // boot-splash/font fixes), so a tap can land before that script has
+      // necessarily finished loading in the background. Without this, that
+      // wait looks exactly like nothing happened.
+      const indicator = document.getElementById('connectingIndicator');
+      indicator.style.display = 'block';
+      try {
+        const success = await Auth.triggerFirstTapSync();
+        if (success) {
+          window.addEventListener('notaBackgroundSyncComplete', () => {
+            showToast('Synced ✓', 'success');
+          }, { once: true });
+        }
+      } finally {
+        indicator.style.display = 'none';
       }
     }
     document.addEventListener('click', _onFirstTap, { capture: true });
@@ -3968,14 +4016,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   // so it also covers e.g. a desktop browser blocking the popup. Standalone
   // detection is used for exactly one thing: the escape-hatch link's label.
   (function() {
-    // Derived from HIST_LOAD_TIMEOUT_MS (loadHistData()'s own fetch budget) plus a
-    // fixed margin for one retry-backoff (1.5s) and deferred-first-tap/scheduling
-    // slack — covers a single normal (even slow) load without falsely tripping,
-    // while still catching a truly hung load in well under a minute. The
-    // independent notaTokenStuck event (below) still catches a real, fast failure
-    // (e.g. iOS-standalone popup silently closing) immediately — this watchdog is a
-    // slower, broader backstop, not the primary detector.
-    const STUCK_WATCHDOG_MS = HIST_LOAD_TIMEOUT_MS + 1500 + 8500; // 40000
+    // Derived from HIST_LOAD_TIMEOUT_MS (loadHistData()'s own fetch budget, which
+    // itself now includes a possible deferred-mode token wait — see its own
+    // comment) plus a fixed margin for one retry-backoff (1.5s) and
+    // scheduling slack — covers a single normal (even slow, even including a
+    // slow interactive sign-in) load without falsely tripping, while still
+    // catching a truly hung load eventually. This is now a large number
+    // (~85s) precisely because it has to cover the full worst-case chain
+    // (token wait + actual fetch) rather than either alone — but it's a true
+    // last resort: the immediate #connectingIndicator feedback on tap, and the
+    // independent notaTokenStuck event (below, fired the moment a token
+    // attempt actually fails) both surface far sooner for any real problem.
+    // This watchdog only exists to catch what neither of those would.
+    const STUCK_WATCHDOG_MS = HIST_LOAD_TIMEOUT_MS + 1500 + 8500;
     const banner = document.getElementById('stuckRecoveryBanner');
     const btn = document.getElementById('stuckRecoveryBtn');
     const escapeLink = document.getElementById('stuckRecoveryEscape');

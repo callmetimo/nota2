@@ -339,42 +339,51 @@ const Auth = (() => {
   async function getAccessToken() {
     if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
 
-    // In deferred mode, wait for the first-tap sync to provide a token — but
-    // bounded. A failed first-tap attempt already rejects/re-arms _tokenReady
-    // itself (see triggerFirstTapSync()'s catch above); this timeout is
-    // defense-in-depth for any other caller that reaches this await mid-attempt.
+    // In deferred mode, wait for the first-tap sync to provide a token.
     //
-    // Must be at least as long as requestToken()'s own INTERACTIVE_PROMPT_TIMEOUT_MS
-    // — otherwise this gives up on a token that's still legitimately in-flight
-    // (e.g. the user genuinely still reading/tapping an account-chooser popup),
-    // showing the recovery banner and falling loadHistData()/fetchCurrentMonth()
-    // back to degraded/cached data seconds before the real sign-in succeeds on
-    // its own. Same class of bug as the STUCK_WATCHDOG_MS/HIST_LOAD_TIMEOUT_MS
-    // mismatch fixed in an earlier session — derive one from the other so they
-    // can't drift apart again, rather than picking two independent numbers.
+    // Two cases, deliberately handled differently instead of one shared
+    // timeout — a single fixed number here has now drifted out of sync with
+    // requestToken()'s own (correct, larger) bound three times in a row
+    // (Sessions 37/38, 41, 42), each fix just re-tuning the same fragile
+    // duplication instead of removing it:
     if (_deferredMode) {
-      const TOKEN_WAIT_TIMEOUT_MS = INTERACTIVE_PROMPT_TIMEOUT_MS + 2000;
-      try {
-        await Promise.race([
-          _tokenReady,
-          new Promise((_, rej) => setTimeout(() => rej(new Error('token wait timed out')), TOKEN_WAIT_TIMEOUT_MS))
-        ]);
-      } catch (err) {
-        // Only surface this as a "stuck" event if the user actually attempted a
-        // token request (first tap already fired) — otherwise this just means
-        // nobody has tapped the screen yet within the wait window, which is normal
-        // (e.g. glancing at the already-cached calendar before touching it) and not
-        // evidence of a real failure. Firing the event here unconditionally used to
-        // make the Home page's recovery banner appear on almost every launch.
-        if (_firstTapAttempted) {
-          window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: err.message } }));
+      if (_firstTapAttempted) {
+        // A real attempt is already in flight. requestToken() itself is already
+        // bounded (SILENT_PROMPT_TIMEOUT_MS / INTERACTIVE_PROMPT_TIMEOUT_MS, with
+        // its own refocus-based rescue) and is guaranteed to settle _tokenReady
+        // one way or another by then — directly on success, or via
+        // triggerFirstTapSync()'s catch rejecting and re-arming it (which
+        // already dispatches notaTokenStuck itself). Racing an independent
+        // timeout here on top of that guarantee is exactly what kept going
+        // stale relative to it — just trust the lower layer instead of
+        // duplicating its bound.
+        await _tokenReady;
+      } else {
+        // No tap yet — don't wait indefinitely for one that might never come.
+        // This bound is purely "how long is it OK to silently wait before
+        // giving up", not a race against a slow popup (there isn't one in
+        // flight yet).
+        const NO_TAP_WAIT_TIMEOUT_MS = 10000;
+        try {
+          await Promise.race([
+            _tokenReady,
+            new Promise((_, rej) => setTimeout(() => rej(new Error('token wait timed out')), NO_TAP_WAIT_TIMEOUT_MS))
+          ]);
+        } catch (err) {
+          // _firstTapAttempted is false in this branch by construction, so
+          // this is genuinely "nobody has tapped yet" (e.g. glancing at the
+          // already-cached calendar before touching it) — normal, not a real
+          // failure, so no notaTokenStuck dispatch (that was the actual bug
+          // behind a much earlier session: firing it here unconditionally made
+          // the recovery banner appear on almost every launch).
+          //
+          // Don't auto-retry the popup from here — this call may be deep
+          // inside a background fetch with no real user gesture behind it,
+          // and GIS popups need one (iOS blocks/kills gesture-less popups).
+          // Let the caller's existing error handling degrade gracefully, same
+          // as any failed fetch.
+          throw err;
         }
-        // Don't auto-retry the popup from here — this call may be deep inside a
-        // background fetch with no real user gesture behind it, and GIS popups
-        // need one (iOS blocks/kills gesture-less popups). Let the caller's
-        // existing error handling degrade gracefully, same as any failed fetch;
-        // recovery happens when the user taps the Home page's retry banner.
-        throw err;
       }
       if (accessToken && Date.now() < tokenExpiresAt - 60000) return accessToken;
     }
@@ -461,7 +470,14 @@ const Auth = (() => {
     // slow background data fetch. Without this, retrying always reopened a
     // redundant Google popup and restarted DataStore.bootstrap() for no reason.
     hasValidToken: () => !!(accessToken && Date.now() < tokenExpiresAt - 60000),
-    isStandalone: isStandaloneMode };
+    isStandalone: isStandaloneMode,
+    // Exposed so any outer fetchWithTimeout() call that can run while sign-in
+    // might still be in deferred mode (loadHistData(), fetchCurrentMonth(),
+    // fetchCurrentMonthFresh()) can derive its own timeout from this single
+    // source instead of picking an independent number — an outer timeout
+    // shorter than this has been the recurring bug across Sessions 37/38, 41,
+    // 42, and 43 (this one). Derive, don't duplicate.
+    INTERACTIVE_PROMPT_TIMEOUT_MS };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

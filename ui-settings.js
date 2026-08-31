@@ -1204,7 +1204,10 @@ async function fetchCurrentMonthFresh() {
     // Bound this the same way as fetchCurrentMonth()/loadHistData() (index.html) —
     // a raw fetch() here routes through requireReady()/Auth.getAccessToken() and can
     // hang forever if a stuck token wait is never resolved (see auth.js _tokenReady).
-    const res = await fetchWithTimeout(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' }, 10000);
+    // MONTH_FETCH_TIMEOUT_MS (defined in index.html's inline script, shared global
+    // scope) already budgets for a deferred-mode token wait on top of the actual
+    // network fetch — a shorter, independent number here was the recurring bug.
+    const res = await fetchWithTimeout(apiGet(`type=month&y=${y}&m=${m}`), { method: 'GET' }, MONTH_FETCH_TIMEOUT_MS);
     const j = await res.json();
     if (j.status === 'ok' && Array.isArray(j.rows)) {
       const prev = localStorage.getItem(cacheKey);

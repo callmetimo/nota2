@@ -4040,6 +4040,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     hideStuckBanner = hideBanner; // expose to the cold-load code further down
 
     window.addEventListener('notaTokenStuck', showBanner);
+    // A token can be obtained via paths this banner doesn't itself trigger —
+    // the full overlay's own "Sign in with Google" button, or the brand-new-user
+    // flow — none of which know this banner exists. Without this, completing
+    // sign-in through one of those left the banner stale: hidden under the
+    // higher z-index overlay while it was up, then re-exposed once it closed.
+    window.addEventListener('notaTokenObtained', hideBanner);
     setTimeout(() => { if (isStillStuck()) showBanner(); }, STUCK_WATCHDOG_MS);
 
     async function attemptRecovery(triggerEl) {

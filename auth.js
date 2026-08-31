@@ -65,6 +65,18 @@ const Auth = (() => {
   }
   let _tokenReady = _armTokenReady();
 
+  // Resolves _tokenReady AND lets index.html know a token was obtained,
+  // regardless of which of the three flows (new-user sign-in, first-tap sync,
+  // or a later signIn() retry) got there — so the Home page's stuck-recovery
+  // banner can hide itself on any successful path, not just the one it itself
+  // triggered. Without this, completing sign-in via the full overlay's own
+  // button (rather than the banner's) left a stale banner behind, hidden under
+  // the overlay while it was up and re-exposed once the overlay closed.
+  function _resolveTokenReady() {
+    tokenReadyResolve();
+    window.dispatchEvent(new CustomEvent('notaTokenObtained'));
+  }
+
   // Whether we are in "deferred token" mode — i.e. Auth.ready has resolved
   // but we are still waiting for the first tap to get a Google token.
   let _deferredMode = false;
@@ -171,24 +183,64 @@ const Auth = (() => {
   // prompt:'none'/no-gesture calls, it can log an error and never invoke the
   // token client's callback at all — leaving the caller's promise hanging
   // forever. A bounded timeout is the only way to guarantee this resolves.
-  async function requestToken(promptMode, timeoutMs = 6000) {
+  //
+  // Two timeout tiers: 'none' never shows any UI — it either resolves silently
+  // in well under a second or fails, so a short bound is safe. Every other
+  // prompt mode ('', 'select_account', 'consent', ...) can legitimately show a
+  // popup that requires a real human to notice it, read it, and tap something —
+  // a 6s bound there was cutting off a genuine, still-in-progress account
+  // selection before the user could finish it, discarding the callback that
+  // then arrived a moment too late (see this file's standalone-iOS caveat).
+  const SILENT_PROMPT_TIMEOUT_MS = 6000;
+  const INTERACTIVE_PROMPT_TIMEOUT_MS = 45000;
+
+  async function requestToken(promptMode, timeoutMs) {
+    if (timeoutMs === undefined) {
+      timeoutMs = promptMode === 'none' ? SILENT_PROMPT_TIMEOUT_MS : INTERACTIVE_PROMPT_TIMEOUT_MS;
+    }
     await waitForGis();
     return new Promise((resolve, reject) => {
       let settled = false;
-      const timer = setTimeout(() => {
+      const startedAt = Date.now();
+      function cleanup() {
+        clearTimeout(timer);
+        document.removeEventListener('visibilitychange', onRefocusCheck);
+        window.removeEventListener('focus', onRefocusCheck);
+      }
+      function fail(err) {
         if (settled) return;
         settled = true;
-        reject(new Error('timeout'));
-      }, timeoutMs);
+        cleanup();
+        reject(err);
+      }
+      function succeed(token) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(token);
+      }
+      const timer = setTimeout(() => fail(new Error('timeout')), timeoutMs);
+      // Defense-in-depth against WebKit throttling or fully pausing this page's
+      // JS timers while the popup has focus (the installed-iOS-PWA caveat
+      // documented at the top of this file) — the setTimeout above can sit
+      // un-fired well past timeoutMs with nothing left to notice, stranding
+      // every caller of requestToken() (first-tap, the overlay's own button,
+      // the recovery banner's retry) on a promise that never settles. Regaining
+      // page visibility is a reliable signal independent of the timer queue —
+      // check real elapsed time directly against it rather than trusting the
+      // timer to have fired on schedule.
+      function onRefocusCheck() {
+        if (settled || document.visibilityState !== 'visible') return;
+        if (Date.now() - startedAt >= timeoutMs) fail(new Error('timeout'));
+      }
+      document.addEventListener('visibilitychange', onRefocusCheck);
+      window.addEventListener('focus', onRefocusCheck);
       const client = initTokenClient();
       client.callback = (resp) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (resp.error) { reject(new Error(resp.error)); return; }
+        if (resp.error) { fail(new Error(resp.error)); return; }
         accessToken = resp.access_token;
         tokenExpiresAt = Date.now() + (Number(resp.expires_in || 3300) * 1000);
-        resolve(accessToken);
+        succeed(accessToken);
       };
       client.requestAccessToken({ prompt: promptMode });
     });
@@ -216,7 +268,7 @@ const Auth = (() => {
       await DataStore.bootstrap();
       _deferredMode = false;
       readyResolve();
-      tokenReadyResolve();
+      _resolveTokenReady();
       overlay.hide();
       return true;
     } catch (err) {
@@ -258,7 +310,7 @@ const Auth = (() => {
     try {
       await requestToken(promptMode);
       _deferredMode = false;
-      tokenReadyResolve();
+      _resolveTokenReady();
       console.log('[auth] token obtained on first tap');
       return true;
     } catch (err) {
@@ -353,7 +405,7 @@ const Auth = (() => {
         await DataStore.bootstrap();
         _deferredMode = false;
         readyResolve();
-        tokenReadyResolve(); // token already in hand
+        _resolveTokenReady(); // token already in hand
       } catch (err) {
         overlay.showSignIn();
       }
@@ -382,33 +434,15 @@ const Auth = (() => {
     location.reload();
   }
 
-  // ── REFOCUS WATCHDOG ────────────────────────────────────────────────────
-  // On an installed iOS PWA specifically, a GIS popup can open and close on its
-  // own without ever invoking its callback (the standalone caveat documented at
-  // the top of this file) — and while that popup has focus, WebKit can throttle
-  // or fully pause the parent page's JS timers, including the plain setTimeout()
-  // inside requestToken() and everything chained after it (the stuck-recovery
-  // banner's own watchdog). The result: the app can sit completely frozen, with
-  // nothing even scheduled to check anything, for an unpredictable stretch (users
-  // have reported 25-35s) until some later event happens to resume the timer
-  // queue — which is why a second, unrelated tap was what "fixed" it: it wasn't
-  // retrying anything, it just happened to be what unfroze the page.
-  //
-  // Regaining page visibility is a far more immediate and reliable signal that
-  // "the popup is gone, check now" than waiting on a timer that may itself have
-  // been paused during that exact window. A short delay after refocusing lets any
-  // now-unthrottled callback that's about to succeed on its own (the common,
-  // healthy case) finish first, before treating a still-pending token as stuck.
-  function _onRefocus() {
-    if (document.visibilityState !== 'visible') return;
-    setTimeout(() => {
-      if (_deferredMode && _firstTapAttempted) {
-        window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: 'refocus-still-deferred' } }));
-      }
-    }, 750);
-  }
-  document.addEventListener('visibilitychange', _onRefocus);
-  window.addEventListener('focus', _onRefocus); // redundant trigger for older/quirkier WebKit visibilitychange behavior
+  // Note: the refocus-based rescue for WebKit throttling/pausing this page's
+  // timers while a popup has focus (the installed-iOS-PWA caveat documented at
+  // the top of this file) used to live here as a module-level watchdog scoped
+  // only to the first deferred-mode tap. It's now built directly into
+  // requestToken() itself instead, so it applies uniformly to every caller
+  // (first tap, the overlay's own "Sign in with Google" button, the recovery
+  // banner's retry) rather than only the one path this watchdog used to cover —
+  // a retry via signIn() could freeze the exact same way and nothing here would
+  // have noticed. See requestToken()'s onRefocusCheck() above.
 
   return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, ready, markAppReady,
     hasAttemptedFirstTap: () => _firstTapAttempted,

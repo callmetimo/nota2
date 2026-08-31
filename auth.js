@@ -184,20 +184,21 @@ const Auth = (() => {
   // token client's callback at all — leaving the caller's promise hanging
   // forever. A bounded timeout is the only way to guarantee this resolves.
   //
-  // Two timeout tiers: 'none' never shows any UI — it either resolves silently
-  // in well under a second or fails, so a short bound is safe. Every other
-  // prompt mode ('', 'select_account', 'consent', ...) can legitimately show a
-  // popup that requires a real human to notice it, read it, and tap something —
-  // a 6s bound there was cutting off a genuine, still-in-progress account
-  // selection before the user could finish it, discarding the callback that
-  // then arrived a moment too late (see this file's standalone-iOS caveat).
-  const SILENT_PROMPT_TIMEOUT_MS = 6000;
-  const INTERACTIVE_PROMPT_TIMEOUT_MS = 45000;
+  // A single, short default for every prompt mode this app actually uses
+  // ('' and 'none') — both resolve silently in practice (a fast successful
+  // reuse, or a fast failure) in every real launch observed, so a short bound
+  // is safe and correct for both. A prior session tried a much longer bound
+  // here specifically to accommodate an experimental interactive prompt
+  // (prompt:'select_account') that needed real human time to read/tap an
+  // account chooser — that experiment was reverted (see triggerFirstTapSync()'s
+  // comment) because it made the overall flow slower and less predictable, and
+  // the long timeout it required cascaded into every layer above this one that
+  // waits on a token. If a genuinely interactive prompt is ever reintroduced,
+  // pass an explicit larger timeoutMs at that call site rather than growing
+  // this default again.
+  const REQUEST_TOKEN_TIMEOUT_MS = 6000;
 
-  async function requestToken(promptMode, timeoutMs) {
-    if (timeoutMs === undefined) {
-      timeoutMs = promptMode === 'none' ? SILENT_PROMPT_TIMEOUT_MS : INTERACTIVE_PROMPT_TIMEOUT_MS;
-    }
+  async function requestToken(promptMode, timeoutMs = REQUEST_TOKEN_TIMEOUT_MS) {
     await waitForGis();
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -290,25 +291,23 @@ const Auth = (() => {
   async function triggerFirstTapSync() {
     if (!_deferredMode) return false; // already have a token or not in deferred mode
     _firstTapAttempted = true;
-    // EXPERIMENTAL (installed iOS PWA only): prompt:'' (silent reuse) has been
-    // reported to reliably fail on the very first popup attempt of a fresh
-    // standalone launch — a known WebKit/GIS limitation of the standalone
-    // webclip runtime (see the caveat at the top of this file) — always
-    // requiring an explicit second tap via the stuck-recovery banner, whose
-    // retry uses this exact same requestToken('') call and succeeds. Working
-    // theory: Google's SDK only falls back to a lighter interactive flow after
-    // a first silent attempt fails within the same page load, and the broken
-    // relay specifically affects the silent path. Forcing that interactive-style
-    // prompt on the very first attempt (standalone only) skips the doomed silent
-    // step outright. Untested trade-off: can occasionally show a visible
-    // account-chooser needing a tap even on a single-account device, in exchange
-    // for likely not needing a second tap in the common case. Left as '' for
-    // every other context, where the silent-reuse flow already works invisibly
-    // and reliably.
-    const promptMode = isStandaloneMode() ? 'select_account' : '';
-    console.log('[auth] first tap — obtaining Google token', { promptMode });
+    // REVERTED (see this file's changelog of sessions): a prior session tried
+    // forcing an interactive prompt:'select_account' here for installed iOS PWA
+    // specifically, hoping to skip a WebKit/GIS popup-relay quirk that made the
+    // silent prompt:'' attempt reliably fail on the very first tap there. It
+    // made things worse in practice — an account chooser needs real,
+    // unpredictable human time to read and tap, which then needed a large
+    // timeout to accommodate, which cascaded into every layer above it that
+    // waits on a token, and the overall flow ended up slower and less
+    // predictable than the plain silent flow it replaced. Reverted back to ''
+    // for every context: in every real report gathered, '' resolves within a
+    // few seconds either way (fast successful reuse, or a fast failure) — the
+    // stuck-recovery banner (via notaTokenStuck below) already handles the
+    // failure case with a one-tap retry, which is the simpler, faster,
+    // more-predictable flow this reverts back to.
+    console.log('[auth] first tap — obtaining Google token');
     try {
-      await requestToken(promptMode);
+      await requestToken('');
       _deferredMode = false;
       _resolveTokenReady();
       console.log('[auth] token obtained on first tap');
@@ -349,8 +348,8 @@ const Auth = (() => {
     if (_deferredMode) {
       if (_firstTapAttempted) {
         // A real attempt is already in flight. requestToken() itself is already
-        // bounded (SILENT_PROMPT_TIMEOUT_MS / INTERACTIVE_PROMPT_TIMEOUT_MS, with
-        // its own refocus-based rescue) and is guaranteed to settle _tokenReady
+        // bounded (REQUEST_TOKEN_TIMEOUT_MS, with its own refocus-based rescue)
+        // and is guaranteed to settle _tokenReady
         // one way or another by then — directly on success, or via
         // triggerFirstTapSync()'s catch rejecting and re-arming it (which
         // already dispatches notaTokenStuck itself). Racing an independent
@@ -476,8 +475,8 @@ const Auth = (() => {
     // fetchCurrentMonthFresh()) can derive its own timeout from this single
     // source instead of picking an independent number — an outer timeout
     // shorter than this has been the recurring bug across Sessions 37/38, 41,
-    // 42, and 43 (this one). Derive, don't duplicate.
-    INTERACTIVE_PROMPT_TIMEOUT_MS };
+    // 42, and 43. Derive, don't duplicate.
+    REQUEST_TOKEN_TIMEOUT_MS };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

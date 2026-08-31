@@ -374,6 +374,12 @@ Following Session 28's fix, ran a full audit (all `.js` files and inline `<scrip
 - **Fix**: reintroduced *only* the early-first-tap-listener change from Session 45 on top of the Session 46 revert baseline — the one-shot `click` listener now lives in its own small `<script>` immediately after `auth.js`'s tag instead of inside `DOMContentLoaded`, closing the confirmed ~5s dead-tap window. Nothing else from Sessions 36-45 (no timeout changes, no `select_account`, no tap-anywhere-on-the-banner — the user explicitly asked to keep the button-only interaction as-is) came back.
 - **Deliberately not attempted this session — scoped as a plan for a future session instead**: see "Planned: Redirect-Based Sign-In (Not Yet Implemented)" below.
 
+#### Session 48: Connecting/Syncing Toast Added, Early-Listener Fix Confirmed via a Second Recording (Claude)
+- **Request**: with the early-listener fix live, the user asked for a "Connecting…" toast (same shared `#toast` element/styling as everything else, top-right) during the skeleton-only wait between the first tap and the recovery banner appearing, then a second screen recording to analyze for the redirect-flow plan.
+- **Fix**: added a `setToast()`/`clearToast()` pair to the early first-tap listener, manipulating `#toast` directly (same className/textContent pattern `showToast()` itself uses) rather than calling that function — it's defined later in the document and this listener is deliberately attached before that's guaranteed to exist. Shows "Connecting to Google…" on tap, updates to "Loading data…" on success (handing off to the existing cold-load sequence's own toast calls, which still own clearing it once data actually finishes), clears on failure so it doesn't linger next to the recovery banner.
+- **Second recording, frame-extracted the same way (35 frames, 17s clip)**: confirmed the early-listener fix's real-world effect directly — tap→popup dropped from ~9.5-10s (Session 47's recording) to ~6-7s here, a genuine ~3s improvement matching the fix's intent. **Did not confirm the new toast** — no toast text appeared in any frame from the tap onward, though it should be visible continuously per the code just shipped. Most likely a deploy/service-worker cache lag (this app explicitly caches its own shell files — see `sw.js`) rather than a code defect, but flagged as unverified pending one more real-device check, not claimed as confirmed-working.
+- **Updated the redirect-flow plan** (below) with concrete, recording-derived timing baselines instead of estimates, and an explicit definition of what "success" looks like for that future rewrite (eliminating the failed first attempt, not just recovering from it faster).
+
 ## Planned: Redirect-Based Sign-In (Not Yet Implemented)
 
 Scoped in Session 47, deliberately not started — this is a real architectural change, not a same-session fix, and this project's own recent history (Sessions 36-45) is a direct warning against attempting something this size without room to verify it properly.
@@ -389,6 +395,13 @@ Scoped in Session 47, deliberately not started — this is a real architectural 
 - Worth deciding explicitly whether to use the plain implicit flow (token directly in the fragment, simplest, matches current architecture most closely) or authorization-code-with-PKCE (more secure, no long-lived token ever appears in a URL, but needs a token-exchange step this app's current no-backend architecture would need to do as a public client — more moving parts).
 
 **Suggested approach for whoever picks this up**: build it behind a flag or on a branch, verify the standalone-navigation behavior on a real installed iOS PWA *first* — before writing the rest of the flow — since if that assumption is wrong, the whole approach is moot and it's better to find out in five minutes than after the full implementation.
+
+**Baseline measurements to compare against** (from real screen recordings, frame-extracted and read directly — see Sessions 47-48; not estimates), so a future implementation of the redirect flow has something concrete to beat:
+- Tap → popup visibly opens: ~9.5-10s before the Session 47 early-listener fix, ~6-7s after it. The remaining gap is mostly `waitForGis()` (Google's own script finishing its load) plus normal tap-response latency, not something the redirect flow itself would change.
+- Popup opens → Google's own branded loading UI renders (a real network round-trip, confirmed visually — not an instant/silent failure): ~1.5-2s.
+- That loading UI → popup self-closes without completing: near-immediate after it starts rendering (well under 1s once "Please wait a moment…" appears).
+- Popup closing → recovery banner appearing: **highly variable** — ~7s in one recorded run, 25-35s in earlier (pre-recording, text-described) reports. This variability itself is expected if the cause is WebKit throttling the parent page's timers while the popup had focus — it is not a number a fixed timeout could ever reliably characterize, which is part of why Sessions 41-43's timeout-tuning arc didn't converge.
+- **What "success" for the redirect flow looks like**: eliminating the "popup opens, reaches Google, dies mid-load" step entirely — i.e., a single redirect round-trip completing sign-in without ever needing the recovery banner in the common case, not just making today's failure-then-retry faster.
 
 ---
 

@@ -3784,6 +3784,14 @@ function initSearchPage() {
 // Nota Public has no data.json bulk-history snapshot (unlike the original Nota app
 // this was forked from) — full Opex history is fetched directly from the user's
 // own Sheet via ?type=allOpex instead.
+// Deliberately generous budget for a full-history sync (loadHistData() below can
+// legitimately take this long on real network). The stuck-recovery watchdog
+// (further down) derives its own delay from this constant so the two can never
+// drift apart again — that drift (a 9s watchdog checking a fetch budgeted for 30s)
+// is exactly what made the "Retry sign-in" banner show up on almost every normal
+// launch even though sign-in itself had succeeded.
+const HIST_LOAD_TIMEOUT_MS = 30000;
+
 async function loadHistData(_isRetry) {
   try {
     // fetchWithTimeout (not a raw fetch) — this call routes through
@@ -3796,7 +3804,7 @@ async function loadHistData(_isRetry) {
     // tighter bound here was cutting the fetch off before it legitimately
     // finished, wiping every previous month from the calendar/Insights even
     // though sign-in and the network were both fine.
-    const res = await fetchWithTimeout(apiGet('type=allOpex'), { method: 'GET' }, 30000);
+    const res = await fetchWithTimeout(apiGet('type=allOpex'), { method: 'GET' }, HIST_LOAD_TIMEOUT_MS);
     const j = await res.json();
     if (j.status !== 'ok' || !Array.isArray(j.rows)) throw new Error('bad allOpex response');
     HIST.opex = j.rows;
@@ -3885,6 +3893,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   // safe to call this early since it just chains onto that promise internally.
   Auth.markAppReady();
 
+  // Bound to the stuck-recovery banner's real hideBanner() once that IIFE (below)
+  // runs. Exists so the cold-load code further down — outside that IIFE's scope —
+  // can dismiss the banner on a normal successful load without needing a tap.
+  let hideStuckBanner = () => {};
+
   // ── ONE-SHOT FIRST-TAP LISTENER ─────────────────────────────────────────
   // For returning users, Auth.ready resolves immediately from the localStorage
   // cache but the Google token is deferred until the user's first physical tap.
@@ -3918,11 +3931,20 @@ window.addEventListener('DOMContentLoaded', async () => {
   // so it also covers e.g. a desktop browser blocking the popup. Standalone
   // detection is used for exactly one thing: the escape-hatch link's label.
   (function() {
-    const STUCK_WATCHDOG_MS = 9000;
+    // Derived from HIST_LOAD_TIMEOUT_MS (loadHistData()'s own fetch budget) plus a
+    // fixed margin for one retry-backoff (1.5s) and deferred-first-tap/scheduling
+    // slack — covers a single normal (even slow) load without falsely tripping,
+    // while still catching a truly hung load in well under a minute. The
+    // independent notaTokenStuck event (below) still catches a real, fast failure
+    // (e.g. iOS-standalone popup silently closing) immediately — this watchdog is a
+    // slower, broader backstop, not the primary detector.
+    const STUCK_WATCHDOG_MS = HIST_LOAD_TIMEOUT_MS + 1500 + 8500; // 40000
     const banner = document.getElementById('stuckRecoveryBanner');
     const btn = document.getElementById('stuckRecoveryBtn');
     const escapeLink = document.getElementById('stuckRecoveryEscape');
     let shown = false;
+    let stuckAnyTapArmed = false;
+    let recovering = false;
 
     function isStandalone() {
       return navigator.standalone === true ||
@@ -3934,6 +3956,23 @@ window.addEventListener('DOMContentLoaded', async () => {
       const toastEl = document.getElementById('toast');
       const toastStuck = toastEl && toastEl.classList.contains('show') && toastEl.classList.contains('loading');
       return skeletonVisible || toastStuck;
+    }
+
+    // Tap-anywhere recovery: once the banner is showing for a genuine reason (the
+    // user already tried once — see the Auth.hasAttemptedFirstTap() guard below),
+    // the user's very next tap anywhere on screen retries, instead of requiring a
+    // precisely-aimed hit on the small button. Guarded so it never fires before a
+    // first tap actually happened — in that (rare/edge) case the existing global
+    // first-tap listener above is already the correct single-tap recovery path, and
+    // letting both listeners act on the same click could fire two concurrent Google
+    // token requests (tokenClient.callback in auth.js is overwritten per-request, so
+    // a second concurrent requestToken() call can strand the first one's promise).
+    function onStuckAnyTap(e) {
+      if (e.target.closest('#stuckRecoveryBanner')) return; // let the button's own click handle it
+      if (!Auth.hasAttemptedFirstTap()) return; // defer to the original first-tap listener instead
+      document.removeEventListener('click', onStuckAnyTap, true);
+      stuckAnyTapArmed = false;
+      attemptRecovery(btn);
     }
 
     function showBanner() {
@@ -3952,24 +3991,28 @@ window.addEventListener('DOMContentLoaded', async () => {
         escapeLink.onclick = (e) => { e.preventDefault(); location.reload(); };
       }
       banner.style.display = 'flex';
+      if (!stuckAnyTapArmed) { stuckAnyTapArmed = true; document.addEventListener('click', onStuckAnyTap, true); }
     }
 
     function hideBanner() {
       shown = false;
       banner.style.display = 'none';
+      if (stuckAnyTapArmed) { document.removeEventListener('click', onStuckAnyTap, true); stuckAnyTapArmed = false; }
     }
+    hideStuckBanner = hideBanner; // expose to the cold-load code further down
 
     window.addEventListener('notaTokenStuck', showBanner);
     setTimeout(() => { if (isStillStuck()) showBanner(); }, STUCK_WATCHDOG_MS);
 
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      btn.textContent = 'Retrying…';
+    async function attemptRecovery(triggerEl) {
+      if (recovering) return;
+      recovering = true;
+      if (triggerEl) { triggerEl.disabled = true; triggerEl.textContent = 'Retrying…'; }
       try {
-        // Gesture-driven: invoked synchronously from this click, so the popup
-        // it opens isn't blocked. signIn() never throws — check its result.
+        // Gesture-driven: invoked synchronously from a click (button or tap-anywhere),
+        // so the popup it opens isn't blocked. signIn() never throws — check its result.
         const ok = await Auth.signIn();
-        if (!ok) return; // signIn() already re-enabled its own button/status
+        if (!ok) return; // signIn() already re-enabled its own overlay button/status
         hideBanner();
         showToast('Loading data…', 'loading', 0);
         const [, freshMonth] = await Promise.all([loadHistData(), fetchCurrentMonthFresh()]);
@@ -3980,10 +4023,12 @@ window.addEventListener('DOMContentLoaded', async () => {
       } catch (err) {
         console.warn('[home] stuck-recovery retry failed', err);
       } finally {
-        btn.disabled = false;
-        btn.textContent = 'Retry sign-in';
+        recovering = false;
+        if (triggerEl) { triggerEl.disabled = false; triggerEl.textContent = 'Retry sign-in'; }
       }
-    });
+    }
+
+    btn.addEventListener('click', () => attemptRecovery(btn));
   })();
 
   // Fire-and-forget: repopulates allCategories/allPMs/allStocks/allAccounts/CAT_COLORS/
@@ -4070,6 +4115,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     // current-month total and any pre-loaded older months reflect full data.
     patchCurMonthCache();
     calInited = false;
+    hideStuckBanner(); // load finished on its own — don't leave a stale banner up
     if (isHome()) {
       if (calOlderShown) calRefreshOlderMonths();
       initCalendar();
@@ -4088,6 +4134,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     await Promise.race([_monthFetch, new Promise(r => setTimeout(r, 15000))]);
     patchCurMonthCache();
     hideToast();
+    hideStuckBanner(); // load finished on its own — don't leave a stale banner up
     calInited = false;
     if (isHome()) initCalendar();
     // If Apps Script was cold and timed out above, re-render when it eventually finishes.

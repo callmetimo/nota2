@@ -69,6 +69,13 @@ const Auth = (() => {
   // but we are still waiting for the first tap to get a Google token.
   let _deferredMode = false;
 
+  // True once the user's first tap has actually attempted a token request (whether
+  // it succeeds or fails). Distinguishes "genuinely stuck after trying" from "just
+  // hasn't tapped the screen yet" — the latter is normal and not evidence of a
+  // failure, but getAccessToken()'s deferred-wait timeout below can't otherwise tell
+  // the difference.
+  let _firstTapAttempted = false;
+
   // Two content modes share one full-screen card: a bare "splash" (logo +
   // loading text, no button) shown while we check for an existing session,
   // and the full interactive sign-in prompt shown only when needed.
@@ -222,6 +229,7 @@ const Auth = (() => {
   // full sign-in overlay so they can complete sign-in manually.
   async function triggerFirstTapSync() {
     if (!_deferredMode) return false; // already have a token or not in deferred mode
+    _firstTapAttempted = true;
     console.log('[auth] first tap — obtaining Google token');
     try {
       // '' avoids re-showing consent for a user who already granted access;
@@ -269,7 +277,15 @@ const Auth = (() => {
           new Promise((_, rej) => setTimeout(() => rej(new Error('token wait timed out')), TOKEN_WAIT_TIMEOUT_MS))
         ]);
       } catch (err) {
-        window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: err.message } }));
+        // Only surface this as a "stuck" event if the user actually attempted a
+        // token request (first tap already fired) — otherwise this just means
+        // nobody has tapped the screen yet within the wait window, which is normal
+        // (e.g. glancing at the already-cached calendar before touching it) and not
+        // evidence of a real failure. Firing the event here unconditionally used to
+        // make the Home page's recovery banner appear on almost every launch.
+        if (_firstTapAttempted) {
+          window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: err.message } }));
+        }
         // Don't auto-retry the popup from here — this call may be deep inside a
         // background fetch with no real user gesture behind it, and GIS popups
         // need one (iOS blocks/kills gesture-less popups). Let the caller's
@@ -344,7 +360,8 @@ const Auth = (() => {
     location.reload();
   }
 
-  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, ready, markAppReady };
+  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, ready, markAppReady,
+    hasAttemptedFirstTap: () => _firstTapAttempted };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

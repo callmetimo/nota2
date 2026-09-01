@@ -525,7 +525,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
        always reachable in-app — no reinstall required. Hidden by default;
        wired up in the DOMContentLoaded handler below. -->
   <div class="stuck-recovery-banner" id="stuckRecoveryBanner" style="display:none">
-    <span class="stuck-recovery-msg">Still connecting to Google…</span>
+    <span class="stuck-recovery-msg" id="stuckRecoveryMsg">Still connecting to Google…</span>
     <div class="stuck-recovery-actions">
       <button id="stuckRecoveryBtn" type="button">Retry sign-in</button>
       <a id="stuckRecoveryEscape" href="#">Reload the page</a>
@@ -1459,7 +1459,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.28';
+const APP_VERSION = 'v4.29';
 const APP_BUILD = '2026-07-27d'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -4038,6 +4038,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   (function() {
     const STUCK_WATCHDOG_MS = 9000;
     const banner = document.getElementById('stuckRecoveryBanner');
+    const msg = document.getElementById('stuckRecoveryMsg');
     const btn = document.getElementById('stuckRecoveryBtn');
     const escapeLink = document.getElementById('stuckRecoveryEscape');
     let shown = false;
@@ -4051,19 +4052,27 @@ window.addEventListener('DOMContentLoaded', async () => {
       const skeletonVisible = isHome() && !calInited;
       const toastEl = document.getElementById('toast');
       const toastStuck = toastEl && toastEl.classList.contains('show') && toastEl.classList.contains('loading');
-      // Neither symptom alone means sign-in is stuck — a slow Sheets/data.json
-      // fetch on a weak connection can leave the toast (or even the skeleton,
-      // pre-Bug-1-fix) showing well past this watchdog's window on its own,
-      // with a perfectly valid token already in hand. Only surface the
-      // "Still connecting to Google…" banner if we genuinely don't have one —
-      // otherwise this banner's own copy and its only action (retry sign-in)
-      // are both wrong for what's actually happening.
-      return (skeletonVisible || toastStuck) && !Auth.hasValidToken();
+      // Deliberately cause-agnostic: "sign-in itself never resolved" and "sign-in
+      // succeeded but the follow-up data fetch is stuck" look identical from
+      // here (skeleton or a persistent loading toast, either way). showBanner()
+      // below picks the right copy/action for whichever it actually is. An
+      // earlier version of this check additionally required !Auth.hasValidToken()
+      // to avoid a misleading "still connecting to Google" message — but that
+      // also silently disabled the only recovery path for a stuck data fetch
+      // after an already-successful sign-in (a real regression — see Session 52).
+      return skeletonVisible || toastStuck;
     }
 
     function showBanner() {
       if (shown) return;
       shown = true;
+      // A valid token already in hand means sign-in isn't actually the
+      // problem — it's loadHistData()/fetchCurrentMonthFresh() that's stuck.
+      // Reflect that honestly (not "still connecting to Google") and skip
+      // re-running sign-in in the retry handler below.
+      const signedIn = Auth.hasValidToken();
+      msg.textContent = signedIn ? 'Still loading your data…' : 'Still connecting to Google…';
+      btn.textContent = signedIn ? 'Retry' : 'Retry sign-in';
       if (isStandalone()) {
         escapeLink.textContent = 'Open Nota in Safari instead';
         escapeLink.href = location.href;
@@ -4088,13 +4097,22 @@ window.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => { if (isStillStuck()) showBanner(); }, STUCK_WATCHDOG_MS);
 
     btn.addEventListener('click', async () => {
+      // Read once, at the moment of the click — used consistently through
+      // this whole handler (including the finally block) even though
+      // Auth's own state could in principle change mid-await.
+      const alreadySignedIn = Auth.hasValidToken();
       btn.disabled = true;
       btn.textContent = 'Retrying…';
       try {
-        // Gesture-driven: invoked synchronously from this click, so the popup
-        // it opens isn't blocked. signIn() never throws — check its result.
-        const ok = await Auth.signIn();
-        if (!ok) return; // signIn() already re-enabled its own button/status
+        if (!alreadySignedIn) {
+          // Gesture-driven: invoked synchronously from this click, so the
+          // popup it opens isn't blocked. signIn() never throws — check its
+          // result.
+          const ok = await Auth.signIn();
+          if (!ok) return; // signIn() already re-enabled its own button/status
+        }
+        // Whether sign-in just ran or was already fine, the actual stuck
+        // thing is the data fetch — re-run it either way.
         hideBanner();
         showToast('Loading data…', 'loading', 0);
         const [, freshMonth] = await Promise.all([loadHistData(), fetchCurrentMonthFresh()]);
@@ -4106,7 +4124,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         console.warn('[home] stuck-recovery retry failed', err);
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Retry sign-in';
+        btn.textContent = alreadySignedIn ? 'Retry' : 'Retry sign-in';
       }
     });
   })();

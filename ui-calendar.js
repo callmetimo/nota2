@@ -110,6 +110,14 @@ function calGetMonthData(year, month) {
     .filter(r => r.y === year && r.m === month - 1 && r.cat !== 'Income' && r.cat !== 'Investment' && r.cat !== 'Transfer' && !isCreditCardPM(r.pm))
     .reduce((s, r) => s + (r.exp || 0), 0);
 
+  // CC purchases themselves are excluded above (the money hasn't left the bank yet), but a
+  // Transfer paying INTO a credit card account is real cash leaving the bank — count it as
+  // expense on the date it was actually paid, not the (excluded) purchase date. Reuses the
+  // paired-transfer merge above rather than re-deriving from/to accounts from raw rows.
+  Object.values(txByDay).flat().forEach(r => {
+    if (r.cat === 'Transfer' && isCreditCardPM(r.transferToPm)) total += (r.amt || 0);
+  });
+
   const localIncome = (txHistory || [])
     .filter(r => {
       if (r.synced || !r.date || r.type !== 'income') return false;
@@ -263,7 +271,7 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
       const cellY    = isCur ? year : (cell.next ? nextYear : prevYear);
       const cellM    = isCur ? month : (cell.next ? nextMonth : prevMonth);
       const txs      = getTxByDayFor(cellY, cellM)[cell.day] || [];
-      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer' && (r.projected || !isCreditCardPM(r.pm || ''))).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && ((r.category || r.cat) !== 'Transfer' || isCreditCardPM(r.transferToPm)) && (r.projected || !isCreditCardPM(r.pm || ''))).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
       const hasData  = txs.length > 0;
       const allProjected = hasData && txs.every(r => r.projected);
       const hasFuture = hasData && txs.some(r => r.future && isFuture);
@@ -345,7 +353,7 @@ function calGetRemainingWeeksHTML(year, month, today) {
       const isCur = (dy === year && dm === month);
       const isFuture = d > today;
       const txs = getTxByDayFor(dy, dm)[dd] || [];
-      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && (r.category || r.cat) !== 'Transfer' && (r.projected || !isCreditCardPM(r.pm || ''))).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
+      const dayTotal = txs.filter(r => (r.category || r.cat) !== 'Income' && ((r.category || r.cat) !== 'Transfer' || isCreditCardPM(r.transferToPm)) && (r.projected || !isCreditCardPM(r.pm || ''))).reduce((s, r) => s + (r.amount || r.exp || 0), 0);
       const hasData = txs.length > 0;
 
       let cls = 'cal-day' + (isCur ? (isFuture && hasData ? ' future' : (hasData ? ' has-data' : '')) : ' other-month');

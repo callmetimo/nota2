@@ -281,6 +281,18 @@ const Auth = (() => {
     }
   }
 
+  // Whether we currently hold a token that's actually usable — i.e. sign-in
+  // itself has genuinely succeeded, independent of whatever's happening with
+  // data fetching afterward. Used by index.html's stuck-recovery watchdog:
+  // "the loading toast is still showing" isn't the same thing as "still
+  // connecting to Google" — a slow Sheets/data.json fetch on a weak
+  // connection can outlast the watchdog's fixed window on its own, and
+  // showing a "Retry sign-in" banner in that case is both wrong (nothing's
+  // actually stuck signing in) and useless (retrying sign-in fixes nothing).
+  function hasValidToken() {
+    return !!(accessToken && Date.now() < tokenExpiresAt - 60000);
+  }
+
   // Called by SheetsClient for every API call. For returning users in deferred
   // mode, this blocks on _tokenReady (waiting for the first tap) instead of
   // attempting a silent request that iOS PWA will always block. After the first
@@ -375,7 +387,7 @@ const Auth = (() => {
     location.reload();
   }
 
-  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, silentRetry, ready, markAppReady };
+  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, silentRetry, hasValidToken, ready, markAppReady };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

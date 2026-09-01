@@ -1459,7 +1459,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.27';
+const APP_VERSION = 'v4.28';
 const APP_BUILD = '2026-07-27d'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -4051,7 +4051,14 @@ window.addEventListener('DOMContentLoaded', async () => {
       const skeletonVisible = isHome() && !calInited;
       const toastEl = document.getElementById('toast');
       const toastStuck = toastEl && toastEl.classList.contains('show') && toastEl.classList.contains('loading');
-      return skeletonVisible || toastStuck;
+      // Neither symptom alone means sign-in is stuck — a slow Sheets/data.json
+      // fetch on a weak connection can leave the toast (or even the skeleton,
+      // pre-Bug-1-fix) showing well past this watchdog's window on its own,
+      // with a perfectly valid token already in hand. Only surface the
+      // "Still connecting to Google…" banner if we genuinely don't have one —
+      // otherwise this banner's own copy and its only action (retry sign-in)
+      // are both wrong for what's actually happening.
+      return (skeletonVisible || toastStuck) && !Auth.hasValidToken();
     }
 
     function showBanner() {
@@ -4148,8 +4155,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   })();
 
-  // Step 1: Show skeleton instantly
-  if (isHome()) initCalendarSkeleton();
+  // Step 1: Show skeleton instantly — but only if the shell-transition catch-up
+  // above hasn't already rendered the real (data-less) calendar. On a slow
+  // launch the user's first tap can land before this handler even runs,
+  // meaning _showRealCalendarShell() already called initCalendar() (setting
+  // calInited = true) a few lines up. initCalendarSkeleton() doesn't touch
+  // calInited, so an unconditional call here would silently overwrite that
+  // real render with the skeleton and leave it stuck — every later
+  // `if (isHome()) initCalendar()` call (the cache-render branch below,
+  // the no-cache branch's post-fetch render) would then no-op forever,
+  // since initCalendar() itself guards on calInited already being true.
+  if (isHome() && !calInited) initCalendarSkeleton();
 
   // Step 2: Try rendering from localStorage cache for instant display
   const cachedCurMonth = (() => {

@@ -1327,7 +1327,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 <script src="data-store.js"></script>
 <script src="auth.js"></script>
 
-<!-- ── ONE-SHOT FIRST-TAP LISTENER ──────────────────────────────────────────
+<!-- ── FIRST-TAP / NEXT-TAP SIGN-IN ESCALATION ──────────────────────────────
      Deliberately its own tiny script, placed immediately after auth.js rather
      than inside the DOMContentLoaded handler further down. That handler can't
      run until every remaining <script> tag below (the rest of this inline
@@ -1343,17 +1343,25 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
      early. We use capture phase so this fires before any other handler, and
      we listen on click (not touchstart) because Google's GIS popup requires a
      robust user gesture to avoid popup blockers, and click is universally
-     accepted. -->
+     accepted.
+
+     EXPERIMENT (v4.27, see README): on an installed iOS Home Screen app, the
+     first sign-in attempt is expected to fail (a known WebKit/GIS popup-relay
+     bug — see auth.js's standalone caveat); a second, separately-gestured
+     attempt reliably succeeds. Rather than surfacing the recovery banner on
+     that first, expected failure, this now escalates quietly through a
+     couple more ordinary taps first — any tap the user makes anyway (opening
+     a day, adding a transaction), not a dedicated "Retry" tap — only falling
+     back to the banner (unchanged, dedicated button, no tap-anywhere) once
+     those are exhausted too. If this experiment makes the real flow worse,
+     revert index.html/auth.js to the commit tagged just before v4.27. -->
 <script>
 (function() {
   // Sets the shared #toast element directly (same element/classes showToast()
   // itself uses — top-right corner, per .header-right's existing placement —
   // just not calling that function, since it's defined later in the document
   // and this listener is deliberately attached before that's guaranteed to
-  // exist). Between the first tap and either success or the recovery banner
-  // showing, the calendar sits on its skeleton with nothing explaining why —
-  // this gives the user a persistent, accurate "something is happening"
-  // message instead of silence.
+  // exist).
   function setToast(msg) {
     const t = document.getElementById('toast');
     if (!t) return;
@@ -1364,27 +1372,80 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     const t = document.getElementById('toast');
     if (t) t.className = 'toast';
   }
+
+  // Pure visual feedback that the app is responsive, independent of whether
+  // sign-in succeeds — flips the calendar from its static HTML skeleton to
+  // the real (properly-styled, just data-less) shell on the very first tap.
+  // initCalendar() isn't defined yet at this point in the document (
+  // ui-calendar.js hasn't loaded), so this only sets a flag + fires a
+  // one-shot event; the DOMContentLoaded handler further down (where
+  // initCalendar/calInited are guaranteed to exist) does the actual render,
+  // catching up immediately if this already fired by the time it runs.
+  function _fireShellTransition() {
+    window.__notaFirstTapFired = true;
+    window.dispatchEvent(new CustomEvent('notaFirstTapFired'));
+  }
+
+  function _onSyncSuccess() {
+    // Token obtained — the boot-time data fetch (kicked off separately,
+    // independent of this tap) may still be running, especially with no
+    // warm cache. Update the message instead of clearing it so the user
+    // isn't left looking at a stale "Connecting…" during what's now
+    // actually a data-loading wait; the cold-load sequence further down
+    // (DOMContentLoaded) still owns clearing/replacing this toast once
+    // data actually finishes, via its own showToast()/hideToast() calls.
+    setToast('Loading data…');
+    window.addEventListener('notaBackgroundSyncComplete', () => {
+      if (typeof showToast === 'function') showToast('Synced ✓', 'success');
+    }, { once: true });
+  }
+
+  // How many *additional* taps (beyond the first) get a quiet retry before
+  // giving up and falling back to the existing recovery banner.
+  const MAX_SILENT_RETRIES = 2;
+  let silentRetriesUsed = 0;
+  let armed = false;
+
+  function _armNextTapRetry() {
+    if (armed) return;
+    armed = true;
+    document.addEventListener('click', _onSubsequentTap, { capture: true });
+  }
+
+  function _onSubsequentTap() {
+    // One attempt per tap — detach immediately so a fast burst of taps can't
+    // fire overlapping requestToken() calls.
+    document.removeEventListener('click', _onSubsequentTap, true);
+    armed = false;
+    silentRetriesUsed++;
+    setToast('Connecting to Google…');
+    Auth.silentRetry().then(success => {
+      if (success) { _onSyncSuccess(); return; }
+      clearToast();
+      if (silentRetriesUsed < MAX_SILENT_RETRIES) {
+        _armNextTapRetry(); // still within budget — try again on the next tap
+      } else {
+        // Quiet retries exhausted — fall back to the existing, UNCHANGED
+        // stuck-recovery banner (index.html's own IIFE already listens for
+        // this event; nothing about that banner's behavior changes here).
+        window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: 'silent-retries-exhausted' } }));
+      }
+    });
+  }
+
   async function _onFirstTap() {
     document.removeEventListener('click', _onFirstTap, true);
-    setToast('Connecting to Google…');
+    _fireShellTransition();
+    // Deliberately silent on this first attempt — no toast, no banner. See
+    // the EXPERIMENT note above for why: this attempt is expected to fail on
+    // an installed iOS PWA, and showing "Connecting…"/a banner on that
+    // expected first failure would be both premature and, on iOS, wrong
+    // almost every time.
     const success = await Auth.triggerFirstTapSync();
     if (success) {
-      // Token obtained — the boot-time data fetch (kicked off separately,
-      // independent of this tap) may still be running, especially with no
-      // warm cache. Update the message instead of clearing it so the user
-      // isn't left looking at a stale "Connecting…" during what's now
-      // actually a data-loading wait; the cold-load sequence further down
-      // (DOMContentLoaded) still owns clearing/replacing this toast once
-      // data actually finishes, via its own showToast()/hideToast() calls.
-      setToast('Loading data…');
-      window.addEventListener('notaBackgroundSyncComplete', () => {
-        if (typeof showToast === 'function') showToast('Synced ✓', 'success');
-      }, { once: true });
+      _onSyncSuccess();
     } else {
-      // Failed — the recovery banner (shown separately via the notaTokenStuck
-      // event this dispatches) is the primary explanation now; clear the
-      // toast rather than leave "Connecting…" lingering alongside it.
-      clearToast();
+      _armNextTapRetry();
     }
   }
   document.addEventListener('click', _onFirstTap, { capture: true });
@@ -1398,7 +1459,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.26';
+const APP_VERSION = 'v4.27';
 const APP_BUILD = '2026-07-27d'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -3945,6 +4006,21 @@ window.addEventListener('DOMContentLoaded', async () => {
   // was silently lost, adding a real ~5s dead window before anything visibly
   // happened. It's now registered immediately after auth.js's own <script>
   // tag instead — see there for the actual listener.
+
+  // Catches up on that early script's shell-transition signal: flips the
+  // calendar from its static HTML skeleton to the real (properly-styled,
+  // just data-less) shell as soon as the first tap fires, independent of
+  // whether sign-in has resolved yet. initCalendar() no-ops harmlessly if
+  // this races with the cache/network-driven render further down (that code
+  // re-sets calInited = false itself before re-rendering with real data).
+  function _showRealCalendarShell() {
+    if (isHome() && !calInited) initCalendar();
+  }
+  if (window.__notaFirstTapFired) {
+    _showRealCalendarShell(); // tap already happened before this handler ran
+  } else {
+    window.addEventListener('notaFirstTapFired', _showRealCalendarShell, { once: true });
+  }
 
   // ── STUCK-SIGN-IN RECOVERY BANNER ───────────────────────────────────────
   // Surfaces a tappable retry affordance if sign-in/data-loading is still

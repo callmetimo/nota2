@@ -28,13 +28,16 @@
 // can open and then close on its own without ever completing — a known
 // WebKit/GIS limitation of the standalone webclip runtime (broken
 // window.opener/postMessage relay, and/or Google's own embedded-user-agent
-// policy), not something fixable purely from this app's JS. Since that can
-// leave _tokenReady permanently unresolved, every path that can strand it
-// (triggerFirstTapSync()'s catch, getAccessToken()'s deferred-mode wait)
-// rejects/re-arms it and fires a `notaTokenStuck` window event instead of
-// hanging forever — index.html listens for this to surface a Home-page retry
-// banner (with an "open in Safari" escape hatch on standalone) well before
-// any network-level timeout would otherwise expire.
+// policy), not something fixable purely from this app's JS. A second,
+// separately-gestured attempt reliably succeeds, so rather than surfacing a
+// retry banner on the very first failure, index.html's early-tap-listener
+// script quietly re-tries via silentRetry() on the user's next few ordinary
+// taps (no visible Google-adjacent UI) before giving up and falling back to
+// the Home-page retry banner. Every path that can strand _tokenReady
+// (triggerFirstTapSync()'s catch, silentRetry()'s catch, getAccessToken()'s
+// deferred-mode wait) rejects/re-arms it so nothing hangs forever;
+// getAccessToken()'s own timeout still fires `notaTokenStuck` directly as a
+// backstop, independent of index.html's tap-counted escalation.
 
 const Auth = (() => {
   let tokenClient = null;
@@ -232,7 +235,15 @@ const Auth = (() => {
       console.log('[auth] token obtained on first tap');
       return true;
     } catch (err) {
-      console.warn('[auth] first-tap token request failed, showing sign-in', err);
+      // Deliberately silent — no overlay, no notaTokenStuck event yet. The
+      // "next natural tap" design (index.html's early-tap-listener script)
+      // escalates through a few more silent Auth.silentRetry() attempts,
+      // triggered by the user's own next incidental tap, before falling back
+      // to the stuck-recovery banner (which fires notaTokenStuck itself) as
+      // a last resort. Showing the full sign-in overlay from here — as this
+      // used to do — would defeat that: it's exactly the visible Google-
+      // adjacent UI the redesign exists to avoid on the first failure.
+      console.warn('[auth] first-tap token request failed, will retry silently on next tap', err);
       _deferredMode = false;
       // Unblock anything already waiting on the old _tokenReady (e.g. a concurrent
       // fetchCurrentMonthFresh() call stuck inside getAccessToken()), then arm a
@@ -240,12 +251,32 @@ const Auth = (() => {
       // permanently stranded for the rest of this page load.
       tokenReadyReject(err);
       _tokenReady = _armTokenReady();
-      // Let the Home page know immediately, rather than only after a fetch's own
-      // timeout expires — Nota's stuck-recovery banner listens for this.
-      window.dispatchEvent(new CustomEvent('notaTokenStuck', { detail: { reason: 'first-tap-failed' } }));
-      // Show the full overlay — signIn() called from the button will resolve
-      // _tokenReady (via the same tokenReadyResolve reference captured above).
-      overlay.showSignIn();
+      return false;
+    }
+  }
+
+  // Side-effect-free retry used by index.html's incidental-tap escalation —
+  // any ordinary tap (opening a calendar day, adding a transaction, etc.)
+  // after the first silent attempt (triggerFirstTapSync()) already failed.
+  // Unlike signIn(), this never shows the full-screen overlay; whatever
+  // toast/status the user sees is entirely index.html's concern, so this
+  // stays usable from a tap the user didn't intend as a "retry" at all.
+  // Returns true/false, never throws.
+  async function silentRetry() {
+    if (accessToken && Date.now() < tokenExpiresAt - 60000) {
+      tokenReadyResolve();
+      return true;
+    }
+    try {
+      await requestToken('');
+      _deferredMode = false;
+      tokenReadyResolve();
+      console.log('[auth] token obtained on silent retry');
+      return true;
+    } catch (err) {
+      console.warn('[auth] silent retry failed', err);
+      tokenReadyReject(err);
+      _tokenReady = _armTokenReady();
       return false;
     }
   }
@@ -344,7 +375,7 @@ const Auth = (() => {
     location.reload();
   }
 
-  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, ready, markAppReady };
+  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, silentRetry, ready, markAppReady };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

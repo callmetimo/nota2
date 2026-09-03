@@ -10,6 +10,9 @@ const DataStore = (() => {
   const LS_INVEST_GID = 'notaPublic_investSheetId';
   const LS_SPLIT_MIGRATED = 'notaPublic_splitMigratedV1';
   const LS_DATE_FORMAT_MIGRATED = 'notaPublic_dateFormatMigratedV1';
+  // Separate flag from LS_DATE_FORMAT_MIGRATED above: that migration already ran (and wrongly
+  // pinned a DATE format) for every existing user, so it will never re-run to apply this fix.
+  const LS_RECURRING_TEXT_FORMAT_MIGRATED = 'notaPublic_recurringTextFormatMigratedV1';
 
   // crypto.randomUUID is available in all modern browsers (Chrome 92+, Safari 15.4+, Firefox 95+).
   // Centralised here so the guard/fallback doesn't have to be repeated at every call site.
@@ -58,13 +61,51 @@ const DataStore = (() => {
       addCol(goalsGid, 1);      // Goals!B StartDate
       addCol(goalsGid, 2);      // Goals!C EndDate
       addCol(goalsGid, 6);      // Goals!G CompletedDate
-      addCol(recurringGid, 9);  // Recurring!J lastFired
-      addCol(recurringGid, 11); // Recurring!L endMonth
+      // Recurring!J (lastFired) and !L (endMonth) used to be pinned DATE here too, but they
+      // hold partial "YYYY-MM" tokens (no day), not full dates — see
+      // ensureRecurringTextColumnFormat() below for why that was wrong and how it's fixed.
 
       if (requests.length) await SheetsClient.batchUpdate(spreadsheetId, requests);
       localStorage.setItem(LS_DATE_FORMAT_MIGRATED, '1');
     } catch (e) {
       console.warn('[bootstrap] ensureDateColumnFormats error:', e);
+    }
+  }
+
+  // A prior migration (ensureDateColumnFormats above) pinned a DATE numberFormat on
+  // Recurring!J (lastFired) and !L (endMonth), reasoning that applied to full dates
+  // elsewhere but not here: these two columns hold partial "YYYY-MM" tokens with no day.
+  // Once a cell is DATE-formatted, writing a bare "2026-09" gets auto-parsed by Sheets as
+  // a real date (day defaults to the 1st) and rendered back as "2026-09-01" — which then
+  // fails handleGetRecurring()'s strict YYYY-MM regex and gets nulled out on every read.
+  // That's the root cause of "edit Repeat Until, reopen, it's empty again". Fix: pin these
+  // (plus the new installmentStart column, same "YYYY-MM" shape) as TEXT instead, so Sheets
+  // never reinterprets them — belt-and-suspenders alongside writing them with valueInputOption
+  // 'RAW' in handleRecurring(). Needs its own migration flag: LS_DATE_FORMAT_MIGRATED is
+  // already set for every existing user (it's what wrongly pinned DATE in the first place),
+  // so reusing it would mean this fix never actually re-runs for them.
+  async function ensureRecurringTextColumnFormat(meta) {
+    if (localStorage.getItem(LS_RECURRING_TEXT_FORMAT_MIGRATED)) return;
+    try {
+      const sheets = (meta && meta.sheets) || (await SheetsClient.getSpreadsheetMeta(spreadsheetId)).sheets || [];
+      const recurringGid = sheets.find(s => s.properties.title === RECURRING_SHEET)?.properties.sheetId;
+      if (recurringGid != null) {
+        const addTextCol = (colIndex) => ({
+          repeatCell: {
+            range: { sheetId: recurringGid, startColumnIndex: colIndex, endColumnIndex: colIndex + 1 },
+            cell: { userEnteredFormat: { numberFormat: { type: 'TEXT' } } },
+            fields: 'userEnteredFormat.numberFormat',
+          },
+        });
+        await SheetsClient.batchUpdate(spreadsheetId, [
+          addTextCol(9),  // Recurring!J lastFired
+          addTextCol(11), // Recurring!L endMonth
+          addTextCol(13), // Recurring!N installmentStart
+        ]);
+      }
+      localStorage.setItem(LS_RECURRING_TEXT_FORMAT_MIGRATED, '1');
+    } catch (e) {
+      console.warn('[bootstrap] ensureRecurringTextColumnFormat error:', e);
     }
   }
 
@@ -207,6 +248,13 @@ const DataStore = (() => {
           console.warn('[bootstrap] Date format migration error:', e);
         }
       }
+      if (!localStorage.getItem(LS_RECURRING_TEXT_FORMAT_MIGRATED)) {
+        try {
+          await ensureRecurringTextColumnFormat();
+        } catch (e) {
+          console.warn('[bootstrap] Recurring text format migration error:', e);
+        }
+      }
       return;
     }
 
@@ -232,6 +280,11 @@ const DataStore = (() => {
         await ensureDateColumnFormats();
       } catch (e) {
         console.warn('[bootstrap] Date format migration error:', e);
+      }
+      try {
+        await ensureRecurringTextColumnFormat();
+      } catch (e) {
+        console.warn('[bootstrap] Recurring text format migration error:', e);
       }
       return;
     }
@@ -269,8 +322,8 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:I1`, [[
       'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate','id','Ccy',
     ]]);
-    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
-      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
+    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:N1`, [[
+      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart',
     ]]);
     await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:L1`, [[
       'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights', 'creditCard',
@@ -291,6 +344,11 @@ const DataStore = (() => {
       await ensureDateColumnFormats({ sheets: created.sheets });
     } catch (e) {
       console.warn('[bootstrap] Date format migration error (new spreadsheet):', e);
+    }
+    try {
+      await ensureRecurringTextColumnFormat({ sheets: created.sheets });
+    } catch (e) {
+      console.warn('[bootstrap] Recurring text format migration error (new spreadsheet):', e);
     }
   }
 
@@ -342,11 +400,15 @@ const DataStore = (() => {
     if (await sheetHasHeader(RECURRING_SHEET)) return;
     const old = await SheetsClient.getValues(spreadsheetId, 'Invest!R1:AC');
     const oldRows = old.values || [];
+    // This legacy block predates the installmentTotal/installmentStart columns entirely, so
+    // its rows are always the original 12-wide shape — only the fallback header (used when the
+    // old block never had one of its own) is extended to the current 14-column schema so the
+    // sheet stays consistent going forward; data rows are written at their native width.
     const header = (oldRows[0] && oldRows[0][0]) ? oldRows[0] : [
-      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
+      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart',
     ];
     const dataRows = oldRows.slice(1).filter(r => r && r[0]);
-    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [header]);
+    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:N1`, [header]);
     if (dataRows.length) {
       await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A2:L${1 + dataRows.length}`, dataRows);
     }
@@ -975,16 +1037,27 @@ const DataStore = (() => {
     return { status: 'ok', id: goalId };
   }
 
-  // ── RECURRING (Recurring!A2:L) ─────────────────────────────────
+  // Both lastFired and endMonth (and installmentStart below) are partial "YYYY-MM" tokens with
+  // no day component. If one ever leaks through as a full "YYYY-MM-DD" — e.g. a cell that still
+  // carries the old, wrongly-pinned DATE format from before ensureRecurringTextColumnFormat()
+  // ran — recover it by truncating to the first 7 chars instead of discarding it outright, so
+  // already-corrupted sheets self-heal on the next fetch rather than needing a manual repair.
+  function normalizeYearMonth(raw) {
+    const s = String(raw || '').trim();
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(s)) return s;
+    if (/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/.test(s)) return s.slice(0, 7);
+    return '';
+  }
+
+  // ── RECURRING (Recurring!A2:N) ─────────────────────────────────
   async function handleGetRecurring() {
-    const res = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:L`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:N`);
     const data = res.values || [];
     const rules = [];
     data.forEach(row => {
       const id = Number(row[0]);
       if (!id) return;
       if (isDeletedFlag(row[10])) return;
-      const endMonthVal = String(row[11] || '').trim();
       rules.push({
         id, type: String(row[1] || '').trim(), tx: String(row[2] || '').trim(), cat: String(row[3] || '').trim(),
         amount: Number(row[4]) || 0, pm: String(row[5] || '').trim(), notes: String(row[6] || '').trim(),
@@ -995,23 +1068,35 @@ const DataStore = (() => {
         // look never-fired, re-prompting a transaction the user already recorded, and
         // (b) via the raw cross-format `>` compare against a clean local "YYYY-MM" value
         // elsewhere, let corrupted server data silently win over and overwrite a correct
-        // local lastFired stamp. Validate the same way endMonth already is on the next line.
-        lastFired: /^\d{4}-(0[1-9]|1[0-2])$/.test(String(row[9] || '').trim()) ? String(row[9] || '').trim() : '',
-        endMonth: /^\d{4}-(0[1-9]|1[0-2])$/.test(endMonthVal) ? endMonthVal : null,
+        // local lastFired stamp. normalizeYearMonth() validates/repairs the same way for both.
+        lastFired: normalizeYearMonth(row[9]),
+        endMonth: normalizeYearMonth(row[11]) || null,
+        installmentTotal: Number(row[12]) || 0,
+        installmentStart: normalizeYearMonth(row[13]),
       });
     });
     return { status: 'ok', rules };
   }
 
   async function handleRecurring(data) {
-    const { action, rules } = data;
+    const { action, rules, allowEmpty } = data;
     if (action !== 'saveAll') return { status: 'error', message: 'Unknown action' };
     if (!Array.isArray(rules)) return { status: 'error', message: 'rules must be an array' };
 
-    const header = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`);
+    // Guard against an accidental full wipe: a client-side bug producing an empty array
+    // (rather than a deliberate "delete the last rule") would otherwise silently blank the
+    // whole sheet on the next debounced push. allowEmpty is set explicitly by the client when
+    // it really does mean to save zero rules (see _doRecurringPush in ui-settings.js).
+    if (rules.length === 0 && !allowEmpty) {
+      const existing = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:A`);
+      const hasExistingRows = (existing.values || []).some(row => String(row[0] || '').trim());
+      if (hasExistingRows) return { status: 'error', message: 'Refusing empty saveAll over existing rows without allowEmpty' };
+    }
+
+    const header = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A1:N1`);
     if (!(header.values && header.values[0] && header.values[0][0])) {
-      await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:L1`, [[
-        'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth',
+      await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:N1`, [[
+        'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart',
       ]]);
     }
 
@@ -1020,13 +1105,17 @@ const DataStore = (() => {
       String(r.cat || '').slice(0, 50), Number(r.amount) || 0, String(r.pm || '').slice(0, 30),
       String(r.notes || '').slice(0, 500), Number(r.dayOfMonth) || 1, r.active ? 'TRUE' : 'FALSE',
       String(r.lastFired || '').slice(0, 7), '', String(r.endMonth || '').slice(0, 7),
+      Number(r.installmentTotal) || 0, String(r.installmentStart || '').slice(0, 7),
     ]);
 
     // Pad with empty rows to overwrite deleted rules in a single API request instead of sequential clear+update
-    const emptyRow = Array(12).fill('');
+    const emptyRow = Array(14).fill('');
     while (rows.length < 100) rows.push(emptyRow);
 
-    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:L${RECURRING_DATA_ROW + rows.length - 1}`, rows);
+    // 'RAW' stores every value literally (no date/number/boolean auto-detection), regardless
+    // of the cell's number format — this is what actually stops Sheets from re-parsing bare
+    // "YYYY-MM" strings in lastFired/endMonth/installmentStart as full dates on write.
+    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:N${RECURRING_DATA_ROW + rows.length - 1}`, rows, 'RAW');
     return { status: 'ok', count: rows.length };
   }
 

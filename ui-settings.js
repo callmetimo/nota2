@@ -1321,15 +1321,17 @@ async function _doRecurringPush(rules) {
   // Save pending state immediately, before server call (fallback if app closes before response)
   localStorage.setItem('notapub_recurring_pending', JSON.stringify(rules));
   localStorage.setItem('notapub_recurring_pending_ts', String(Date.now()));
-  // clientTs lets the server reject this write if a newer one already landed —
-  // fetchWithTimeout's Promise.race does NOT cancel the underlying fetch, so an
-  // abandoned (client-timed-out) request can still complete server-side minutes
-  // later and silently overwrite newer data without this guard.
+  // clientTs is sent so the server COULD reject this write if a newer one already landed —
+  // fetchWithTimeout's Promise.race does NOT cancel the underlying fetch, so an abandoned
+  // (client-timed-out) request can still complete server-side minutes later and silently
+  // overwrite newer data. NOTE: data-store.js's handleRecurring() does not currently act on
+  // this field — no staleness guard actually exists server-side yet (would need a persisted
+  // last-write timestamp that doesn't exist anywhere today). Sent here for a future fix.
   const clientTs = Date.now();
   try {
-    // allowEmpty confirms to the server this is a deliberate "delete the last rule" push,
-    // not an accidental empty array from a client-side bug — the server refuses to wipe an
-    // already-populated sheet with an empty saveAll unless this is set (appsscript_v40).
+    // allowEmpty confirms to the server this is a deliberate "delete the last rule" push, not
+    // an accidental empty array from a client-side bug — data-store.js's handleRecurring()
+    // refuses to wipe an already-populated sheet with an empty saveAll unless this is set.
     const res = await fetchWithTimeout(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -1374,17 +1376,6 @@ function curMonthKey() {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 
-function _initRecurringEndYears() {
-  const curY = new Date().getFullYear();
-  const opts = '<option value="">Year</option>' +
-    Array.from({length: 11}, (_, i) => {
-      const y = curY + i;
-      return `<option value="${y}">${y}</option>`;
-    }).join('');
-  document.getElementById('inputRecurringEndYear').innerHTML = opts;
-  document.getElementById('recurringEditEndYear').innerHTML = opts;
-}
-
 function _autoSetEndYear(yearId) {
   const yEl = document.getElementById(yearId);
   if (!yEl.value) yEl.value = String(new Date().getFullYear());
@@ -1392,8 +1383,12 @@ function _autoSetEndYear(yearId) {
 
 function _getEndMonthValue(monthId, yearId) {
   const m = document.getElementById(monthId).value;
-  const y = document.getElementById(yearId).value;
-  if (!m || !y) return null;
+  const y = document.getElementById(yearId).value.trim();
+  // Year is a free-typed number field — require a real 4-digit year (matching endMonth's own
+  // storage format) before combining. If month is set but year is missing/invalid, treat it
+  // the same as no end date at all (silent — "Repeat until" is explicitly optional) rather
+  // than blocking the rest of the save.
+  if (!m || !/^\d{4}$/.test(y)) return null;
   return `${y}-${m}`;
 }
 
@@ -1402,12 +1397,6 @@ function _setEndMonthValue(monthId, yearId, value) {
   const yEl = document.getElementById(yearId);
   if (value && /^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
     const [year, month] = value.split('-');
-    // Add the year option on-the-fly if it's not in the generated list (e.g. a past year)
-    if (!yEl.querySelector(`option[value="${year}"]`)) {
-      const opt = document.createElement('option');
-      opt.value = year; opt.textContent = year;
-      yEl.appendChild(opt);
-    }
     mEl.value = month;
     yEl.value = year;
   } else {
@@ -1454,6 +1443,24 @@ function getRecurringProjections(year, month) {
       type: r.type,
       projected: true,
     }));
+}
+
+// Remove recurring rules whose end month has fully passed — from the app and, via the normal
+// saveRecurring()/tombstone pipeline, from the Recurring sheet tab too. Strict "<" (not "<=")
+// so a rule due in its own final month (endMonth === curMonthKey()) is left alone: both
+// getRecurringDue() and getRecurringProjections() above already use ">=", so nothing still-
+// current can ever be pruned here. Called once per app load, after fetchRecurring() resolves
+// (see index.html), so it prunes against the authoritative merged rule set.
+function pruneExpiredRecurring() {
+  const mk = curMonthKey();
+  const rules = loadRecurring();
+  const expired = rules.filter(r => r.endMonth && r.endMonth < mk);
+  if (!expired.length) return;
+  expired.forEach(r => _tombstoneRecurringId(r.id));
+  saveRecurring(rules.filter(r => !(r.endMonth && r.endMonth < mk)));
+  if (document.getElementById('page-recurring')?.classList.contains('active')) {
+    renderRecurringList();
+  }
 }
 
 // Toggle the day-of-month and end-date rows in the input form

@@ -298,10 +298,11 @@ function renderCCMonitor() {
       if (!rule.installmentTotal || !rule.installmentStart) return;
       if (!isMatchPM(rule.pm)) return;
 
-      const [startMonStr, startYStr] = rule.installmentStart.split('-');
-      const startY = parseInt(startYStr);
-      const startM0 = MO.indexOf(startMonStr);
-      if (startM0 < 0 || isNaN(startY)) return;
+      // installmentStart is dateToMonthKey()'s "YYYY-MM" numeric format, not a month-name string.
+      const [startYStr, startMonStr] = rule.installmentStart.split('-');
+      const startY = parseInt(startYStr, 10);
+      const startM0 = parseInt(startMonStr, 10) - 1; // 0-based, matches getEffectiveBillingMonth's convention
+      if (isNaN(startY) || isNaN(startM0) || startM0 < 0 || startM0 > 11) return;
 
       const startDay = rule.dayOfMonth || 1;
       const startBM  = getEffectiveBillingMonth(startDay, startY, startM0);

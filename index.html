@@ -649,9 +649,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
             <option value="07">July</option><option value="08">August</option><option value="09">September</option>
             <option value="10">October</option><option value="11">November</option><option value="12">December</option>
           </select>
-          <select class="form-input" id="inputRecurringEndYear" style="width:90px">
-            <option value="">Year</option>
-          </select>
+          <input type="number" class="form-input" id="inputRecurringEndYear" placeholder="Year" min="1900" max="9999" step="1" inputmode="numeric" style="width:90px">
         </div>
       </div>
       <button class="submit-btn expense" id="submitOpexBtn" onclick="submitOpex()">Save Transaction</button>
@@ -1214,9 +1212,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
           <option value="07">July</option><option value="08">August</option><option value="09">September</option>
           <option value="10">October</option><option value="11">November</option><option value="12">December</option>
         </select>
-        <select class="form-input" id="recurringEditEndYear" style="width:90px">
-          <option value="">Year</option>
-        </select>
+        <input type="number" class="form-input" id="recurringEditEndYear" placeholder="Year" min="1900" max="9999" step="1" inputmode="numeric" style="width:90px">
       </div>
     </div>
     <div class="form-group">
@@ -1459,8 +1455,8 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.29';
-const APP_BUILD = '2026-07-27d'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
+const APP_VERSION = 'v4.30';
+const APP_BUILD = '2026-09-03a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
 }
@@ -4266,11 +4262,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Retry any locally-queued transactions that failed to sync previously
   retryPendingQueue();
-  // Populate year dropdowns for recurring end-date selects
-  _initRecurringEndYears();
   // Sync recurring rules with Google Sheets first, then run due-check/retry on merged data
   // (avoids racing a stale pre-fetch push against the server merge — see checkRecurringOnLoad)
   fetchRecurring().then(() => {
+    pruneExpiredRecurring();
     checkRecurringOnLoad();
     retryPendingRecurring();
   });

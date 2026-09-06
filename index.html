@@ -1455,7 +1455,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.31';
+const APP_VERSION = 'v4.32';
 const APP_BUILD = '2026-09-03a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2797,7 +2797,7 @@ function submitTransfer() {
       showToast('Transfer saved ✓', 'success');
       Promise.all([
         fetchCurrentMonth(true),
-        fetchAllOpex(),
+        loadHistData(),
       ]).then(() => {
         calInited = false;
         if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); }
@@ -2853,7 +2853,7 @@ async function deleteTransfer(txId) {
     const j = await res.json().catch(() => ({}));
     if (j.status === 'ok') {
       showToast('Transfer deleted ✓', 'success');
-      Promise.all([fetchCurrentMonth(true), fetchAllOpex()]).then(() => {
+      Promise.all([fetchCurrentMonth(true), loadHistData()]).then(() => {
         calInited = false;
         if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); }
         buildAccountBalances();
@@ -2918,7 +2918,7 @@ async function updateTransferTransaction() {
     const j = await res.json().catch(() => ({}));
     if (j.status === 'ok') {
       showToast('Transfer updated ✓', 'success');
-      await Promise.all([fetchCurrentMonth(true), fetchAllOpex()]);
+      await Promise.all([fetchCurrentMonth(true), loadHistData()]);
       calInited = false;
       if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); }
       buildAccountBalances();

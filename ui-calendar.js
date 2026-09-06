@@ -299,7 +299,9 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
             projected: r.projected || false,
             ruleId: r.ruleId || null,
             future: r.future || false,
-            synced: r.synced
+            synced: r.synced,
+            transferFromPm: r.transferFromPm || null,
+            transferToPm: r.transferToPm || null
           }))).replace(/'/g, '&#39;')
         : '[]';
       const dateStr  = `${cellY}-${String(cellM).padStart(2,'0')}-${String(cell.day).padStart(2,'0')}`;
@@ -373,7 +375,9 @@ function calGetRemainingWeeksHTML(year, month, today) {
             projected: r.projected || false,
             ruleId: r.ruleId || null,
             future: r.future || false,
-            synced: r.synced
+            synced: r.synced,
+            transferFromPm: r.transferFromPm || null,
+            transferToPm: r.transferToPm || null
           }))).replace(/'/g,'&#39;')
         : '[]';
       const dateStr = `${dy}-${String(dm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
@@ -429,7 +433,9 @@ function calGetCurrentWeekHTML(year, month, today) {
           inc: (r.inc || (r.isIncome ? (r.amount || 0) : 0)),
           projected: r.projected || false,
           ruleId: r.ruleId || null,
-          synced: r.synced
+          synced: r.synced,
+          transferFromPm: r.transferFromPm || null,
+          transferToPm: r.transferToPm || null
         }))).replace(/'/g,'&#39;')
       : '[]';
     const dateStr  = `${dy}-${String(dm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
@@ -692,7 +698,7 @@ function calBuildCurrentMonthHiddenWeeks() {
         const total  = txs.filter(r=>(r.category||r.cat)!=='Income').reduce((s,r)=>s+(r.amount||r.exp||0),0);
         const hasData = txs.length > 0;
         let cls = 'cal-day' + (isCur ? (hasData ? ' has-data' : '') : ' other-month') + (d >= 5 ? ' weekend' : '');
-        const txJson = hasData ? JSON.stringify(txs.map(r=>({tx:r.tx||r.payee||r.mk||'',cat:r.category||r.cat||'',pm:r.pm||'',amt:r.amount||r.exp||r.inc||0,type:(r.category||r.cat)==='Income'?'income':((r.category||r.cat)==='Investment'?'invest':''),rowIndex:r.rowIndex||null,sheetId:r.rowIndex?(r.id||null):null,notes:r.notes||'',inc:(r.inc||(r.isIncome?(r.amount||0):0)),projected:r.projected||false,ruleId:r.ruleId||null}))).replace(/'/g,'&#39;') : '[]';
+        const txJson = hasData ? JSON.stringify(txs.map(r=>({tx:r.tx||r.payee||r.mk||'',cat:r.category||r.cat||'',pm:r.pm||'',amt:r.amount||r.exp||r.inc||0,type:(r.category||r.cat)==='Income'?'income':((r.category||r.cat)==='Investment'?'invest':''),rowIndex:r.rowIndex||null,sheetId:r.rowIndex?(r.id||null):null,notes:r.notes||'',inc:(r.inc||(r.isIncome?(r.amount||0):0)),projected:r.projected||false,ruleId:r.ruleId||null,transferFromPm:r.transferFromPm||null,transferToPm:r.transferToPm||null}))).replace(/'/g,'&#39;') : '[]';
         const dateStr = `${cellY}-${String(cellM).padStart(2,'0')}-${String(cell.day).padStart(2,'0')}`;
         const totalStr = total ? fRp(total) : '';
         const clickAttr = `onclick="calSelectDay(this,'${dateStr}','${totalStr}')"` ;

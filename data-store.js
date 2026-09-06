@@ -683,12 +683,12 @@ const DataStore = (() => {
     const { date, month, fromPm, toPm, amount, notes } = data;
     const groupId = generateId();
     const txId = 'xfr_' + groupId;
-    await SheetsClient.appendValues(spreadsheetId, 'Opex!A:K', [[
-      formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0, txId,
-    ]]);
-    await SheetsClient.appendValues(spreadsheetId, 'Opex!A:K', [[
-      formatDateStr(date), month, 'Transfer', 'Transfer', toPm, amount, '', notes || '', '', 0, txId,
-    ]]);
+    // Both legs are appended in a single call so they land together — appending them as two
+    // separate requests could leave exactly one leg written if the second call failed.
+    await SheetsClient.appendValues(spreadsheetId, 'Opex!A:K', [
+      [formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0, txId],
+      [formatDateStr(date), month, 'Transfer', 'Transfer', toPm, amount, '', notes || '', '', 0, txId],
+    ]);
     return { status: 'ok', wrote: true, id: txId };
   }
 

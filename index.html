@@ -1455,7 +1455,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.30';
+const APP_VERSION = 'v4.31';
 const APP_BUILD = '2026-09-03a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2779,7 +2779,7 @@ function submitTransfer() {
   const notes = sanitizeInput(document.getElementById('xfrNotes').value, 200);
   if (!date || !fromPm || !toPm || !amount) { isSyncing = false; showToast('All fields required', 'error'); return; }
   if (fromPm === toPm) { isSyncing = false; showToast('From and To must be different', 'error'); return; }
-  const r = { id: Date.now(), date, fromPm, toPm, amount, notes, type: 'transfer', synced: false };
+  const r = { id: Date.now(), date, fromPm, toPm, amount, notes, tx: 'Transfer', type: 'transfer', synced: false };
   switchTab('home', null);
   showToast('Saving transfer…', 'loading', 0);
 

@@ -102,7 +102,10 @@ function calGetMonthData(year, month) {
         transferFromPm: expRow.pm,
         transferToPm: incRow.pm,
       };
-      txByDay[day] = arr.filter(r => !rows.includes(r)).concat([merged]);
+      // Filter against the live, already-updated txByDay[day] (not the stale `arr`
+      // snapshot) — a day can have multiple transfers, and using `arr` here would
+      // discard an earlier iteration's merge and restore its two raw unmerged legs.
+      txByDay[day] = txByDay[day].filter(r => !rows.includes(r)).concat([merged]);
     });
   });
 

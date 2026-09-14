@@ -1067,8 +1067,8 @@ function openGoalsOverlay(mode, goalId) {
   const assets = getGoalAssetList();
   document.getElementById('goalSourceFundList').innerHTML = assets.map(asset =>
     `<label class="goal-source-row">
-      <input type="checkbox" value="${asset}" ${selectedSources.includes(asset) ? 'checked' : ''}>
-      <span style="font-size:14px">${asset}</span>
+      <input type="checkbox" value="${esc(asset)}" ${selectedSources.includes(asset) ? 'checked' : ''}>
+      <span style="font-size:14px">${esc(asset)}</span>
     </label>`
   ).join('');
 

@@ -3207,6 +3207,20 @@ async function updateTransaction() {
     renderSearchOrMonitor();
     if (searchActiveQuery) performSearch(searchActiveQuery);
   }
+
+  // If this transaction never reached the server (still sitting in the local retry
+  // queue), there's no sheet row for an "edit" action to find. Patch the queued
+  // create in place instead — retryPendingQueue() will send the new values as a
+  // fresh create next time it runs, instead of us sending a doomed edit request.
+  const queuedIdx = queue.findIndex(q => q.id === id);
+  if (queuedIdx !== -1) {
+    queue[queuedIdx] = { ...queue[queuedIdx], date, tx, amount, category: cat, pm, notes, type: isInc ? 'income' : 'expense', future: isFuture };
+    saveLocal();
+    showToast('Updated ✓', 'success');
+    _suppressVisRefresh = false;
+    return;
+  }
+
   showToast('Updating…', 'loading', 0);
 
   const payload = {
@@ -3259,6 +3273,9 @@ async function deleteSheetTransaction() {
   const origInc   = overlayEditOrigInc;
   const origISO   = calCurrentDateStr;
 
+  // Capture before _applyLocalDelete below trims any matching queue entry.
+  const wasQueued = queue.some(q => q.id === id);
+
   // Delete locally first — calendar updates immediately regardless of server
   _applyLocalDelete(origISO, origTx, origAmt, rowIndex, id, origInc);
   closeInputOverlay();
@@ -3269,6 +3286,15 @@ async function deleteSheetTransaction() {
     renderSearchOrMonitor();
     if (searchActiveQuery) performSearch(searchActiveQuery);
   }
+
+  // Never reached the server — nothing to delete there. _applyLocalDelete already
+  // dropped the matching queue entry above so it won't resurrect on the next retry.
+  if (wasQueued) {
+    showToast('Deleted ✓', 'success');
+    _suppressVisRefresh = false;
+    return;
+  }
+
   showToast('Deleting…', 'loading', 0);
 
   const payload = {
@@ -3342,6 +3368,24 @@ async function updateInvestTransaction() {
   const total=parseAmt('inputTotal');
   if(!date||!stock||!account||!lot||!price){showToast('All fields required','error');return}
   closeInputOverlay();
+
+  // If this investment never reached the server (still sitting in the local retry
+  // queue), there's no sheet row for an "edit" action to find. Patch the queued
+  // create and investHistory entry in place instead — retryPendingQueue() will send
+  // the new values as a fresh create next time it runs.
+  const queuedIdx = queue.findIndex(q => q.id === id);
+  if (queuedIdx !== -1) {
+    const patch = { date, stock, account, action: investAction, lot, price, totalIdr: total };
+    queue[queuedIdx] = { ...queue[queuedIdx], ...patch };
+    investHistory = investHistory.map(h => h.id === id ? { ...h, ...patch } : h);
+    saveLocal();
+    buildAccountBalances();
+    renderAccountBalanceCards();
+    if (document.getElementById('page-search').classList.contains('active')) renderSearchOrMonitor();
+    showToast('Updated ✓', 'success');
+    return;
+  }
+
   showToast('Updating…', 'loading', 0);
   const payload = {
     type:'invest', op:'edit', id, rowIndex,
@@ -3373,6 +3417,21 @@ async function deleteSheetInvestTransaction() {
   const rowIndex = overlayEditRowIndex;
   const id = overlayEditId;
   closeInputOverlay();
+
+  // Same as updateInvestTransaction: if it's still just a queued, unsynced create,
+  // there's no sheet row to delete — remove it locally instead.
+  const queuedIdx = queue.findIndex(q => q.id === id);
+  if (queuedIdx !== -1) {
+    queue = queue.filter(q => q.id !== id);
+    investHistory = investHistory.filter(h => h.id !== id);
+    saveLocal();
+    buildAccountBalances();
+    renderAccountBalanceCards();
+    if (document.getElementById('page-search').classList.contains('active')) renderSearchOrMonitor();
+    showToast('Deleted ✓', 'success');
+    return;
+  }
+
   showToast('Deleting…', 'loading', 0);
   const payload = { type:'invest', op:'delete', id, rowIndex };
   try {

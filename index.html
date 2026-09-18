@@ -2785,7 +2785,8 @@ function submitTransfer() {
 
   // Optimistically save transfer locally and recompute balances
   txHistory.unshift(r);
-  saveLocal();
+  queue.push({...r});
+  saveLocal();updateStatus();
   buildAccountBalances();
   renderAccountBalanceCards();
 
@@ -2793,7 +2794,8 @@ function submitTransfer() {
     isSyncing = false;
     if (ok) {
       r.synced = true;
-      saveLocal();
+      queue = queue.filter(q => q.id !== r.id);
+      saveLocal();updateStatus();
       showToast('Saved ✓', 'success');
       Promise.all([
         fetchCurrentMonth(true),
@@ -2805,7 +2807,8 @@ function submitTransfer() {
         renderAccountBalanceCards();
       });
     } else {
-      showToast(navigator.onLine ? 'Save failed' : 'Offline — saved locally', '');
+      // Left in queue — retryPendingQueue() will resync it automatically on next load/focus.
+      showToast(navigator.onLine ? 'Save failed' : 'Saved offline — will sync ✓', '');
     }
   });
   resetTransferForm();
@@ -2843,6 +2846,9 @@ async function deleteTransfer(txId) {
   // Optimistically remove transfer from local memory and update balances immediately
   txHistory = txHistory.filter(h => h.id !== txId && h.txId !== txId && String(h.id) !== String(txId));
   HIST.opex = (HIST.opex || []).filter(r => r.id !== txId && String(r.id) !== String(txId));
+  // Also drop it from the retry queue — otherwise an unsynced transfer deleted before
+  // retryPendingQueue() gets to it would resurrect as a new transaction after deletion.
+  queue = queue.filter(q => q.id !== txId && String(q.id) !== String(txId));
   saveLocal();
   buildAccountBalances();
   renderAccountBalanceCards();
@@ -4354,12 +4360,15 @@ async function retryPendingQueue() {
   let synced = 0;
   for (const r of pending) {
     const isInvest = r.type === 'invest' || r.action === 'invest';
+    const isTransfer = r.type === 'transfer';
     // Belt-and-suspenders on top of the Apps Script clientId idempotency cache (6h TTL):
     // an earlier fetchCurrentMonth/fetchCurrentMonthFresh in this same boot already
     // populated HIST.opex, so check in-memory first — no extra network call — before
     // blindly re-POSTing an item whose original request may have succeeded server-side
-    // despite a client-side timeout (see syncOpex/fetchWithTimeout).
-    if (!isInvest && r.date) {
+    // despite a client-side timeout (see syncOpex/fetchWithTimeout). Transfers don't land
+    // in HIST.opex so this dedup check doesn't apply — they rely solely on the server-side
+    // clientId idempotency cache in syncTransfer's payload.
+    if (!isInvest && !isTransfer && r.date) {
       const d = parseInt(r.date.split('-')[2], 10);
       const sig = sigOfTxHistory(r);
       const alreadyCovered = (HIST.opex || []).some(o =>
@@ -4371,7 +4380,7 @@ async function retryPendingQueue() {
         continue;
       }
     }
-    const ok = isInvest ? await syncInvest(r) : await syncOpex(r);
+    const ok = isInvest ? await syncInvest(r) : isTransfer ? await syncTransfer(r) : await syncOpex(r);
     if (ok) {
       queue = queue.filter(q => q.id !== r.id);
       txHistory = txHistory.map(h => h.id === r.id ? {...h, synced:true} : h);

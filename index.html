@@ -2843,6 +2843,9 @@ async function deleteTransfer(txId) {
   if (!txId) return;
   showToast('Deleting…', 'loading', 0);
 
+  // Capture before the queue is trimmed below.
+  const wasQueued = queue.some(q => q.id === txId || String(q.id) === String(txId));
+
   // Optimistically remove transfer from local memory and update balances immediately
   txHistory = txHistory.filter(h => h.id !== txId && h.txId !== txId && String(h.id) !== String(txId));
   HIST.opex = (HIST.opex || []).filter(r => r.id !== txId && String(r.id) !== String(txId));
@@ -2852,6 +2855,13 @@ async function deleteTransfer(txId) {
   saveLocal();
   buildAccountBalances();
   renderAccountBalanceCards();
+
+  // Never reached the server — nothing to delete there, and the queue entry above
+  // is already gone so it won't resurrect on the next retry.
+  if (wasQueued) {
+    showToast('Deleted ✓', 'success');
+    return;
+  }
 
   try {
     const payload = { type: 'transfer', action: 'delete', id: txId };
@@ -2873,7 +2883,10 @@ async function deleteTransfer(txId) {
 
 function openEditTransferOverlay(tx, dateStr = calCurrentDateStr) {
   if (!tx) return;
-  overlayEditId   = tx.sheetId || null;
+  // Fall back to the client-generated id (same pattern as opex/invest) so an unsynced
+  // transfer still in the retry queue can be identified as such by updateTransferTransaction/
+  // deleteTransfer, rather than only ever resolving a real server-issued sheetId.
+  overlayEditId   = tx.sheetId || tx.id || null;
   overlayEditMode = true;
   overlayEditType = 'transfer';
   const btn = document.querySelector('.pill-toggle-btn[data-mode="transfer"]');
@@ -2903,6 +2916,24 @@ async function updateTransferTransaction() {
   if (fromPm === toPm) { showToast('From and To must be different', 'error'); return; }
 
   closeInputOverlay();
+
+  // If this transfer never reached the server (still sitting in the local retry
+  // queue), there's no sheet row for an "edit" action to find. Patch the queued
+  // create and its txHistory entry in place instead — retryPendingQueue() will send
+  // the new values as a fresh create next time it runs.
+  const queuedIdx = queue.findIndex(q => q.id === txId || String(q.id) === String(txId));
+  if (queuedIdx !== -1) {
+    const patch = { date, fromPm, toPm, amount, notes };
+    queue[queuedIdx] = { ...queue[queuedIdx], ...patch };
+    txHistory = txHistory.map(h => (h.id === txId || String(h.id) === String(txId)) ? { ...h, ...patch } : h);
+    saveLocal();
+    calInited = false; initCalendar();
+    buildAccountBalances();
+    renderAccountBalanceCards();
+    showToast('Updated ✓', 'success');
+    return;
+  }
+
   showToast('Updating…', 'loading', 0);
 
   // Optimistically drop the old linked pair locally — the refetch below replaces

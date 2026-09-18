@@ -2691,7 +2691,7 @@ function submitOpex() {
   renderAccountBalanceCards();
   // Navigate back to Home immediately, with Saving toast
   switchTab('home', null);
-  showToast('Saving transaction…', 'loading', 0);
+  showToast('Saving…', 'loading', 0);
   syncOpex(r).then(ok=>{
     isSyncing = false;
     if(ok){
@@ -2712,7 +2712,7 @@ function submitOpex() {
       // Force-refresh so the new row gets rowIndex from the sheet (makes it editable)
       fetchCurrentMonth(true).then(rowCount=>{calInited=false;if(document.getElementById('page-home').classList.contains('active')){initCalendar();calRefreshOpenDayPanel();}buildAccountBalances();renderAccountBalanceCards();if(rowCount===0)showToast('Sent to sheet — couldn\'t confirm readback','error',6000);});
     }
-    else showToast(navigator.onLine ? 'Saved locally — sync pending' : 'Offline — will sync when connected','');
+    else showToast(navigator.onLine ? 'Save failed' : 'Saved offline — will sync ✓', '');
   });
   // Save recurring rule if toggle is ON
   if (isInstallment) {
@@ -2781,7 +2781,7 @@ function submitTransfer() {
   if (fromPm === toPm) { isSyncing = false; showToast('From and To must be different', 'error'); return; }
   const r = { id: Date.now(), date, fromPm, toPm, amount, notes, tx: 'Transfer', type: 'transfer', synced: false };
   switchTab('home', null);
-  showToast('Saving transfer…', 'loading', 0);
+  showToast('Saving…', 'loading', 0);
 
   // Optimistically save transfer locally and recompute balances
   txHistory.unshift(r);
@@ -2794,7 +2794,7 @@ function submitTransfer() {
     if (ok) {
       r.synced = true;
       saveLocal();
-      showToast('Transfer saved ✓', 'success');
+      showToast('Saved ✓', 'success');
       Promise.all([
         fetchCurrentMonth(true),
         loadHistData(),
@@ -2805,7 +2805,7 @@ function submitTransfer() {
         renderAccountBalanceCards();
       });
     } else {
-      showToast(navigator.onLine ? 'Save failed' : 'Offline — sync pending', '');
+      showToast(navigator.onLine ? 'Save failed' : 'Offline — saved locally', '');
     }
   });
   resetTransferForm();
@@ -2838,7 +2838,7 @@ async function syncTransfer(r) {
 
 async function deleteTransfer(txId) {
   if (!txId) return;
-  showToast('Deleting transfer…', 'loading', 0);
+  showToast('Deleting…', 'loading', 0);
 
   // Optimistically remove transfer from local memory and update balances immediately
   txHistory = txHistory.filter(h => h.id !== txId && h.txId !== txId && String(h.id) !== String(txId));
@@ -2852,7 +2852,7 @@ async function deleteTransfer(txId) {
     const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: apiBody(payload) });
     const j = await res.json().catch(() => ({}));
     if (j.status === 'ok') {
-      showToast('Transfer deleted ✓', 'success');
+      showToast('Deleted ✓', 'success');
       Promise.all([fetchCurrentMonth(true), loadHistData()]).then(() => {
         calInited = false;
         if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); }
@@ -2862,7 +2862,7 @@ async function deleteTransfer(txId) {
     } else {
       showToast('Delete failed', 'error');
     }
-  } catch (e) { showToast('Delete failed', 'error'); }
+  } catch (e) { showToast(navigator.onLine ? 'Delete failed' : 'Offline — saved locally', navigator.onLine ? 'error' : ''); }
 }
 
 function openEditTransferOverlay(tx, dateStr = calCurrentDateStr) {
@@ -2897,7 +2897,7 @@ async function updateTransferTransaction() {
   if (fromPm === toPm) { showToast('From and To must be different', 'error'); return; }
 
   closeInputOverlay();
-  showToast('Updating transfer…', 'loading', 0);
+  showToast('Updating…', 'loading', 0);
 
   // Optimistically drop the old linked pair locally — the refetch below replaces
   // it with the authoritative updated rows (same pattern as deleteTransfer).
@@ -2917,7 +2917,7 @@ async function updateTransferTransaction() {
     const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: apiBody(payload) });
     const j = await res.json().catch(() => ({}));
     if (j.status === 'ok') {
-      showToast('Transfer updated ✓', 'success');
+      showToast('Updated ✓', 'success');
       await Promise.all([fetchCurrentMonth(true), loadHistData()]);
       calInited = false;
       if (document.getElementById('page-home').classList.contains('active')) { initCalendar(); calRefreshOpenDayPanel(); }
@@ -2926,7 +2926,7 @@ async function updateTransferTransaction() {
     } else {
       showToast('Update failed', 'error');
     }
-  } catch (e) { showToast(navigator.onLine ? 'Update failed' : 'Offline — update pending', ''); }
+  } catch (e) { showToast(navigator.onLine ? 'Update failed' : 'Offline — saved locally', navigator.onLine ? 'error' : ''); }
 }
 
 async function deleteSheetTransferTransaction() {
@@ -3227,10 +3227,10 @@ async function updateTransaction() {
       }
       showToast('Updated ✓', 'success');
     } else {
-      showToast('Updated locally ✓', 'success');
+      showToast('Update failed', 'error');
     }
   } catch(e) {
-    showToast(navigator.onLine ? 'Updated locally ✓' : 'Offline — updated locally', 'success');
+    showToast(navigator.onLine ? 'Update failed' : 'Offline — saved locally', navigator.onLine ? 'error' : '');
   } finally {
     _suppressVisRefresh = false;
   }
@@ -3287,10 +3287,10 @@ async function deleteSheetTransaction() {
         }
       });
     } else {
-      showToast('Deleted locally ✓', 'success');
+      showToast('Delete failed', 'error');
     }
   } catch(e) {
-    showToast(navigator.onLine ? 'Deleted locally ✓' : 'Offline — deleted locally', 'success');
+    showToast(navigator.onLine ? 'Delete failed' : 'Offline — saved locally', navigator.onLine ? 'error' : '');
   } finally {
     _suppressVisRefresh = false;
   }
@@ -3358,7 +3358,7 @@ async function updateInvestTransaction() {
       showToast('Update failed', 'error');
     }
   } catch(e) {
-    showToast(navigator.onLine ? 'Update failed' : 'Offline — try again later', 'error');
+    showToast(navigator.onLine ? 'Update failed' : 'Offline — saved locally', navigator.onLine ? 'error' : '');
   }
 }
 
@@ -3384,7 +3384,7 @@ async function deleteSheetInvestTransaction() {
       showToast('Delete failed', 'error');
     }
   } catch(e) {
-    showToast(navigator.onLine ? 'Delete failed' : 'Offline — try again later', 'error');
+    showToast(navigator.onLine ? 'Delete failed' : 'Offline — saved locally', navigator.onLine ? 'error' : '');
   }
 }
 
@@ -3409,7 +3409,7 @@ function submitInvest() {
   // submitOpex/submitTransfer — leaving the overlay open after tapping Save made
   // it unclear whether the investment had actually been saved.
   switchTab('home', null);
-  showToast('Saving investment…', 'loading', 0);
+  showToast('Saving…', 'loading', 0);
   isSyncing = true;
   syncInvest(r).then(ok=>{
     isSyncing = false;
@@ -3421,7 +3421,7 @@ function submitInvest() {
       localStorage.removeItem(curMonthCacheKey());
       fetchCurrentMonth(true).then(() => { buildAccountBalances(); renderAccountBalanceCards(); });
     }
-    else showToast(navigator.onLine ? 'Saved locally — sync pending' : 'Offline — will sync when connected','');
+    else showToast(navigator.onLine ? 'Save failed' : 'Saved offline — will sync ✓', '');
   });
   const t=todayISO();
   document.getElementById('inputDateRawI').value=t;

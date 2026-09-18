@@ -423,7 +423,7 @@ async function saveAccountBalance() {
     // Also persist to Config sheet columns I (balance) and J (balanceDate)
     await saveConfigToServer();
 
-    showToast('Balance saved', 'success');
+    showToast('Saved ✓', 'success');
   } catch(e) {
     showToast('Could not save: ' + e.message, 'error');
   }
@@ -786,7 +786,7 @@ async function saveConfigItem() {
   showToast('Saving…', 'loading');
   await saveConfigToServer();
   renderSettingsLists();
-  showToast('Saved', 'success');
+  showToast('Saved ✓', 'success');
 }
 
 async function toggleArchiveCurrentConfigItem() {
@@ -798,10 +798,10 @@ async function toggleArchiveCurrentConfigItem() {
   existing.archived = !existing.archived;
   closeConfigItemOverlay();
   renderSettingsLists();
-  showToast(existing.archived ? 'Deleted' : 'Restored', 'loading');
+  showToast(existing.archived ? 'Deleting…' : 'Restoring…', 'loading');
   await saveConfigToServer();
   renderSettingsLists();
-  showToast('Saved', 'success');
+  showToast(existing.archived ? 'Deleted ✓' : 'Restored ✓', 'success');
 }
 
 // ── ACCOUNT PAGE ───────────────────────────────────────────────
@@ -1602,7 +1602,7 @@ function handleProjectedAddSync() {
   isSyncing = true;
   rules[idx].lastFired = curMonthKey();
   saveRecurring(rules);
-  showToast('Adding recurring transaction…', 'loading', 0);
+  showToast('Saving…', 'loading', 0);
   _addAndSyncRecurringRule(r).then(() => {
     isSyncing = false;
     saveLocal(); updateStatus();
@@ -1807,7 +1807,7 @@ function saveRecurringEdit() {
   saveRecurring(rules);
   closeRecurringEditModal();
   renderRecurringList();
-  showToast('Recurring rule updated', 'success');
+  showToast('Updated ✓', 'success');
 }
 
 function closeRecurringEditModal() {
@@ -1824,7 +1824,7 @@ function deleteRecurringRule(id) {
   // if user closes app before debounce fires (within 1s), there's no pending to indicate deletion.
   // Instead, rely on the merge logic to detect deleted rules via the pendingIds set.
   renderRecurringList();
-  showToast('Recurring rule deleted', 'success');
+  showToast('Deleted ✓', 'success');
 }
 
 function getCCBillingDate(pmName) {

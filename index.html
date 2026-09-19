@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Nota">
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="icon" href="icon.png">
@@ -36,7 +36,7 @@ html{height:100%;overflow:hidden;overscroll-behavior:none}
 body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:var(--bg);color:var(--text);height:var(--app-vh,100dvh);max-width:430px;margin:0 auto;overflow:hidden;overscroll-behavior:none}
 
 /* HEADER */
-.header{padding:env(safe-area-inset-top,44px) 20px 10px;background:var(--bg);position:sticky;top:0;z-index:100;border-bottom:0.5px solid var(--border)}
+.header{padding:calc(env(safe-area-inset-top,44px) + 6px) 20px 10px;background:var(--bg);position:sticky;top:0;z-index:100;border-bottom:0.5px solid var(--border)}
 .header-top{display:flex;align-items:center;justify-content:space-between}
 .app-title{font-size:22px;font-weight:800;letter-spacing:-0.5px;display:flex;align-items:center;gap:8px;font-family:var(--font-logo);color:var(--accent)}
 .app-title .dot{color:rgba(200,240,96,0.4)}

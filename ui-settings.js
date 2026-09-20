@@ -190,14 +190,14 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInv
     // via r.opexTxId, since Step 1 is its sole source of truth for that outflow).
     if (!includeInvestIdr && r.cat === 'Investment') return;
     const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
-    if (baseDate && rowDate <= baseDate) return;
+    if (baseDate && rowDate < baseDate) return;
     delta += (Number(r.inc) || 0) - (Number(r.exp) || 0);
   });
 
   // 2. Local unsynced transactions and transfers from txHistory
   (txHistory || []).forEach(r => {
     if (r.synced) return;
-    if (baseDate && r.date && r.date <= baseDate) return;
+    if (baseDate && r.date && r.date < baseDate) return;
 
     if (r.type === 'transfer') {
       const fromMatch = matchNames.includes(String(r.fromPm || '').toLowerCase().trim());
@@ -221,7 +221,7 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInv
   if (includeInvestIdr) {
     const allInvest = typeof getAllInvestRows === 'function' ? getAllInvestRows() : (investHistory || []);
     allInvest.forEach(r => {
-      if (baseDate && r.date && r.date <= baseDate) return;
+      if (baseDate && r.date && r.date < baseDate) return;
       const rAcct = String(r.account || '').toLowerCase().trim();
       if (!matchNames.includes(rAcct)) return;
       if (r.action === 'Buy') {

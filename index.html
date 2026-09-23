@@ -4065,6 +4065,32 @@ async function loadHistData(_isRetry) {
   }
 }
 
+// handleGetAllOpex()'s stale-while-revalidate cache returns the last-known-good
+// payload synchronously and refreshes it in the background, firing this event once
+// the fresh copy actually differs. Without a listener, any edit to a transaction
+// outside the current month (the current month has its own separate cache that IS
+// re-applied on every load) would appear to "revert" — the next loadHistData() call
+// would keep returning the pre-edit snapshot until a fetch happened to race ahead of
+// the read, then go stale again on the load after that.
+window.addEventListener('notaOpexUpdated', (e) => {
+  const payload = e.detail;
+  if (!payload || !Array.isArray(payload.rows)) return;
+  HIST.opex = payload.rows;
+  const now = new Date();
+  const cachedRows = JSON.parse(localStorage.getItem(curMonthCacheKey()) || 'null');
+  if (cachedRows && cachedRows.length > 0) _applyCurrentMonthRows(cachedRows, now.getFullYear(), now.getMonth()+1);
+  if (payload.txCat) { HIST.txCat = payload.txCat; localStorage.setItem('notapub_txCat', JSON.stringify(payload.txCat)); }
+  if (payload.txPm)  { HIST.txPm  = payload.txPm;  localStorage.setItem('notapub_txPm', JSON.stringify(payload.txPm)); }
+  pruneStaleHistory();
+  buildAccountBalances();
+  renderAccountBalanceCards();
+  if (document.getElementById('page-home')?.classList.contains('active')) {
+    calInited = false;
+    initCalendar();
+    calRefreshOpenDayPanel();
+  }
+});
+
 (function() {
   const cachedCat = localStorage.getItem('notapub_txCat');
   const cachedPm  = localStorage.getItem('notapub_txPm');

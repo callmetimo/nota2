@@ -2333,8 +2333,18 @@ function calcTotal() {
   updateInvestTotalHint();
 }
 
-function investTotalToIdr(total, ccy) {
-  return ccy === 'IDR' ? Math.round(total) : Math.round(total * getCcyRate(ccy));
+// `total` is what's shown in the field (rounded to 2dp for display). When it
+// still matches lot × price — i.e. the field is calcTotal's own auto-calculated
+// value, not a manual override — convert from the full-precision lot × price
+// instead, so there's only ONE rounding step down to IDR (matching the original
+// single-step Math.round(lot*price*rate) behavior) rather than rounding once to
+// native cents for display and again to IDR here. A genuinely manually-edited
+// Total (differs from lot × price by more than half a cent) is still honored
+// as-is, since that's the user's explicit override.
+function investTotalToIdr(total, ccy, lot, price) {
+  const autoCalculated = lot != null && price != null && Math.abs(total - lot * price) < 0.005;
+  const base = autoCalculated ? lot * price : total;
+  return ccy === 'IDR' ? Math.round(base) : Math.round(base * getCcyRate(ccy));
 }
 
 function updateInvestTotalHint() {
@@ -2344,9 +2354,11 @@ function updateInvestTotalHint() {
   const ccy = getStockCcy(stock);
   if (ccy === 'IDR') { hintEl.style.display = 'none'; hintEl.textContent = ''; return; }
   const total = parseAmt('inputTotal');
+  const lot = parseAmt('inputLot');
+  const price = parseAmt('inputPrice');
   hintEl.style.display = 'block';
   hintEl.textContent = total > 0
-    ? `≈ ${fRp(investTotalToIdr(total, ccy))} at today's rate`
+    ? `≈ ${fRp(investTotalToIdr(total, ccy, lot, price))} at today's rate`
     : `Total is in ${ccy} — converted to IDR at today's rate when saved`;
 }
 
@@ -3638,7 +3650,7 @@ async function updateInvestTransaction() {
   const price=parseAmt('inputPrice');
   const total=parseAmt('inputTotal');
   if(!date||!stock||!account||!lot||!price){showToast('All fields required','error');return}
-  const totalIdr=investTotalToIdr(total, getStockCcy(stock));
+  const totalIdr=investTotalToIdr(total, getStockCcy(stock), lot, price);
   closeInputOverlay();
 
   // If this investment never reached the server (still sitting in the local retry
@@ -3736,7 +3748,7 @@ function submitInvest() {
   const price=parseAmt('inputPrice');
   const total=parseAmt('inputTotal');
   if(!date||!stock||!account||!lot||!price){showToast('All fields required','error');return}
-  const totalIdr=investTotalToIdr(total, getStockCcy(stock));
+  const totalIdr=investTotalToIdr(total, getStockCcy(stock), lot, price);
   const r={id:Date.now(),date,stock,account,action:investAction,lot,price,totalIdr,type:'invest',synced:false};
   investHistory.unshift(r);
   queue.push({...r});

@@ -304,7 +304,9 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
             future: r.future || false,
             synced: r.synced,
             transferFromPm: r.transferFromPm || null,
-            transferToPm: r.transferToPm || null
+            transferToPm: r.transferToPm || null,
+            nativeAmount: r.nativeAmount || 0,
+            ccy: r.ccy || ''
           }))).replace(/'/g, '&#39;')
         : '[]';
       const dateStr  = `${cellY}-${String(cellM).padStart(2,'0')}-${String(cell.day).padStart(2,'0')}`;
@@ -380,7 +382,9 @@ function calGetRemainingWeeksHTML(year, month, today) {
             future: r.future || false,
             synced: r.synced,
             transferFromPm: r.transferFromPm || null,
-            transferToPm: r.transferToPm || null
+            transferToPm: r.transferToPm || null,
+            nativeAmount: r.nativeAmount || 0,
+            ccy: r.ccy || ''
           }))).replace(/'/g,'&#39;')
         : '[]';
       const dateStr = `${dy}-${String(dm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
@@ -438,7 +442,9 @@ function calGetCurrentWeekHTML(year, month, today) {
           ruleId: r.ruleId || null,
           synced: r.synced,
           transferFromPm: r.transferFromPm || null,
-          transferToPm: r.transferToPm || null
+          transferToPm: r.transferToPm || null,
+          nativeAmount: r.nativeAmount || 0,
+          ccy: r.ccy || ''
         }))).replace(/'/g,'&#39;')
       : '[]';
     const dateStr  = `${dy}-${String(dm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;

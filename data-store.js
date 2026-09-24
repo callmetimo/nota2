@@ -705,7 +705,7 @@ const DataStore = (() => {
     if (data.action === 'edit') {
       const rowIndices = await findOpexRowsByTxId(data.id);
       if (rowIndices.length < 2) return { status: 'error', message: 'Transfer rows not found' };
-      const { date, month, fromPm, toPm, amount, notes } = data;
+      const { date, month, fromPm, toPm, amount, notes, nativeAmount, ccy } = data;
       const [rowA, rowB] = [...rowIndices].sort((a, b) => a - b);
       await SheetsClient.updateValues(spreadsheetId, `Opex!A${rowA}:J${rowA}`, [[
         formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0,
@@ -713,6 +713,10 @@ const DataStore = (() => {
       await SheetsClient.updateValues(spreadsheetId, `Opex!A${rowB}:J${rowB}`, [[
         formatDateStr(date), month, 'Transfer', 'Transfer', toPm, amount, '', notes || '', '', 0,
       ]]);
+      // Both legs of a same-currency transfer share the same native amount/ccy —
+      // separate call, same reason as handleOpex's edit path: never touch K (TxID).
+      await SheetsClient.updateValues(spreadsheetId, `Opex!L${rowA}:M${rowA}`, [[nativeAmount || '', ccy || '']]);
+      await SheetsClient.updateValues(spreadsheetId, `Opex!L${rowB}:M${rowB}`, [[nativeAmount || '', ccy || '']]);
       return { status: 'ok' };
     }
     if (data.action === 'delete') {
@@ -729,14 +733,14 @@ const DataStore = (() => {
       })));
       return { status: 'ok' };
     }
-    const { date, month, fromPm, toPm, amount, notes } = data;
+    const { date, month, fromPm, toPm, amount, notes, nativeAmount, ccy } = data;
     const groupId = generateId();
     const txId = 'xfr_' + groupId;
     // Both legs are appended in a single call so they land together — appending them as two
     // separate requests could leave exactly one leg written if the second call failed.
-    await SheetsClient.appendValues(spreadsheetId, 'Opex!A:K', [
-      [formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0, txId],
-      [formatDateStr(date), month, 'Transfer', 'Transfer', toPm, amount, '', notes || '', '', 0, txId],
+    await SheetsClient.appendValues(spreadsheetId, 'Opex!A:M', [
+      [formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0, txId, nativeAmount || '', ccy || ''],
+      [formatDateStr(date), month, 'Transfer', 'Transfer', toPm, amount, '', notes || '', '', 0, txId, nativeAmount || '', ccy || ''],
     ]);
     return { status: 'ok', wrote: true, id: txId };
   }

@@ -217,6 +217,14 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInv
     if (r.type === 'transfer') {
       const fromMatch = matchNames.includes(String(r.fromPm || '').toLowerCase().trim());
       const toMatch = matchNames.includes(String(r.toPm || '').toLowerCase().trim());
+      if (!includeInvestIdr) {
+        const acctCcy = ((acctOrPm && acctOrPm.ccy) || '').toUpperCase();
+        if (!r.ccy || r.ccy.toUpperCase() !== acctCcy) return;
+        const nat = Number(r.nativeAmount) || 0;
+        if (fromMatch && !toMatch) delta -= nat;
+        else if (toMatch && !fromMatch) delta += nat;
+        return;
+      }
       const amt = Number(r.amount) || 0;
       if (fromMatch && !toMatch) delta -= amt;
       else if (toMatch && !fromMatch) delta += amt;

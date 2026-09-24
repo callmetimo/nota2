@@ -736,23 +736,24 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">From</label>
           <input type="text" class="form-input" id="xfrFrom" placeholder="Source account…" autocomplete="off" maxlength="50"
-            oninput="showAC('xfrFrom', getSmartTransferPms())" onfocus="showAC('xfrFrom', getSmartTransferPms())">
+            oninput="showAC('xfrFrom', getSmartTransferPms())" onfocus="showAC('xfrFrom', getSmartTransferPms())" onblur="onXfrAcctSelect()">
           <div class="autocomplete-list" id="ac-xfrFrom" style="display:none"></div>
         </div>
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">To</label>
           <input type="text" class="form-input" id="xfrTo" placeholder="Destination account…" autocomplete="off" maxlength="50"
-            oninput="showAC('xfrTo', getSmartTransferPms())" onfocus="showAC('xfrTo', getSmartTransferPms())">
+            oninput="showAC('xfrTo', getSmartTransferPms())" onfocus="showAC('xfrTo', getSmartTransferPms())" onblur="onXfrAcctSelect()">
           <div class="autocomplete-list" id="ac-xfrTo" style="display:none"></div>
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">Amount</label>
         <div class="amount-wrapper">
-          <span class="amount-prefix">Rp</span>
-          <input type="text" class="form-input amount-input" id="xfrAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
+          <span class="amount-prefix" id="xfrAmountPrefix">Rp</span>
+          <input type="text" class="form-input amount-input" id="xfrAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event); updateXfrFxHint()">
         </div>
       </div>
+      <div class="form-group" id="xfrFxHint" style="display:none;font-size:12px;color:var(--text2);margin-top:-4px"></div>
       <div class="form-group">
         <label class="form-label">Notes</label>
         <input type="text" class="form-input" id="xfrNotes" placeholder="Add a note…" autocomplete="off" maxlength="200">
@@ -2057,6 +2058,7 @@ function setInputMode(mode, el) {
     const t = todayISO();
     const rawEl = document.getElementById('xfrDateRaw');
     if (rawEl && !rawEl.value) { rawEl.value = t; document.getElementById('xfrDateText').textContent = isoDisp(t); }
+    onXfrAcctSelect();
   }
   const btn = document.getElementById('submitOpexBtn');
   btn.className = `submit-btn ${mode}`;
@@ -2103,6 +2105,7 @@ function selectAC(fid,val){
   if(fid==='inputStock'){onStockSelect(val);}
   if(fid==='inputAccount'){onAccountSelect();}
   if(fid==='inputPm'){checkCcInstallmentVisibility();onOpexPmSelect();}
+  if(fid==='xfrFrom'||fid==='xfrTo'){onXfrAcctSelect();}
 }
 document.addEventListener('click',e=>{
   if(!e.target.closest('.autocomplete-wrapper'))
@@ -2273,17 +2276,27 @@ function updateSmartSuggestions(txName) {
 }
 
 // ── INVEST HELPERS ────────────────────────────────────────────
+// Resolves what currency a stock/asset's own Price field is quoted in. A Forex
+// pair (e.g. "USDIDR CIMB") is excluded even though it tracks a foreign
+// currency — its price IS the IDR rate itself, not a foreign-currency price —
+// so it stays Rp-prefixed, same as before this was generalized past USD.
+function getStockCcy(stockName) {
+  const type = STOCK_TYPE[stockName] || '';
+  if (type === 'Forex') return 'IDR';
+  const item = CONFIG_ITEMS.find(i => i.kind === 'stock' && i.name === stockName);
+  if (item && item.ccy) return item.ccy.toUpperCase();
+  return type === 'US Stock' ? 'USD' : 'IDR';
+}
+function ccyPrefix(ccy) { return ccy === 'IDR' ? 'Rp' : (CCY_SYMBOLS[ccy] || ccy + ' '); }
+
 function onAccountSelect() {
   const acct = document.getElementById('inputAccount').value.trim();
-  const isUSD = ACCOUNT_CCY[acct] === 'USD';
-  document.getElementById('investPricePrefix').textContent = isUSD ? '$' : 'Rp';
+  document.getElementById('investPricePrefix').textContent = ccyPrefix(getOpexPmCcy(acct));
   calcTotal();
   updateAvgPrices();
 }
 function onStockSelect(stock) {
-  const type = STOCK_TYPE[stock] || '';
-  const isUSD = type === 'US Stock';
-  document.getElementById('investPricePrefix').textContent = isUSD ? '$' : 'Rp';
+  document.getElementById('investPricePrefix').textContent = ccyPrefix(getStockCcy(stock));
   updateAvgPrices();
   updateSmartAccountSuggestion(stock);
   autoFillAccountIfExactMatch(stock);
@@ -2298,14 +2311,10 @@ function calcTotal() {
   const lot = parseAmt('inputLot');
   const price = parseAmt('inputPrice');
   const stock = document.getElementById('inputStock').value;
-  const type = STOCK_TYPE[stock] || '';
-  const isUSD = type === 'US Stock';
+  const ccy = getStockCcy(stock);
   if (lot && price) {
     let total = lot * price;
-    if (isUSD) {
-      const rate = fxRates['USD'] || 16500;
-      total = Math.round(total * rate);
-    }
+    if (ccy !== 'IDR') total = Math.round(total * getCcyRate(ccy));
     document.getElementById('inputTotal').value = formatGroupedAmt(Math.round(total));
   }
   updateAvgPrices();
@@ -2316,7 +2325,7 @@ function updateAvgPrices() {
   const lot    = parseAmt('inputLot');
   const price  = parseAmt('inputPrice');
   const action = document.querySelector('#form-invest .action-btn.active')?.dataset.action || 'Buy';
-  const isUSD  = (STOCK_TYPE[stock] || '') === 'US Stock';
+  const ccy    = getStockCcy(stock);
 
   const curEl = document.getElementById('investCurrentAvg');
   const newEl = document.getElementById('investNewAvg');
@@ -2336,7 +2345,7 @@ function updateAvgPrices() {
   const avgPrice = buyLots > 0 ? buyPriceWeighted / buyLots : 0;
 
   // String-exponent rounding avoids IEEE 754 half-point errors (e.g. 147.325*100 = 14732.4999...)
-  const fmt = (v) => isUSD ? `$${Number(Math.round(v + 'e2') + 'e-2').toFixed(2)}` : fRp(Math.round(v));
+  const fmt = (v) => ccy !== 'IDR' ? `${ccyPrefix(ccy)}${Number(Math.round(v + 'e2') + 'e-2').toFixed(2)}` : fRp(Math.round(v));
 
   if (buyLots > 0) {
     curEl.textContent = fmt(avgPrice);
@@ -2684,6 +2693,47 @@ function updateOpexFxHint() {
     : `Amount is in ${ccy} — converted at avg ${fRp(Math.round(rate))}/${ccy}`;
 }
 
+// ── TRANSFER FX ──────────────────────────────────────────────
+// A Transfer only ever moves cash within ONE currency (it's not a conversion) —
+// so it's FX-aware only when From and To share the same non-IDR currency (e.g.
+// moving USD between two USD accounts while travelling). From/To in different
+// currencies is refused; that's what Invest (Buy/Sell the FX pair) is for.
+function resolveXfrFx() {
+  const fromPm = document.getElementById('xfrFrom').value.trim();
+  const toPm = document.getElementById('xfrTo').value.trim();
+  const fromCcy = getOpexPmCcy(fromPm);
+  const toCcy = getOpexPmCcy(toPm);
+  const mismatch = !!(fromPm && toPm && fromCcy !== toCcy);
+  return { fromPm, toPm, ccy: fromCcy, mismatch };
+}
+
+function onXfrAcctSelect() {
+  const { ccy, mismatch } = resolveXfrFx();
+  const prefixEl = document.getElementById('xfrAmountPrefix');
+  if (prefixEl) prefixEl.textContent = mismatch ? 'Rp' : ccyPrefix(ccy);
+  updateXfrFxHint();
+}
+
+function updateXfrFxHint() {
+  const hintEl = document.getElementById('xfrFxHint');
+  if (!hintEl) return;
+  const { fromPm, ccy, mismatch } = resolveXfrFx();
+  if (mismatch) {
+    hintEl.style.display = 'block';
+    hintEl.style.color = 'var(--red)';
+    hintEl.textContent = 'From and To are different currencies — Transfer only moves cash within one currency. Use Invest to convert currencies.';
+    return;
+  }
+  hintEl.style.color = 'var(--text2)';
+  if (ccy === 'IDR') { hintEl.style.display = 'none'; hintEl.textContent = ''; return; }
+  const native = parseAmt('xfrAmount');
+  const rate = getFxAvgRate(fromPm, ccy);
+  hintEl.style.display = 'block';
+  hintEl.textContent = native > 0
+    ? `≈ ${fRp(Math.round(native * rate))} at avg ${fRp(Math.round(rate))}/${ccy}`
+    : `Amount is in ${ccy} — converted at avg ${fRp(Math.round(rate))}/${ccy}`;
+}
+
 // ── SUBMIT OPEX ───────────────────────────────────────────────
 function submitOpex() {
   if (isSyncing) return;
@@ -2857,11 +2907,19 @@ function submitTransfer() {
   const date = document.getElementById('xfrDateRaw').value;
   const fromPm = sanitizeInput(document.getElementById('xfrFrom').value, 50).trim();
   const toPm = sanitizeInput(document.getElementById('xfrTo').value, 50).trim();
-  const amount = parseGroupedAmt('xfrAmount');
+  let amount = parseGroupedAmt('xfrAmount');
   const notes = sanitizeInput(document.getElementById('xfrNotes').value, 200);
   if (!date || !fromPm || !toPm || !amount) { isSyncing = false; showToast('All fields required', 'error'); return; }
   if (fromPm === toPm) { isSyncing = false; showToast('From and To must be different', 'error'); return; }
-  const r = { id: Date.now(), date, fromPm, toPm, amount, notes, tx: 'Transfer', type: 'transfer', synced: false };
+  const { ccy: xfrCcy, mismatch: xfrMismatch } = resolveXfrFx();
+  if (xfrMismatch) { isSyncing = false; showToast('From and To are different currencies — use Invest to convert', 'error'); return; }
+  let nativeAmount = 0, ccy = '';
+  if (xfrCcy !== 'IDR') {
+    nativeAmount = amount;
+    ccy = xfrCcy;
+    amount = Math.round(nativeAmount * getFxAvgRate(fromPm, xfrCcy));
+  }
+  const r = { id: Date.now(), date, fromPm, toPm, amount, notes, tx: 'Transfer', type: 'transfer', synced: false, nativeAmount, ccy };
   switchTab('home', null);
   showToast('Saving…', 'loading', 0);
 
@@ -2904,6 +2962,7 @@ function resetTransferForm() {
   document.getElementById('xfrTo').value = '';
   document.getElementById('xfrAmount').value = '';
   document.getElementById('xfrNotes').value = '';
+  onXfrAcctSelect();
 }
 
 async function syncTransfer(r) {
@@ -2913,6 +2972,7 @@ async function syncTransfer(r) {
       date: isoSheetDate(r.date), month: isoMonthKey(r.date),
       fromPm: r.fromPm, toPm: r.toPm,
       amount: r.amount, notes: r.notes || '',
+      nativeAmount: r.nativeAmount || '', ccy: r.ccy || '',
       clientId: String(r.id),
     };
     const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: apiBody(payload) });
@@ -2980,8 +3040,9 @@ function openEditTransferOverlay(tx, dateStr = calCurrentDateStr) {
   }
   document.getElementById('xfrFrom').value   = tx.transferFromPm || '';
   document.getElementById('xfrTo').value     = tx.transferToPm   || '';
-  document.getElementById('xfrAmount').value = formatGroupedAmt(tx.amt);
+  document.getElementById('xfrAmount').value = formatGroupedAmt(tx.ccy ? tx.nativeAmount : tx.amt);
   document.getElementById('xfrNotes').value  = tx.notes || '';
+  onXfrAcctSelect();
   document.getElementById('submitTransferBtn').textContent = 'Update Transfer';
   document.getElementById('deleteTransferBtn').style.display = 'block';
   document.getElementById('inputOverlay').classList.add('open');
@@ -2992,10 +3053,18 @@ async function updateTransferTransaction() {
   const date = document.getElementById('xfrDateRaw').value;
   const fromPm = sanitizeInput(document.getElementById('xfrFrom').value, 50).trim();
   const toPm = sanitizeInput(document.getElementById('xfrTo').value, 50).trim();
-  const amount = parseGroupedAmt('xfrAmount');
+  let amount = parseGroupedAmt('xfrAmount');
   const notes = sanitizeInput(document.getElementById('xfrNotes').value, 200);
   if (!date || !fromPm || !toPm || !amount) { showToast('All fields required', 'error'); return; }
   if (fromPm === toPm) { showToast('From and To must be different', 'error'); return; }
+  const { ccy: xfrCcy, mismatch: xfrMismatch } = resolveXfrFx();
+  if (xfrMismatch) { showToast('From and To are different currencies — use Invest to convert', 'error'); return; }
+  let nativeAmount = 0, ccy = '';
+  if (xfrCcy !== 'IDR') {
+    nativeAmount = amount;
+    ccy = xfrCcy;
+    amount = Math.round(nativeAmount * getFxAvgRate(fromPm, xfrCcy));
+  }
 
   closeInputOverlay();
 
@@ -3005,7 +3074,7 @@ async function updateTransferTransaction() {
   // the new values as a fresh create next time it runs.
   const queuedIdx = queue.findIndex(q => q.id === txId || String(q.id) === String(txId));
   if (queuedIdx !== -1) {
-    const patch = { date, fromPm, toPm, amount, notes };
+    const patch = { date, fromPm, toPm, amount, notes, nativeAmount, ccy };
     queue[queuedIdx] = { ...queue[queuedIdx], ...patch };
     txHistory = txHistory.map(h => (h.id === txId || String(h.id) === String(txId)) ? { ...h, ...patch } : h);
     saveLocal();
@@ -3032,6 +3101,7 @@ async function updateTransferTransaction() {
       type: 'transfer', action: 'edit', id: txId,
       date: isoSheetDate(date), month: isoMonthKey(date),
       fromPm, toPm, amount, notes,
+      nativeAmount: nativeAmount || '', ccy: ccy || '',
     };
     const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: apiBody(payload) });
     const j = await res.json().catch(() => ({}));

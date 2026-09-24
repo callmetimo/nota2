@@ -503,6 +503,14 @@ Following Session 28's fix, ran a full audit (all `.js` files and inline `<scrip
 - Bumped `APP_VERSION` to `'v4.35'`.
 - **Verification**: read-through/context audit rather than a live exploit test (no real account in this environment); the fix mirrors an already-proven-safe pattern used at ~15 other call sites in the same files, so risk of regression is low. No other unescaped user-data render sites were found across the 57 checked.
 
+#### Session 59: Fixed Invest Sell Transactions Never Appearing on the Home Calendar and Not Crediting the Receiving Account (v4.36) (Claude)
+- **Bug**: reported by a user — entering a Sell transaction on the Invest page didn't show up on the Home Calendar, and the destination (receiving) account's balance didn't increase even though the source stock holding correctly decreased.
+- **Root cause**: `handleInvest()` (`data-store.js`) only ever dual-wrote a linked `Opex` row (`cat='Investment'`) for `action === 'Buy'`. That linked row is what makes an Invest transaction show up on the Home Calendar (`ui-calendar.js` reads `HIST.opex`, not the Invest sheet) — a Sell never got one, so it was invisible there. It also meant a Sell's cash inflow only ever existed on the Invest sheet, read directly by `computeAccountCurrentBalance()`'s Step 3 (`ui-settings.js`) — correct in isolation, but happening on a different refresh path than Step 1 (`HIST.opex`, refreshed by `fetchCurrentMonth()` right after sync) and never refreshed by `submitInvest()`'s own post-sync callback, so the very next balance recompute could race and appear to not have credited the account at all.
+- **Fix (`data-store.js`)**: extended `handleInvest()` to dual-write for `Sell` too — writing the linked Opex row as **income** (`inc = totalIdr`) instead of expense, joined by the same `opexTxId` column. Generalized the `op:'edit'` branch so switching a row between Buy and Sell updates the *same* linked Opex row in place (flips income/expense) instead of deleting it — previously, editing an existing Buy into a Sell deleted its linked row and never created a replacement, since only `action === 'Buy'` created one.
+- **Fix (`ui-settings.js`)**: extended the existing `opexTxId` de-dupe guard in `computeAccountCurrentBalance()`'s Step 3 (previously Buy-only, see Session 31) to Sell rows as well, since Sell's cash flow is now also represented via Step 1's linked Opex row — without this, a synced Sell would be double-counted (once via the new Opex row, once via the raw Invest row).
+- Bumped `APP_VERSION` to `'v4.36'`.
+- **Not fixed / follow-up flagged**: `computeCashBalance()` (`ui-insights.js`), used for the Net Worth "Cash" total, sums Buy/Sell deltas from `investHistory`/`liveInvest` with no `opexTxId` guard at all — this looks like the same double-count class Session 31 fixed for `computeAccountCurrentBalance()`, pre-existing for Buy and now also applicable to Sell, but out of scope for this specific bug report and left for a separate session.
+
 ---
 
 ## Sign-In Flow — Do's and Don'ts (Read Before Touching Auth Code)
@@ -632,29 +640,34 @@ split) to prevent them from drifting out of sync.
 
 ## Invest ↔ Opex dual-write (avoiding double-counting)
 
-Every Invest **Buy** writes to **two sheets, not one**: `handleInvest()`
-(`data-store.js`) appends the Invest row itself, and — for `action === 'Buy'`
-only — also appends a linked `Opex` row (`cat = 'Investment'`, `pm` = the
-funding account, `exp = totalIdr`), joining the two via an `opexTxId`/`opexId`
-column. This is deliberate — it's what makes an investment show up as an
-"Investment" expense in the ledger — but it means **the same real-world outflow
-now exists as two rows**, and any balance/valuation calculation that reads
-both sheets for the same account has to count it exactly once, not twice.
-Session 31 fixed two variants of this exact mistake (see above) — both were
-`computeAccountCurrentBalance()` (`ui-settings.js`) summing the linked Opex
-row *and* the Invest row for the same Buy.
+Every Invest **Buy or Sell** writes to **two sheets, not one**: `handleInvest()`
+(`data-store.js`) appends the Invest row itself, and also appends a linked
+`Opex` row (`cat = 'Investment'`, `pm` = the funding/receiving account,
+`exp = totalIdr` for a Buy, `inc = totalIdr` for a Sell), joining the two via
+an `opexTxId`/`opexId` column. This is deliberate — it's what makes an
+investment show up as an "Investment" expense/income in the ledger and on the
+Home Calendar — but it means **the same real-world cash flow now exists as two
+rows**, and any balance/valuation calculation that reads both sheets for the
+same account has to count it exactly once, not twice.
+Session 31 fixed two variants of this exact mistake for Buy (see above) — both
+were `computeAccountCurrentBalance()` (`ui-settings.js`) summing the linked
+Opex row *and* the Invest row for the same Buy. A later fix (2026-09-24)
+extended the dual-write to Sell (previously Sell only existed on the Invest
+side, which is why a Sell never showed on the Home Calendar and its inflow
+raced with cross-device sync) and extended the same `opexTxId` de-dupe guard
+to Sell rows.
 
 **Do:**
 - When writing a calculation that reads **both** `HIST.opex` and Invest rows
   (`getAllInvestRows()`) for the same account, decide up front which sheet is
-  the "source of truth" for a linked Buy's outflow, and explicitly skip that
-  same event on the other side.
+  the "source of truth" for a linked Buy/Sell's cash flow, and explicitly skip
+  that same event on the other side.
 - Use the row's `opexTxId` (Invest side) as the de-dupe key — a truthy
-  `opexTxId` on a `Buy` row means its outflow is already represented as an
-  Opex row somewhere.
-- Remember `Sell` never gets a linked Opex row (`handleInvest` only dual-writes
-  for `Buy`) — don't add a de-dupe guard that accidentally also skips Sells;
-  they're the *only* record of that inflow.
+  `opexTxId` on a Buy *or* Sell row means its cash flow is already represented
+  as an Opex row somewhere.
+- On an Invest edit (`op:'edit'`), update the existing linked Opex row in place
+  when switching between Buy and Sell (flip expense↔income on the same row)
+  rather than deleting/recreating it — see `handleInvest()`'s edit branch.
 - Remember a linked Opex row's amount (`exp`/`totalIdr`) is **always
   IDR-denominated**, even when the funding account's own currency isn't IDR.
   If a calculation is working in an account's native currency (as the FX
@@ -780,7 +793,7 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
 - **Config Balance Parsing (`parseConfigBalance` & `data-store.js`)**: Config balance strings formatted like `Rp 150.000.000` or `150,000,000` MUST NOT be parsed with naive `replace(/[^\d.-]/g, '')`. In dot-separated formats, `Number("150.000.000")` turns into `150` or `NaN`. Use `parseConfigBalance()` which handles currency prefixes, thousand dots, and commas before numeric conversion.
 - **Asset Type Fallback Priority**: Always perform keyword-based asset identification (e.g. `sUpper.includes('JHT')`) BEFORE testing generic fallbacks (`!type || type === 'Other'`). Otherwise, items configured with `Other` or missing asset types will fall back to `Cash` or `US Stock` instead of `JHT`.
 - **Net Worth Fallback Aggregation (`getNetWorthAllocations` step 3, `ui-insights.js`)**: Non-invest stock items and static account snapshots stored in `rawAccountBalances` or `CONFIG_ITEMS` (like JHT) must be included via the fallback pass inside `getNetWorthAllocations()` (called by `renderOverview()`, `ui-insights.js:952-1040`, the fallback block at line ~999), ensuring assets without Opex/Invest sheet transaction rows are still counted in total net worth and donut visualization. (There is no function literally named `renderNetWorthOverview` — that name never existed in the codebase; this bullet previously cited it in error.)
-- **Invest Buy transactions dual-write to Opex** (`handleInvest`, `data-store.js`) — a linked `cat='Investment'` row, joined via `opexTxId`. Any balance calculation reading both `HIST.opex` and Invest rows for the same account must count that outflow exactly once — see **[Invest ↔ Opex dual-write](#invest--opex-dual-write-avoiding-double-counting)** for the do's/don'ts and Session 31 for the two variants of this bug (IDR and FX accounts) already found and fixed.
+- **Invest Buy and Sell transactions dual-write to Opex** (`handleInvest`, `data-store.js`) — a linked `cat='Investment'` row (expense for Buy, income for Sell), joined via `opexTxId`. Any balance calculation reading both `HIST.opex` and Invest rows for the same account must count that cash flow exactly once — see **[Invest ↔ Opex dual-write](#invest--opex-dual-write-avoiding-double-counting)** for the do's/don'ts, Session 31 for the two variants of this bug (IDR and FX accounts) already found and fixed for Buy, and Session 59 for extending the dual-write and the de-dupe guard to Sell.
 
 ### Resilience & error handling patterns
 

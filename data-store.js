@@ -843,24 +843,24 @@ const DataStore = (() => {
         formatDateStr(date), stock, stockType, action, account || '', lot, price, totalIdr,
       ]]);
 
+      // Both Buy and Sell keep a linked Opex row (expense for Buy, income for Sell) —
+      // so switching action on an existing row updates that same row in place instead
+      // of deleting/recreating it.
       let newOpexId = existingOpexId;
-      const newActionIsBuy = action === 'Buy';
-      if (existingOpexId && newActionIsBuy) {
+      const isSell = action === 'Sell';
+      const monthKey = month || deriveMonthKey(date);
+      const payMethod = account || pm || 'BCA';
+      if (existingOpexId) {
         const opexRow = await findOpexRowById(existingOpexId);
         if (opexRow) {
-          const monthKey = month || deriveMonthKey(date);
-          const payMethod = account || pm || 'BCA';
+          const income = isSell ? Number(totalIdr) : '';
+          const expense = isSell ? '' : Number(totalIdr);
           await SheetsClient.updateValues(spreadsheetId, `Opex!A${opexRow}:J${opexRow}`, [[
-            formatDateStr(date), monthKey, 'Investment', stock, payMethod, '', Number(totalIdr), '', '', 0,
+            formatDateStr(date), monthKey, 'Investment', stock, payMethod, income, expense, '', '', 0,
           ]]);
         }
-      } else if (existingOpexId && !newActionIsBuy) {
-        await deleteOpexRowById(existingOpexId);
-        newOpexId = '';
-      } else if (!existingOpexId && newActionIsBuy) {
-        const monthKey = month || deriveMonthKey(date);
-        const payMethod = account || pm || 'BCA';
-        newOpexId = await writeToOpex(date, monthKey, 'Investment', stock, payMethod, 'expense', totalIdr, '');
+      } else {
+        newOpexId = await writeToOpex(date, monthKey, 'Investment', stock, payMethod, isSell ? 'income' : 'expense', totalIdr, '');
       }
       if (newOpexId !== existingOpexId) {
         await SheetsClient.updateValues(spreadsheetId, `Invest!J${rowIndex}`, [[newOpexId]]);
@@ -884,10 +884,10 @@ const DataStore = (() => {
 
     const id = generateId();
     let opexId = '';
-    if (action === 'Buy') {
+    if (action === 'Buy' || action === 'Sell') {
       const monthKey = month || deriveMonthKey(date);
       const payMethod = account || pm || 'BCA';
-      opexId = await writeToOpex(date, monthKey, 'Investment', stock, payMethod, 'expense', totalIdr, '');
+      opexId = await writeToOpex(date, monthKey, 'Investment', stock, payMethod, action === 'Sell' ? 'income' : 'expense', totalIdr, '');
     }
     await SheetsClient.appendValues(spreadsheetId, 'Invest!A:J', [[
       formatDateStr(date), stock, stockType, action, account || '', lot, price, totalIdr, id, opexId,

@@ -180,14 +180,15 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInv
   (HIST.opex || []).forEach(r => {
     const rPm = String(r.pm || '').toLowerCase().trim();
     if (!matchNames.includes(rPm)) return;
-    // A linked Opex 'Investment' row (handleInvest's dual-write for a Buy) is always
-    // IDR-denominated (r.exp = totalIdr), even when the funding account is itself
-    // FX/non-IDR. For non-IDR accounts (includeInvestIdr=false, the only other caller
-    // of this function) that depletion is already correctly counted, in native units,
-    // by netLot/computeInvestNetLots in buildAccountBalances — so counting it again
-    // here would both double-count it and apply an IDR figure as if it were native
-    // currency. IDR accounts still need this row (Step 3 below skips it there instead,
-    // via r.opexTxId, since Step 1 is its sole source of truth for that outflow).
+    // A linked Opex 'Investment' row (handleInvest's dual-write for a Buy or Sell) is
+    // always IDR-denominated (r.exp/r.inc = totalIdr), even when the funding/receiving
+    // account is itself FX/non-IDR. For non-IDR accounts (includeInvestIdr=false, the
+    // only other caller of this function) that flow is already correctly counted, in
+    // native units, by netLot/computeInvestNetLots in buildAccountBalances — so
+    // counting it again here would both double-count it and apply an IDR figure as if
+    // it were native currency. IDR accounts still need this row (Step 3 below skips it
+    // there instead, via r.opexTxId, since Step 1 is its sole source of truth for that
+    // cash flow).
     if (!includeInvestIdr && r.cat === 'Investment') return;
     const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
     if (baseDate && rowDate < baseDate) return;
@@ -224,14 +225,12 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInv
       if (baseDate && r.date && r.date < baseDate) return;
       const rAcct = String(r.account || '').toLowerCase().trim();
       if (!matchNames.includes(rAcct)) return;
-      if (r.action === 'Buy') {
-        // A Buy already has its outflow counted via Step 1's linked Opex 'Investment'
-        // row (handleInvest writes both, linked by opexTxId) — counting it again here
-        // would double-subtract the source account. Only Buys with no link (unsynced
-        // local rows that haven't round-tripped through sync yet) still need this.
-        if (r.opexTxId) return;
-        delta -= (Number(r.totalIdr) || 0);
-      }
+      // Both Buy and Sell now have their cash-flow counted via Step 1's linked Opex
+      // 'Investment' row (handleInvest writes both, linked by opexTxId) — counting it
+      // again here would double count. Only rows with no link (unsynced local rows
+      // that haven't round-tripped through sync yet) still need this.
+      if (r.opexTxId) return;
+      if (r.action === 'Buy') delta -= (Number(r.totalIdr) || 0);
       else if (r.action === 'Sell') delta += (Number(r.totalIdr) || 0);
     });
   }

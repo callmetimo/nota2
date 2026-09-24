@@ -1455,7 +1455,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.38';
+const APP_VERSION = 'v4.39';
 const APP_BUILD = '2026-09-03a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -3125,12 +3125,17 @@ function openEditOverlayFromRow(row, dateStr) {
     const opexPm = tx.pm || '';
     const allInvest = typeof getAllInvestRows === 'function' ? getAllInvestRows() : [];
 
-    // Prefer the exact link: tx.id is this linked Opex row's own id, which
-    // handleInvest() stores on the Invest row as opexTxId. Matching on it is
-    // exact — unlike the date+account+amount fallback below, it can't silently
-    // resolve to the wrong row (or fail to resolve at all) and fall through to
-    // editing/deleting only the Opex side, orphaning the Invest sheet row.
-    let invRow = tx.id ? allInvest.find(r => r.opexTxId && r.opexTxId === tx.id) : null;
+    // Prefer the exact link: the tapped row's own id (tx.sheetId from the
+    // Calendar day panel's serialized JSON, or tx.id from Search/HIST.opex rows
+    // directly) is this linked Opex row's own id, which handleInvest() stores on
+    // the Invest row as opexTxId. Matching on it is exact — unlike the
+    // date+account+amount fallback below, it can't silently resolve to the wrong
+    // row (or fail to resolve at all, e.g. for a USD-settled Buy/Sell, since the
+    // fallback compares the Opex row's always-IDR amount against native units)
+    // and fall through to editing/deleting only the Opex side, orphaning the
+    // Invest sheet row.
+    const opexRowId = tx.sheetId || tx.id || null;
+    let invRow = opexRowId ? allInvest.find(r => r.opexTxId && r.opexTxId === opexRowId) : null;
 
     if (!invRow) {
       invRow = allInvest.find(r => {

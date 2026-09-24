@@ -287,9 +287,34 @@ function buildAccountBalances() {
         });
       }
 
+      // Buy/Sell of a DIFFERENTLY-named stock settled through this FX account (e.g.
+      // buying/selling QQQ — priced in USD — funded from or credited to a USD
+      // account) moves this account's own native cash balance too. netLot above only
+      // covers a stock that literally shares this account's name/currency-pair
+      // identity (e.g. "USDIDR Pluang Febri"); it never matches a real ticker like
+      // "QQQ", so without this, an FX account never reflects a Buy/Sell of anything
+      // funded through it unless that trade is itself the dual-purpose FX "stock".
+      // Only counted when the traded stock's own price is quoted in this account's
+      // currency (so lot×price is already in native units) — otherwise the native
+      // amount isn't reliably known and it's left uncounted rather than risk mixing
+      // units (r.totalIdr is always IDR, never this account's native currency).
+      let fxCashDelta = 0;
+      const acctNameLower = acct.name.toLowerCase().trim();
+      investSinceBase.forEach(r => {
+        if (String(r.account || '').toLowerCase().trim() !== acctNameLower) return;
+        if (isFxAccountMatch(acct.name, ccy, r.stock)) return; // already represented via netLot above
+        const stockConfig = CONFIG_ITEMS.find(i => i.name && i.name.toLowerCase() === (r.stock || '').toLowerCase());
+        const stockType = getAssetTypeForItem(r.stock, stockConfig?.assetType || STOCK_TYPE[r.stock], false);
+        const stockCcy = (ACCOUNT_CCY[r.stock] || stockConfig?.ccy || (stockType === 'US Stock' ? 'USD' : '')).toUpperCase();
+        if (!stockCcy || stockCcy !== ccy) return;
+        const nativeAmt = (Number(r.lot) || 0) * (Number(r.price) || 0);
+        if (r.action === 'Buy') fxCashDelta -= nativeAmt;
+        else if (r.action === 'Sell') fxCashDelta += nativeAmt;
+      });
+
       const currentNative = computeAccountCurrentBalance(baseAmt, baseDate, acct, false);
-      const totalNative = currentNative + netLot;
-      
+      const totalNative = currentNative + netLot + fxCashDelta;
+
       accountBalances[acct.name] = { amount: totalNative * rate, nativeAmount: totalNative, ccy };
       return;
     }

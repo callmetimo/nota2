@@ -712,12 +712,13 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Total (IDR)</label>
+        <label class="form-label">Total</label>
         <div class="amount-wrapper">
-          <span class="amount-prefix">Rp</span>
-          <input type="text" class="form-input amount-input" id="inputTotal" placeholder="Auto-calculated" inputmode="decimal" oninput="formatAmountInput(this, event); updateAvgPrices()">
+          <span class="amount-prefix" id="investTotalPrefix">Rp</span>
+          <input type="text" class="form-input amount-input" id="inputTotal" placeholder="Auto-calculated" inputmode="decimal" oninput="formatAmountInput(this, event); updateAvgPrices(); updateInvestTotalHint()">
         </div>
       </div>
+      <div class="form-group" id="investTotalHint" style="display:none;font-size:12px;color:var(--text2);margin-top:-4px"></div>
       <button class="submit-btn invest" id="submitInvestBtn" onclick="submitInvest()">Save Investment</button>
       <button class="delete-btn" id="deleteInvestBtn" onclick="deleteSheetInvestTransaction()" style="display:none">Delete Investment</button>
     </div>
@@ -2297,6 +2298,7 @@ function onAccountSelect() {
 }
 function onStockSelect(stock) {
   document.getElementById('investPricePrefix').textContent = ccyPrefix(getStockCcy(stock));
+  calcTotal();
   updateAvgPrices();
   updateSmartAccountSuggestion(stock);
   autoFillAccountIfExactMatch(stock);
@@ -2307,17 +2309,45 @@ function onStockInput() {
   updateSmartAccountSuggestion(val);
   autoFillAccountIfExactMatch(val);
 }
+// Total is entered/displayed in the asset's own currency (lot × price), same as
+// Price — not silently converted to IDR the way it used to be, since that made
+// Price show $ while Total stayed Rp on the very same row. The actual IDR figure
+// that gets synced (needed for the linked Opex expense/income row and for
+// Insights) is derived from this at submit time via updateInvestTotalHint's
+// live-rate conversion — same live-rate behavior calcTotal always had, just
+// moved out of the editable field and into the hint below it.
 function calcTotal() {
   const lot = parseAmt('inputLot');
   const price = parseAmt('inputPrice');
   const stock = document.getElementById('inputStock').value;
   const ccy = getStockCcy(stock);
+  const prefixEl = document.getElementById('investTotalPrefix');
+  if (prefixEl) prefixEl.textContent = ccyPrefix(ccy);
   if (lot && price) {
-    let total = lot * price;
-    if (ccy !== 'IDR') total = Math.round(total * getCcyRate(ccy));
-    document.getElementById('inputTotal').value = formatGroupedAmt(Math.round(total));
+    const total = lot * price;
+    document.getElementById('inputTotal').value = ccy === 'IDR'
+      ? formatGroupedAmt(Math.round(total))
+      : formatGroupedAmt(Number(Math.round(total + 'e2') + 'e-2').toFixed(2));
   }
   updateAvgPrices();
+  updateInvestTotalHint();
+}
+
+function investTotalToIdr(total, ccy) {
+  return ccy === 'IDR' ? Math.round(total) : Math.round(total * getCcyRate(ccy));
+}
+
+function updateInvestTotalHint() {
+  const hintEl = document.getElementById('investTotalHint');
+  if (!hintEl) return;
+  const stock = document.getElementById('inputStock').value.trim();
+  const ccy = getStockCcy(stock);
+  if (ccy === 'IDR') { hintEl.style.display = 'none'; hintEl.textContent = ''; return; }
+  const total = parseAmt('inputTotal');
+  hintEl.style.display = 'block';
+  hintEl.textContent = total > 0
+    ? `≈ ${fRp(investTotalToIdr(total, ccy))} at today's rate`
+    : `Total is in ${ccy} — converted to IDR at today's rate when saved`;
 }
 
 function updateAvgPrices() {
@@ -3585,7 +3615,12 @@ function openEditInvestOverlay(row) {
   document.getElementById('inputAccount').value = row.account || '';
   document.getElementById('inputLot').value     = row.lot ? formatGroupedAmt(row.lot) : '';
   document.getElementById('inputPrice').value   = row.price ? formatGroupedAmt(row.price) : '';
-  document.getElementById('inputTotal').value   = row.totalIdr ? formatGroupedAmt(row.totalIdr) : '';
+  // Total isn't stored natively (the sheet only keeps TotalIdr) — reconstruct it as
+  // lot × price, same as calcTotal's own default, rather than the stored IDR figure
+  // (which would show as a bare number under whatever prefix calcTotal below sets,
+  // mixing units). A manual Total override made at entry time won't survive re-editing.
+  document.getElementById('investPricePrefix').textContent = ccyPrefix(getStockCcy(row.stock));
+  calcTotal();
 
   document.getElementById('submitInvestBtn').textContent = 'Update Investment';
   document.getElementById('deleteInvestBtn').style.display = 'block';
@@ -3603,6 +3638,7 @@ async function updateInvestTransaction() {
   const price=parseAmt('inputPrice');
   const total=parseAmt('inputTotal');
   if(!date||!stock||!account||!lot||!price){showToast('All fields required','error');return}
+  const totalIdr=investTotalToIdr(total, getStockCcy(stock));
   closeInputOverlay();
 
   // If this investment never reached the server (still sitting in the local retry
@@ -3611,7 +3647,7 @@ async function updateInvestTransaction() {
   // the new values as a fresh create next time it runs.
   const queuedIdx = queue.findIndex(q => q.id === id);
   if (queuedIdx !== -1) {
-    const patch = { date, stock, account, action: investAction, lot, price, totalIdr: total };
+    const patch = { date, stock, account, action: investAction, lot, price, totalIdr };
     queue[queuedIdx] = { ...queue[queuedIdx], ...patch };
     investHistory = investHistory.map(h => h.id === id ? { ...h, ...patch } : h);
     saveLocal();
@@ -3627,7 +3663,7 @@ async function updateInvestTransaction() {
     type:'invest', op:'edit', id, rowIndex,
     date:isoSheetDate(date), month:isoMonthKey(date), stock,
     stockType:STOCK_TYPE[stock]||'', action:investAction,
-    account, lot, price, totalIdr:total,
+    account, lot, price, totalIdr,
   };
   try {
     const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: {'Content-Type': 'text/plain'}, body: apiBody(payload) });
@@ -3700,7 +3736,8 @@ function submitInvest() {
   const price=parseAmt('inputPrice');
   const total=parseAmt('inputTotal');
   if(!date||!stock||!account||!lot||!price){showToast('All fields required','error');return}
-  const r={id:Date.now(),date,stock,account,action:investAction,lot,price,totalIdr:total,type:'invest',synced:false};
+  const totalIdr=investTotalToIdr(total, getStockCcy(stock));
+  const r={id:Date.now(),date,stock,account,action:investAction,lot,price,totalIdr,type:'invest',synced:false};
   investHistory.unshift(r);
   queue.push({...r});
   saveLocal();updateStatus();
@@ -3739,8 +3776,11 @@ function submitInvest() {
   document.getElementById('inputLot').value='';
   document.getElementById('inputPrice').value='';
   document.getElementById('inputTotal').value='';
+  document.getElementById('investPricePrefix').textContent='Rp';
+  document.getElementById('investTotalPrefix').textContent='Rp';
   const _ca=document.getElementById('investCurrentAvg'); if(_ca)_ca.textContent='—';
   const _na=document.getElementById('investNewAvg'); if(_na)_na.textContent='—';
+  updateInvestTotalHint();
 }
 
 // ── SYNC ──────────────────────────────────────────────────────

@@ -1456,7 +1456,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.39';
+const APP_VERSION = 'v4.40';
 const APP_BUILD = '2026-09-03a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -3195,6 +3195,61 @@ function openEditOverlay(idx) {
   openEditOverlayFromRow(tx, calCurrentDateStr);
 }
 
+// Resolves an "Investment"-category Opex row (tx) back to its real Invest-sheet
+// row and opens it for edit/delete. liveInvest is only populated by a handful of
+// specific triggers (opening Insights, editing/deleting another Invest row,
+// syncing a new one) — NOT on app load — so a fresh session tapping an existing
+// Invest transaction before any of those has fired would otherwise always fail to
+// resolve it. Refetch once via fetchLiveInvest() and retry before giving up,
+// instead of depending on some unrelated prior navigation having already done so.
+async function _resolveAndOpenInvestFromOpexRow(tx, dateStr, amt, retriedFetch) {
+  const opexDate = dateStr || (tx.date ? String(tx.date).slice(0, 10) : '');
+  const opexAmt = amt;
+  const opexPm = tx.pm || '';
+  const allInvest = typeof getAllInvestRows === 'function' ? getAllInvestRows() : [];
+
+  // Prefer the exact link: the tapped row's own id (tx.sheetId from the Calendar
+  // day panel's serialized JSON, or tx.id from Search/HIST.opex rows directly) is
+  // this linked Opex row's own id, which handleInvest() stores on the Invest row
+  // as opexTxId. Matching on it is exact — unlike the date+account+amount
+  // fallback below, it can't silently resolve to the wrong row (or fail to
+  // resolve at all, e.g. for a USD-settled Buy/Sell, since the fallback compares
+  // the Opex row's always-IDR amount against native units) and fall through to
+  // editing/deleting only the Opex side, orphaning the Invest sheet row.
+  const opexRowId = tx.sheetId || tx.id || null;
+  let invRow = opexRowId ? allInvest.find(r => r.opexTxId && r.opexTxId === opexRowId) : null;
+
+  if (!invRow) {
+    invRow = allInvest.find(r => {
+      const rDate = r.date ? String(r.date).slice(0, 10) : '';
+      if (rDate !== opexDate || r.account !== opexPm) return false;
+      const isUSD = (ACCOUNT_CCY[r.account] || '').toUpperCase() === 'USD';
+      const nativeSpent = isUSD ? (r.lot * r.price) : r.totalIdr;
+      return Math.abs(nativeSpent - opexAmt) < 0.05;
+    });
+  }
+
+  if (invRow) {
+    openEditInvestOverlay(invRow);
+    return;
+  }
+
+  if (!retriedFetch) {
+    // Not resolvable from whatever's already in memory — liveInvest may simply
+    // never have been fetched this session. Try once, then re-run this same
+    // resolution against the refreshed data before giving up.
+    await fetchLiveInvest().catch(() => {});
+    _resolveAndOpenInvestFromOpexRow(tx, dateStr, amt, /*retriedFetch*/ true);
+    return;
+  }
+
+  // Investment-category row with no resolvable Invest-sheet counterpart even
+  // after a live refetch. Editing/deleting it as a plain Opex row here would
+  // silently orphan the linked Invest row — refuse instead of falling through
+  // to the plain-Opex path below.
+  showToast('Could not find the linked investment — try again', 'error');
+}
+
 // Shared core for opening the edit overlay from any transaction row source
 // (calendar day panel via openEditOverlay, or Search page via openSearchTxEdit).
 // `row` may be a calCurrentTxns-shaped entry (amt/inc/cat) or a raw HIST.opex/
@@ -3205,43 +3260,7 @@ function openEditOverlayFromRow(row, dateStr) {
   const cat = tx.cat || tx.category || '';
 
   if (tx.type === 'invest' || cat === 'Investment') {
-    const opexDate = dateStr || (tx.date ? String(tx.date).slice(0, 10) : '');
-    const opexAmt = amt;
-    const opexPm = tx.pm || '';
-    const allInvest = typeof getAllInvestRows === 'function' ? getAllInvestRows() : [];
-
-    // Prefer the exact link: the tapped row's own id (tx.sheetId from the
-    // Calendar day panel's serialized JSON, or tx.id from Search/HIST.opex rows
-    // directly) is this linked Opex row's own id, which handleInvest() stores on
-    // the Invest row as opexTxId. Matching on it is exact — unlike the
-    // date+account+amount fallback below, it can't silently resolve to the wrong
-    // row (or fail to resolve at all, e.g. for a USD-settled Buy/Sell, since the
-    // fallback compares the Opex row's always-IDR amount against native units)
-    // and fall through to editing/deleting only the Opex side, orphaning the
-    // Invest sheet row.
-    const opexRowId = tx.sheetId || tx.id || null;
-    let invRow = opexRowId ? allInvest.find(r => r.opexTxId && r.opexTxId === opexRowId) : null;
-
-    if (!invRow) {
-      invRow = allInvest.find(r => {
-        const rDate = r.date ? String(r.date).slice(0, 10) : '';
-        if (rDate !== opexDate || r.account !== opexPm) return false;
-        const isUSD = (ACCOUNT_CCY[r.account] || '').toUpperCase() === 'USD';
-        const nativeSpent = isUSD ? (r.lot * r.price) : r.totalIdr;
-        return Math.abs(nativeSpent - opexAmt) < 0.05;
-      });
-    }
-
-    if (invRow) {
-      openEditInvestOverlay(invRow);
-      return;
-    }
-
-    // Investment-category row with no resolvable Invest-sheet counterpart (e.g.
-    // liveInvest hasn't been (re)fetched yet this session). Editing/deleting it as
-    // a plain Opex row here would silently orphan the linked Invest row — refuse
-    // instead of falling through to the plain-Opex path below.
-    showToast('Still loading investment data — try again in a moment', 'error');
+    _resolveAndOpenInvestFromOpexRow(tx, dateStr, amt, /*retriedFetch*/ false);
     return;
   }
 

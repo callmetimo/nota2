@@ -939,6 +939,13 @@ function computeCashBalance() {
     else if (r.type === 'expense') delta -= (r.amount || 0);
   });
   (investHistory || []).forEach(r => {
+    // Once a local row syncs it's marked synced:true but never removed from
+    // investHistory (only an explicit delete removes it) — and it also then shows
+    // up in liveInvest, fetched separately from the sheet. Without this guard a
+    // synced Buy/Sell would double-count its cash effect here: once from this
+    // now-stale local copy, once from liveInvest. Same dedup rule getAllInvestRows()
+    // already uses for exactly this reason.
+    if (r.synced) return;
     if (!r.date || r.date <= cutoff) return;
     const fromUsdAcct = r.account && ACCOUNT_CCY[r.account] === 'USD';
     if (!fromUsdAcct) {

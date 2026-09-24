@@ -13,6 +13,7 @@ const DataStore = (() => {
   // Separate flag from LS_DATE_FORMAT_MIGRATED above: that migration already ran (and wrongly
   // pinned a DATE format) for every existing user, so it will never re-run to apply this fix.
   const LS_RECURRING_TEXT_FORMAT_MIGRATED = 'notaPublic_recurringTextFormatMigratedV1';
+  const LS_OPEX_NATIVE_CCY_MIGRATED = 'notaPublic_opexNativeCcyMigratedV1';
 
   // crypto.randomUUID is available in all modern browsers (Chrome 92+, Safari 15.4+, Firefox 95+).
   // Centralised here so the guard/fallback doesn't have to be repeated at every call site.
@@ -106,6 +107,36 @@ const DataStore = (() => {
       localStorage.setItem(LS_RECURRING_TEXT_FORMAT_MIGRATED, '1');
     } catch (e) {
       console.warn('[bootstrap] ensureRecurringTextColumnFormat error:', e);
+    }
+  }
+
+  // Adds two columns to Opex for foreign-currency transactions (e.g. a travel expense
+  // paid from a USD account): L (NativeAmount, the amount typed in that currency) and
+  // M (Ccy, the 3-letter code). Column F/G (Income/Expense) keep holding the IDR-converted
+  // amount as before — every existing balance/Insights calculation stays untouched — these
+  // two columns are purely so the native amount survives for editing and for
+  // buildAccountBalances() to deplete/credit the funding account's own native balance.
+  // Idempotent/safe to retry, same pattern as ensureRecurringTextColumnFormat above.
+  async function ensureOpexNativeCcyColumns() {
+    if (localStorage.getItem(LS_OPEX_NATIVE_CCY_MIGRATED)) return;
+    try {
+      const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+      const opexSheet = (meta.sheets || []).find(s => s.properties.title === 'Opex');
+      if (opexSheet) {
+        const colCount = opexSheet.properties.gridProperties?.columnCount || 0;
+        if (colCount < 13) {
+          await SheetsClient.batchUpdate(spreadsheetId, [{
+            updateSheetProperties: {
+              properties: { sheetId: opexSheet.properties.sheetId, gridProperties: { columnCount: 13 } },
+              fields: 'gridProperties.columnCount',
+            },
+          }]);
+        }
+        await SheetsClient.updateValues(spreadsheetId, 'Opex!L1:M1', [['NativeAmount', 'Ccy']]);
+      }
+      localStorage.setItem(LS_OPEX_NATIVE_CCY_MIGRATED, '1');
+    } catch (e) {
+      console.warn('[bootstrap] ensureOpexNativeCcyColumns error:', e);
     }
   }
 
@@ -255,6 +286,13 @@ const DataStore = (() => {
           console.warn('[bootstrap] Recurring text format migration error:', e);
         }
       }
+      if (!localStorage.getItem(LS_OPEX_NATIVE_CCY_MIGRATED)) {
+        try {
+          await ensureOpexNativeCcyColumns();
+        } catch (e) {
+          console.warn('[bootstrap] Opex native/ccy column migration error:', e);
+        }
+      }
       return;
     }
 
@@ -286,6 +324,11 @@ const DataStore = (() => {
       } catch (e) {
         console.warn('[bootstrap] Recurring text format migration error:', e);
       }
+      try {
+        await ensureOpexNativeCcyColumns();
+      } catch (e) {
+        console.warn('[bootstrap] Opex native/ccy column migration error:', e);
+      }
       return;
     }
 
@@ -308,9 +351,10 @@ const DataStore = (() => {
     localStorage.setItem(LS_OPEX_GID, String(opexGid));
     localStorage.setItem(LS_INVEST_GID, String(investGid));
     localStorage.setItem(LS_SPLIT_MIGRATED, '1');
+    localStorage.setItem(LS_OPEX_NATIVE_CCY_MIGRATED, '1');
 
-    await SheetsClient.updateValues(spreadsheetId, 'Opex!A1:K1', [[
-      'Date','Month','Category','Transaction','PM','Income','Expense','Notes','Deleted','Future','TxID',
+    await SheetsClient.updateValues(spreadsheetId, 'Opex!A1:M1', [[
+      'Date','Month','Category','Transaction','PM','Income','Expense','Notes','Deleted','Future','TxID','NativeAmount','Ccy',
     ]]);
     await SheetsClient.updateValues(spreadsheetId, 'Invest!A1:J1', [[
       'Date','Stock','Type','Action','Account','Lot','Price','TotalIdr','TxID','LinkedOpexTxID',
@@ -604,19 +648,20 @@ const DataStore = (() => {
     return null;
   }
 
-  async function writeToOpex(date, month, cat, tx, pm, action, amount, notes, future) {
+  async function writeToOpex(date, month, cat, tx, pm, action, amount, notes, future, nativeAmount, ccy) {
     const isIncome = action === 'income';
     const income = isIncome ? amount : '';
     const expense = isIncome ? '' : amount;
     const id = generateId();
-    await SheetsClient.appendValues(spreadsheetId, 'Opex!A:K', [[
+    await SheetsClient.appendValues(spreadsheetId, 'Opex!A:M', [[
       formatDateStr(date), month, cat, tx, pm, income, expense, notes || '', '', future ? 1 : 0, id,
+      nativeAmount || '', ccy || '',
     ]]);
     return id;
   }
 
   async function handleOpex(data) {
-    const { action, date, month, tx, cat, pm, amount, notes, future, isIncome } = data;
+    const { action, date, month, tx, cat, pm, amount, notes, future, isIncome, nativeAmount, ccy } = data;
     if (action === 'edit') {
       const rowIndex = await findOpexRowById(data.id);
       if (!rowIndex) return { status: 'error', message: 'Row not found' };
@@ -624,6 +669,10 @@ const DataStore = (() => {
       const expense = isIncome ? '' : Number(amount);
       await SheetsClient.updateValues(spreadsheetId, `Opex!A${rowIndex}:J${rowIndex}`, [[
         formatDateStr(date), month, cat, tx, pm, income, expense, notes || '', '', future ? 1 : 0,
+      ]]);
+      // Separate call so it never touches K (TxID), which must stay exactly as-is.
+      await SheetsClient.updateValues(spreadsheetId, `Opex!L${rowIndex}:M${rowIndex}`, [[
+        nativeAmount || '', ccy || '',
       ]]);
       return { status: 'ok' };
     }
@@ -637,7 +686,7 @@ const DataStore = (() => {
       }]);
       return { status: 'ok' };
     }
-    const id = await writeToOpex(date, month, cat, tx, pm, action, amount, notes, future);
+    const id = await writeToOpex(date, month, cat, tx, pm, action, amount, notes, future, nativeAmount, ccy);
     return { status: 'ok', wrote: true, id };
   }
 
@@ -693,7 +742,7 @@ const DataStore = (() => {
   }
 
   async function handleGetMonth(y, m) {
-    const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:K');
+    const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:M');
     const data = res.values || [];
     const targetY = Number(y);
     const targetM = Number(m); // 1-12
@@ -710,6 +759,8 @@ const DataStore = (() => {
       if (notes) r.notes = notes;
       if (Number(row[9]) === 1) r.future = true;
       if (row[10]) r.id = String(row[10]).trim();
+      if (row[11]) r.nativeAmount = Number(row[11]) || 0;
+      if (row[12]) r.ccy = String(row[12]).trim();
       rows.push(r);
     });
     return { status: 'ok', rows, y, m };
@@ -735,7 +786,7 @@ const DataStore = (() => {
 
     const fetchFresh = async () => {
       try {
-        const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:K');
+        const res = await SheetsClient.getValues(spreadsheetId, 'Opex!A2:M');
         const data = res.values || [];
         const rows = [];
         data.forEach((row, idx) => {
@@ -756,6 +807,8 @@ const DataStore = (() => {
           if (notes) r.notes = notes;
           if (Number(row[9]) === 1) r.future = true;
           if (row[10]) r.id = String(row[10]).trim();
+          if (row[11]) r.nativeAmount = Number(row[11]) || 0;
+          if (row[12]) r.ccy = String(row[12]).trim();
           rows.push(r);
         });
 

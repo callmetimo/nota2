@@ -598,17 +598,18 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         <div class="form-group">
           <label class="form-label">Amount</label>
           <div class="amount-wrapper">
-            <span class="amount-prefix">Rp</span>
-            <input type="text" class="form-input amount-input" id="inputAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
+            <span class="amount-prefix" id="opexAmountPrefix">Rp</span>
+            <input type="text" class="form-input amount-input" id="inputAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event); updateOpexFxHint()">
           </div>
         </div>
         <div class="form-group autocomplete-wrapper">
           <label class="form-label" id="inputPmLabel">Payment Method</label>
           <input type="text" class="form-input" id="inputPm" placeholder="Method..." autocomplete="off" maxlength="50"
-            oninput="showAC('inputPm', getSmartPms()); checkCcInstallmentVisibility()" onfocus="showAC('inputPm', getSmartPms())">
+            oninput="showAC('inputPm', getSmartPms()); checkCcInstallmentVisibility()" onfocus="showAC('inputPm', getSmartPms())" onblur="onOpexPmSelect()">
           <div class="autocomplete-list" id="ac-inputPm" style="display:none"></div>
         </div>
       </div>
+      <div class="form-group" id="opexFxHint" style="display:none;font-size:12px;color:var(--text2);margin-top:-4px"></div>
       <div class="form-group" id="installmentRow" style="display:none;background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:0.5px solid var(--border);margin-top:6px">
         <label class="form-label" style="margin-bottom:6px">Installment Option</label>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -2071,6 +2072,7 @@ function setInputMode(mode, el) {
   document.getElementById('inputCat').value = '';
   document.getElementById('inputPm').value = '';
   checkCcInstallmentVisibility();
+  onOpexPmSelect();
 }
 
 function setInvestAction(action, el) {
@@ -2100,7 +2102,7 @@ function selectAC(fid,val){
   if(fid==='inputTx'){onTxSelect(val);}
   if(fid==='inputStock'){onStockSelect(val);}
   if(fid==='inputAccount'){onAccountSelect();}
-  if(fid==='inputPm'){checkCcInstallmentVisibility();}
+  if(fid==='inputPm'){checkCcInstallmentVisibility();onOpexPmSelect();}
 }
 document.addEventListener('click',e=>{
   if(!e.target.closest('.autocomplete-wrapper'))
@@ -2202,7 +2204,10 @@ function getSmartPms() {
   const txPm = HIST.txPm || {};
   const key = Object.keys(txPm).find(k => k.toLowerCase() === txLow) ||
               (txLow && Object.keys(txPm).find(k => txLow.includes(k.toLowerCase()) || k.toLowerCase().includes(txLow)));
-  return key ? txPm[key] : allPMs;
+  // Accounts (e.g. a USD account) are included alongside PMs, same as income mode
+  // already does — so a foreign-currency account is reachable as a payment source
+  // for a travel Expense, not just for crediting Income.
+  return key ? txPm[key] : Array.from(new Set([...allPMs, ...allAccounts]));
 }
 function getSmartTransferPms() {
   return Array.from(new Set([...allAccounts, ...allPMs]));
@@ -2620,6 +2625,65 @@ function openInputFromHome() {
   openInputOverlay();
 }
 
+// ── OPEX FX (foreign-currency Expense/Income) ──────────────────
+// Lets a travel Expense/Income be entered in the PM's own currency (e.g. a USD
+// account) instead of forcing a mental IDR conversion. The IDR amount that's
+// actually stored/used everywhere else (Insights, category totals, account
+// balances) is computed from that currency's own weighted-average buy price
+// (see getFxAvgRate) — the real cost basis of the USD sitting in that account —
+// not a live/spot rate, which would misstate what those units actually cost.
+const CCY_SYMBOLS = { USD:'$', SGD:'S$', EUR:'€', GBP:'£', AUD:'A$', CHF:'CHF ', JPY:'¥', MYR:'RM', THB:'฿', CNY:'¥' };
+
+function getOpexPmCcy(pmName) {
+  const name = (pmName || '').trim();
+  if (!name) return 'IDR';
+  if (ACCOUNT_CCY[name]) return ACCOUNT_CCY[name].toUpperCase();
+  const item = CONFIG_ITEMS.find(i => (i.kind === 'pm' || i.kind === 'account') && i.name === name);
+  return (item && item.ccy) ? item.ccy.toUpperCase() : 'IDR';
+}
+
+// Weighted-average IDR cost per unit of `ccy`, from that currency's own Buy
+// history (same math as updateAvgPrices()'s stock avgPrice) — falls back to
+// today's live rate only when there's no purchase history yet (e.g. the very
+// first time this currency is ever spent).
+function getFxAvgRate(pmName, ccy) {
+  ccy = (ccy || '').toUpperCase();
+  if (!ccy || ccy === 'IDR') return 1;
+  let buyLots = 0, buyPriceWeighted = 0;
+  getAllInvestRows().forEach(r => {
+    if (r.action !== 'Buy') return;
+    if (!isFxAccountMatch(pmName, ccy, r.stock)) return;
+    buyLots += Number(r.lot) || 0;
+    buyPriceWeighted += (Number(r.price) || 0) * (Number(r.lot) || 0);
+  });
+  if (buyLots > 0) return buyPriceWeighted / buyLots;
+  return getCcyRate(ccy);
+}
+
+// Re-evaluates the selected PM's currency and flips the Amount field between
+// plain IDR and "enter it in that currency" mode. Called on inputPm blur.
+function onOpexPmSelect() {
+  const pm = document.getElementById('inputPm').value.trim();
+  const ccy = getOpexPmCcy(pm);
+  const prefixEl = document.getElementById('opexAmountPrefix');
+  if (prefixEl) prefixEl.textContent = ccy === 'IDR' ? 'Rp' : (CCY_SYMBOLS[ccy] || ccy + ' ');
+  updateOpexFxHint();
+}
+
+function updateOpexFxHint() {
+  const hintEl = document.getElementById('opexFxHint');
+  if (!hintEl) return;
+  const pm = document.getElementById('inputPm').value.trim();
+  const ccy = getOpexPmCcy(pm);
+  if (ccy === 'IDR') { hintEl.style.display = 'none'; hintEl.textContent = ''; return; }
+  const native = parseAmt('inputAmount');
+  const rate = getFxAvgRate(pm, ccy);
+  hintEl.style.display = 'block';
+  hintEl.textContent = native > 0
+    ? `≈ ${fRp(Math.round(native * rate))} at avg ${fRp(Math.round(rate))}/${ccy}`
+    : `Amount is in ${ccy} — converted at avg ${fRp(Math.round(rate))}/${ccy}`;
+}
+
 // ── SUBMIT OPEX ───────────────────────────────────────────────
 function submitOpex() {
   if (isSyncing) return;
@@ -2630,9 +2694,11 @@ function submitOpex() {
       const _day = parseInt(document.getElementById('inputRecurringDay').value) || 0;
       if (_day >= 1 && _day <= 31) {
         const _tx     = sanitizeInput(document.getElementById('inputTx').value, 100).trim();
-        const _amount = parseGroupedAmt('inputAmount');
-        const _cat    = sanitizeInput(document.getElementById('inputCat').value, 50).trim();
         const _pm     = sanitizeInput(document.getElementById('inputPm').value, 50).trim();
+        const _pmCcy  = getOpexPmCcy(_pm);
+        let _amount   = parseGroupedAmt('inputAmount');
+        if (_pmCcy !== 'IDR') _amount = Math.round(_amount * getFxAvgRate(_pm, _pmCcy));
+        const _cat    = sanitizeInput(document.getElementById('inputCat').value, 50).trim();
         const _notes  = sanitizeInput(document.getElementById('inputNotes').value, 200);
         const _end    = _getEndMonthValue('inputRecurringEndMonth', 'inputRecurringEndYear');
         if (_tx && _amount && _cat && _pm) {
@@ -2658,11 +2724,24 @@ function submitOpex() {
   isSyncing = true;
   const date=document.getElementById('inputDateRaw').value;
   const tx=sanitizeInput(document.getElementById('inputTx').value,100);
-  const amount=parseGroupedAmt('inputAmount');
+  let amount=parseGroupedAmt('inputAmount');
   const cat=sanitizeInput(document.getElementById('inputCat').value,50);
   const pm=sanitizeInput(document.getElementById('inputPm').value,50);
   const notes=sanitizeInput(document.getElementById('inputNotes').value,200);
   if(!date||!tx||!amount||!cat||!pm){isSyncing=false;showToast('All fields required','error');return}
+
+  // Foreign-currency PM (e.g. a USD account while travelling): the amount just
+  // typed is in that currency, not IDR — convert to IDR (at that currency's own
+  // weighted-average cost, see getFxAvgRate) for everything downstream that
+  // assumes IDR, while keeping the native amount/ccy for the sheet and for
+  // depleting/crediting that account's own native balance.
+  const pmCcy = getOpexPmCcy(pm);
+  let nativeAmount = 0, ccy = '';
+  if (pmCcy !== 'IDR') {
+    nativeAmount = amount;
+    ccy = pmCcy;
+    amount = Math.round(nativeAmount * getFxAvgRate(pm, pmCcy));
+  }
 
   // CC Installment Logic
   const isInstallment = document.getElementById('ccInstallmentBtn').classList.contains('active');
@@ -2676,14 +2755,16 @@ function submitOpex() {
   }
 
   let finalAmount = amount;
+  let finalNativeAmount = nativeAmount;
   let finalTx = tx;
   if (isInstallment) {
     finalAmount = Math.round(amount / installmentMonths);
+    if (finalNativeAmount) finalNativeAmount = Math.round((finalNativeAmount / installmentMonths) * 100) / 100;
     finalTx = `${tx} (1/${installmentMonths})`;
   }
 
   const isFuture = date > todayISO();
-  const r = {id:Date.now(),date,tx:finalTx,amount:finalAmount,category:cat,pm,notes,type:inputMode,synced:false,future:isFuture};
+  const r = {id:Date.now(),date,tx:finalTx,amount:finalAmount,category:cat,pm,notes,type:inputMode,synced:false,future:isFuture,nativeAmount:finalNativeAmount,ccy};
   txHistory.unshift(r);
   queue.push({...r, action:inputMode});
   saveLocal();updateStatus();
@@ -2705,7 +2786,7 @@ function submitOpex() {
       // cache key first creates a window where a reload shows no transaction at all.
       const cacheKey=curMonthCacheKey();
       const dateParts=r.date.split('-');
-      const optimisticRow={d:parseInt(dateParts[2]),cat:r.category,tx:r.tx,pm:r.pm,...(r.notes?{notes:r.notes}:{}),...(r.type==='income'?{inc:r.amount}:{exp:r.amount})};
+      const optimisticRow={d:parseInt(dateParts[2]),cat:r.category,tx:r.tx,pm:r.pm,...(r.notes?{notes:r.notes}:{}),...(r.type==='income'?{inc:r.amount}:{exp:r.amount}),...(r.ccy?{nativeAmount:r.nativeAmount,ccy:r.ccy}:{})};
       const cachedRows=JSON.parse(localStorage.getItem(cacheKey)||'[]');
       cachedRows.push(optimisticRow);
       localStorage.setItem(cacheKey,JSON.stringify(cachedRows));
@@ -2765,6 +2846,7 @@ function resetOpexForm() {
   document.getElementById('inputNotes').value='';
   resetRecurringToggle();
   checkCcInstallmentVisibility();
+  onOpexPmSelect();
 }
 
 // ── TRANSFER ──────────────────────────────────────────────────
@@ -3046,7 +3128,7 @@ function _applyLocalDelete(isoDate, txName, amount, rowIndex, id, isIncome) {
   localStorage.setItem(cKey, JSON.stringify(trimmedCache));
 }
 
-function _applyLocalEdit(isoDate, txName, amount, newDate, newTx, newAmount, newCat, newPm, newNotes, newIsIncome, rowIndex, id) {
+function _applyLocalEdit(isoDate, txName, amount, newDate, newTx, newAmount, newCat, newPm, newNotes, newIsIncome, rowIndex, id, newNativeAmount, newCcy) {
   const [fy, fm, fd] = isoDate.split('-').map(Number);
   const [nfy, nfm, nfd] = newDate.split('-').map(Number);
   const nl = txName.toLowerCase();
@@ -3059,7 +3141,8 @@ function _applyLocalEdit(isoDate, txName, amount, newDate, newTx, newAmount, new
         : (r.y === fy && r.m === fm-1 && r.d === fd && r.tx.toLowerCase() === nl && (r.exp||r.inc||0) === amount);
       if (matches) {
         return {...r, y:nfy, m:nfm-1, d:nfd, tx:newTx, cat:newCat, pm:newPm, notes:newNotes||'',
-                inc: newIsIncome ? newAmount : 0, exp: newIsIncome ? 0 : newAmount, amt: newAmount, future: newIsFuture};
+                inc: newIsIncome ? newAmount : 0, exp: newIsIncome ? 0 : newAmount, amt: newAmount, future: newIsFuture,
+                nativeAmount: newCcy ? newNativeAmount : 0, ccy: newCcy || ''};
       }
       return r;
     });
@@ -3083,7 +3166,8 @@ function _applyLocalEdit(isoDate, txName, amount, newDate, newTx, newAmount, new
   txHistory = txHistory.map(h => {
     if (h.date === isoDate && h.tx.toLowerCase() === nl && h.amount === amount) {
       return {...h, date:newDate, tx:newTx, amount:newAmount, category:newCat, pm:newPm,
-              notes:newNotes||'', type: newIsIncome ? 'income' : 'expense', future: newIsFuture};
+              notes:newNotes||'', type: newIsIncome ? 'income' : 'expense', future: newIsFuture,
+              nativeAmount: newCcy ? newNativeAmount : 0, ccy: newCcy || ''};
     }
     return h;
   });
@@ -3098,7 +3182,8 @@ function _applyLocalEdit(isoDate, txName, amount, newDate, newTx, newAmount, new
   const newCached = JSON.parse(localStorage.getItem(newKey) || '[]');
   const newRow = {d:nfd, cat:newCat, tx:newTx, pm:newPm,
                   ...(newNotes ? {notes:newNotes} : {}),
-                  ...(newIsIncome ? {inc:newAmount} : {exp:newAmount})};
+                  ...(newIsIncome ? {inc:newAmount} : {exp:newAmount}),
+                  ...(newCcy ? {nativeAmount:newNativeAmount, ccy:newCcy} : {})};
   newCached.push(newRow);
   localStorage.setItem(newKey, JSON.stringify(newCached));
 }
@@ -3210,10 +3295,11 @@ function openEditOverlayFromRow(row, dateStr) {
 
   // Pre-fill fields
   document.getElementById('inputTx').value     = tx.tx    || '';
-  document.getElementById('inputAmount').value = formatGroupedAmt(amt);
+  document.getElementById('inputAmount').value = formatGroupedAmt(tx.ccy ? tx.nativeAmount : amt);
   document.getElementById('inputCat').value    = cat;
   document.getElementById('inputPm').value     = tx.pm    || '';
   document.getElementById('inputNotes').value  = tx.notes || '';
+  onOpexPmSelect();
 
   // Pre-set the recurring day from the transaction's date (user still must toggle recurring ON)
   const _recurringDay = parseInt(dateStr?.split('-')[2] || tx.d) || new Date().getDate();
@@ -3233,13 +3319,21 @@ async function updateTransaction() {
   const id = overlayEditId;
   const date   = document.getElementById('inputDateRaw').value;
   const tx     = document.getElementById('inputTx').value.trim();
-  const amount = parseGroupedAmt('inputAmount');
+  let amount   = parseGroupedAmt('inputAmount');
   const cat    = document.getElementById('inputCat').value.trim();
   const pm     = document.getElementById('inputPm').value.trim();
   const notes  = document.getElementById('inputNotes').value.trim();
   const isInc  = inputMode === 'income';
   if (!date || !tx || !amount || !cat || !pm) { showToast('All fields required', 'error'); return; }
   const isFuture = date > todayISO();
+
+  const pmCcy = getOpexPmCcy(pm);
+  let nativeAmount = 0, ccy = '';
+  if (pmCcy !== 'IDR') {
+    nativeAmount = amount;
+    ccy = pmCcy;
+    amount = Math.round(nativeAmount * getFxAvgRate(pm, pmCcy));
+  }
 
   // Snapshot orig values before closeInputOverlay clears them
   const origDate = overlayEditOrigDate;
@@ -3250,7 +3344,7 @@ async function updateTransaction() {
   const origISO = calCurrentDateStr;
 
   // Apply locally first — calendar updates immediately
-  _applyLocalEdit(origISO, origTx, origAmt, date, tx, amount, cat, pm, notes, isInc, rowIndex, id);
+  _applyLocalEdit(origISO, origTx, origAmt, date, tx, amount, cat, pm, notes, isInc, rowIndex, id, nativeAmount, ccy);
   closeInputOverlay();
   calInited = false; initCalendar();
   buildAccountBalances();
@@ -3266,7 +3360,7 @@ async function updateTransaction() {
   // fresh create next time it runs, instead of us sending a doomed edit request.
   const queuedIdx = queue.findIndex(q => q.id === id);
   if (queuedIdx !== -1) {
-    queue[queuedIdx] = { ...queue[queuedIdx], date, tx, amount, category: cat, pm, notes, type: isInc ? 'income' : 'expense', future: isFuture };
+    queue[queuedIdx] = { ...queue[queuedIdx], date, tx, amount, category: cat, pm, notes, type: isInc ? 'income' : 'expense', future: isFuture, nativeAmount, ccy };
     saveLocal();
     showToast('Updated ✓', 'success');
     _suppressVisRefresh = false;
@@ -3279,6 +3373,7 @@ async function updateTransaction() {
     type: 'opex', action: 'edit', rowIndex, id,
     date: isoSheetDate(date), month: isoMonthKey(date),
     cat, tx, pm, amount, notes, isIncome: isInc, future: isFuture,
+    nativeAmount: nativeAmount || '', ccy: ccy || '',
     origDate, origMonth, origTx, origAmt, origIsIncome: origInc
   };
   try {
@@ -3569,6 +3664,7 @@ async function syncOpex(r) {
       type:'opex', action:r.type,
       date:sheetDate, month, monthHeader,
       tx:r.tx, cat:r.category, pm:r.pm, amount:r.amount, notes:r.notes||'', future:r.future||false,
+      nativeAmount:r.nativeAmount||'', ccy:r.ccy||'',
       clientId: String(r.id)
     };
     const res = await fetchWithTimeout(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:apiBody(payload)});

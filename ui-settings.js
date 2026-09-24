@@ -192,6 +192,20 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInv
     if (!includeInvestIdr && r.cat === 'Investment') return;
     const rowDate = `${r.y}-${String(r.m + 1).padStart(2,'0')}-${String(r.d).padStart(2,'0')}`;
     if (baseDate && rowDate < baseDate) return;
+    if (!includeInvestIdr) {
+      // FX/native-currency account: r.inc/r.exp are always IDR (see getFxAvgRate at the
+      // entry point) — only a row explicitly tagged with THIS account's own currency
+      // (via inputPm's FX conversion) carries a meaningful native amount. A plain IDR
+      // row that merely matches this account's bare name (getAccountMatchNames strips
+      // the currency token, e.g. "USD CIMB" -> "cimb") must not be treated as native
+      // units — that would silently move the account's balance by the wrong currency's
+      // magnitude.
+      const acctCcy = ((acctOrPm && acctOrPm.ccy) || '').toUpperCase();
+      if (!r.ccy || r.ccy.toUpperCase() !== acctCcy) return;
+      const nat = Number(r.nativeAmount) || 0;
+      delta += (Number(r.inc) || 0) > 0 ? nat : -nat;
+      return;
+    }
     delta += (Number(r.inc) || 0) - (Number(r.exp) || 0);
   });
 
@@ -209,6 +223,14 @@ function computeAccountCurrentBalance(baseAmount, baseDate, acctOrPm, includeInv
     } else {
       const rPm = String(r.pm || '').toLowerCase().trim();
       if (!matchNames.includes(rPm)) return;
+      if (!includeInvestIdr) {
+        const acctCcy = ((acctOrPm && acctOrPm.ccy) || '').toUpperCase();
+        if (!r.ccy || r.ccy.toUpperCase() !== acctCcy) return;
+        const nat = Number(r.nativeAmount) || 0;
+        if (r.type === 'income') delta += nat;
+        else if (r.type === 'expense') delta -= nat;
+        return;
+      }
       const amt = Number(r.amount) || 0;
       if (r.type === 'income') delta += amt;
       else if (r.type === 'expense') delta -= amt;

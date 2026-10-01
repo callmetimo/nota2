@@ -4,9 +4,23 @@
     {
       "name": "notapublic-dev",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["./serve.py"],
+      "runtimeArgs": [
+        "./serve.py"
+      ],
       "port": 8010,
       "autoPort": true
+    },
+    {
+      "name": "nota-threaded",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8020",
+        "--bind",
+        "127.0.0.1"
+      ],
+      "port": 8020
     }
   ]
 }

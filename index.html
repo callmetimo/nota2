@@ -634,10 +634,21 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
         </label>
       </div>
       <div class="form-group" id="recurringDayRow" style="display:none;background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:0.5px solid var(--border)">
-        <label class="form-label">Repeat on day of each month</label>
+        <label class="form-label">Repeats</label>
+        <select class="form-input" id="inputRecurringFreq" onchange="onRecurringFreqChange()" style="margin-bottom:8px">
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+        <label class="form-label" id="inputRecurringDayLabel">Repeat on day of each month</label>
         <div style="display:flex;align-items:center;gap:8px">
           <input type="number" class="form-input" id="inputRecurringDay" min="1" max="31" placeholder="1–31" style="width:80px">
-          <span style="color:var(--text2);font-size:13px">of every month</span>
+          <select class="form-input" id="inputRecurringMonthOfYear" style="flex:1;display:none">
+            <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+            <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+            <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+            <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+          </select>
+          <span id="inputRecurringDaySuffix" style="color:var(--text2);font-size:13px">of every month</span>
         </div>
       </div>
       <div class="form-group" id="recurringEndRow" style="display:none;background:var(--bg3);border-radius:var(--radius-sm);padding:10px 12px;border:0.5px solid var(--border);margin-top:6px">
@@ -1202,8 +1213,21 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label">Repeat on day of month</label>
-      <input type="number" class="form-input" id="recurringEditDay" min="1" max="31" style="width:90px">
+      <label class="form-label">Repeats</label>
+      <select class="form-input" id="recurringEditFreq" onchange="onRecurringEditFreqChange()" style="margin-bottom:8px">
+        <option value="monthly">Monthly</option>
+        <option value="yearly">Yearly</option>
+      </select>
+      <label class="form-label" id="recurringEditDayLabel">Repeat on day of month</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="number" class="form-input" id="recurringEditDay" min="1" max="31" style="width:90px">
+        <select class="form-input" id="recurringEditMonthOfYear" style="flex:1;display:none">
+          <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+          <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+          <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+          <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+        </select>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">Repeat until <span style="font-weight:400;color:var(--text2);text-transform:none">(optional)</span></label>
@@ -1458,7 +1482,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.41';
+const APP_VERSION = 'v4.42';
 const APP_BUILD = '2026-09-03a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2617,6 +2641,8 @@ function openInputOverlay() {
   ['inputTx','inputAmount','inputNotes'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   // Reset recurring toggle (prevents stale state bleeding into edit sessions)
   document.getElementById('inputRecurring').checked = false;
+  document.getElementById('inputRecurringFreq').value = 'monthly';
+  onRecurringFreqChange();
   document.getElementById('recurringDayRow').style.display = 'none';
   document.getElementById('recurringEndRow').style.display = 'none';
   document.getElementById('inputRecurringEndMonth').value = '';
@@ -2799,7 +2825,8 @@ function submitOpex() {
             id: Date.now(), type: inputMode,
             tx: _tx, cat: _cat, amount: _amount, pm: _pm, notes: _notes,
             dayOfMonth: _day, active: true, lastFired: curMonthKey(),
-            endMonth: _end || null
+            endMonth: _end || null,
+            ..._getRecurringFreqFields('inputRecurringFreq', 'inputRecurringMonthOfYear')
           });
           saveRecurring(rules);
           resetRecurringToggle();
@@ -2919,7 +2946,8 @@ function submitOpex() {
         dayOfMonth: day,
         active: true,
         lastFired: curMonthKey(),
-        endMonth: endMonth || null
+        endMonth: endMonth || null,
+        ..._getRecurringFreqFields('inputRecurringFreq', 'inputRecurringMonthOfYear')
       });
       saveRecurring(rules);
     }
@@ -3172,6 +3200,8 @@ async function deleteSheetTransferTransaction() {
 // checked recurring data left to resubmit (prevents duplicate rule creation).
 function resetRecurringToggle() {
   document.getElementById('inputRecurring').checked=false;
+  document.getElementById('inputRecurringFreq').value='monthly';
+  onRecurringFreqChange();
   document.getElementById('recurringDayRow').style.display='none';
   document.getElementById('recurringEndRow').style.display='none';
   document.getElementById('inputRecurringEndMonth').value='';

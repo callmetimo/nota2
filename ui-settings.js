@@ -1469,26 +1469,53 @@ function ordinalSuffix(n) {
   const s = ['th','st','nd','rd'], v = n % 100;
   return n + (s[(v-20)%10] || s[v] || s[0]);
 }
+const _MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+// Day clamped to the month's length (day 31 in Feb, Feb 29 in a non-leap year, ...).
+function _clampDay(year, month, day) {
+  return Math.min(day, new Date(year, month, 0).getDate());
+}
+
+// A rule with no `frequency` (everything saved before yearly support) is monthly.
+function _isYearlyRule(r) { return r.frequency === 'yearly'; }
+
+// Reads the Monthly/Yearly selector + month dropdown into rule fields.
+function _getRecurringFreqFields(freqId, monthId) {
+  if (document.getElementById(freqId).value !== 'yearly') return { frequency: 'monthly', monthOfYear: 1 };
+  return { frequency: 'yearly', monthOfYear: parseInt(document.getElementById(monthId).value) || 1 };
+}
+
 function getRecurringDue() {
   const today = new Date();
   const mk = curMonthKey();
-  return loadRecurring().filter(r =>
-    r.active &&
-    r.dayOfMonth <= today.getDate() &&
-    r.lastFired !== mk &&
-    (!r.endMonth || r.endMonth >= mk)
-  );
+  const y = today.getFullYear(), curM = today.getMonth() + 1;
+  return loadRecurring().filter(r => {
+    if (!r.active) return false;
+    if (r.endMonth && r.endMonth < mk) return false;
+    if (_isYearlyRule(r)) {
+      // Catch-up semantics: due once this year's target date has been reached and the rule
+      // hasn't fired since that target month — so a yearly rule missed in its month (app not
+      // opened) is still offered later in the year instead of waiting a whole year.
+      // lastFired is always stamped with the month it actually fired in, so a later stamp
+      // (e.g. created right after paying) also correctly suppresses it.
+      const m = r.monthOfYear || 1;
+      const reached = curM > m || (curM === m && _clampDay(y, m, r.dayOfMonth) <= today.getDate());
+      return reached && (r.lastFired || '') < `${y}-${String(m).padStart(2, '0')}`;
+    }
+    return r.dayOfMonth <= today.getDate() && r.lastFired !== mk;
+  });
 }
 
 function getRecurringProjections(year, month) {
   const rules = loadRecurring();
   const mk = `${year}-${String(month).padStart(2,'0')}`;
   return rules
-    .filter(r => r.active && (!r.endMonth || r.endMonth >= mk))
+    .filter(r => r.active && (!r.endMonth || r.endMonth >= mk) &&
+      (!_isYearlyRule(r) || (r.monthOfYear || 1) === month))
     .map(r => ({
       id: `proj_${r.id}`,
       ruleId: r.id,
-      date: `${year}-${String(month).padStart(2,'0')}-${String(r.dayOfMonth).padStart(2,'0')}`,
+      date: `${year}-${String(month).padStart(2,'0')}-${String(_clampDay(year, month, r.dayOfMonth)).padStart(2,'0')}`,
       tx: getInstallmentName(r, mk),
       amount: r.amount,
       category: r.cat,
@@ -1517,6 +1544,20 @@ function pruneExpiredRecurring() {
   }
 }
 
+// Monthly/Yearly selector in the input form: yearly swaps "of every month" for a month dropdown.
+function onRecurringFreqChange() {
+  const yearly = document.getElementById('inputRecurringFreq').value === 'yearly';
+  document.getElementById('inputRecurringMonthOfYear').style.display = yearly ? '' : 'none';
+  document.getElementById('inputRecurringDaySuffix').style.display = yearly ? 'none' : '';
+  document.getElementById('inputRecurringDayLabel').textContent = yearly ? 'Repeat every year on' : 'Repeat on day of each month';
+}
+
+function onRecurringEditFreqChange() {
+  const yearly = document.getElementById('recurringEditFreq').value === 'yearly';
+  document.getElementById('recurringEditMonthOfYear').style.display = yearly ? '' : 'none';
+  document.getElementById('recurringEditDayLabel').textContent = yearly ? 'Repeat every year on' : 'Repeat on day of month';
+}
+
 // Toggle the day-of-month and end-date rows in the input form
 function toggleRecurringRow() {
   const on = document.getElementById('inputRecurring').checked;
@@ -1526,6 +1567,7 @@ function toggleRecurringRow() {
     const raw = document.getElementById('inputDateRaw').value;
     const day = raw ? parseInt(raw.split('-')[2]) : new Date().getDate();
     document.getElementById('inputRecurringDay').value = day;
+    document.getElementById('inputRecurringMonthOfYear').value = raw ? parseInt(raw.split('-')[1]) : new Date().getMonth() + 1;
   } else {
     document.getElementById('inputRecurringEndMonth').value = '';
     document.getElementById('inputRecurringEndYear').value = '';
@@ -1787,7 +1829,9 @@ function _recurringCard(r) {
     <div class="recurring-card-info">
       <div class="recurring-card-tx">${esc(r.tx)}</div>
       <div class="recurring-card-meta">${esc(r.cat)} · ${esc(r.pm)}</div>
-      <div class="recurring-card-day">Every ${ordinalSuffix(r.dayOfMonth)} of the month</div>
+      <div class="recurring-card-day">${_isYearlyRule(r)
+        ? `Every year on ${_MONTH_FULL[(r.monthOfYear || 1) - 1]} ${r.dayOfMonth}`
+        : `Every ${ordinalSuffix(r.dayOfMonth)} of the month`}</div>
       ${endLabel}
     </div>
     <div class="recurring-card-right">
@@ -1826,6 +1870,9 @@ function openRecurringEdit(id) {
   document.getElementById('recurringEditPm').value     = r.pm;
   document.getElementById('recurringEditNotes').value  = r.notes || '';
   document.getElementById('recurringEditDay').value    = r.dayOfMonth;
+  document.getElementById('recurringEditFreq').value   = _isYearlyRule(r) ? 'yearly' : 'monthly';
+  document.getElementById('recurringEditMonthOfYear').value = r.monthOfYear || 1;
+  onRecurringEditFreqChange();
   _setEndMonthValue('recurringEditEndMonth', 'recurringEditEndYear', r.endMonth || null);
   document.getElementById('recurringEditModal').classList.add('open');
 }
@@ -1857,7 +1904,8 @@ function saveRecurringEdit() {
   const idx = rules.findIndex(x => x.id === id);
   if (idx === -1) { closeRecurringEditModal(); return; }
   const endMonth = _getEndMonthValue('recurringEditEndMonth', 'recurringEditEndYear');
-  rules[idx] = { ...rules[idx], type: _recurringEditType, tx, cat, amount: amt, pm, notes, dayOfMonth: day, endMonth: endMonth || null };
+  rules[idx] = { ...rules[idx], type: _recurringEditType, tx, cat, amount: amt, pm, notes, dayOfMonth: day, endMonth: endMonth || null,
+    ..._getRecurringFreqFields('recurringEditFreq', 'recurringEditMonthOfYear') };
   saveRecurring(rules);
   closeRecurringEditModal();
   renderRecurringList();

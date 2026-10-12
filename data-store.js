@@ -366,8 +366,8 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${GOALS_SHEET}!A1:I1`, [[
       'Name','StartDate','EndDate','TargetAmt','Sources','Completed','CompletedDate','id','Ccy',
     ]]);
-    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:N1`, [[
-      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart',
+    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:P1`, [[
+      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart','frequency','monthOfYear',
     ]]);
     await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:L1`, [[
       'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights', 'creditCard',
@@ -449,10 +449,10 @@ const DataStore = (() => {
     // old block never had one of its own) is extended to the current 14-column schema so the
     // sheet stays consistent going forward; data rows are written at their native width.
     const header = (oldRows[0] && oldRows[0][0]) ? oldRows[0] : [
-      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart',
+      'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart','frequency','monthOfYear',
     ];
     const dataRows = oldRows.slice(1).filter(r => r && r[0]);
-    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:N1`, [header]);
+    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:P1`, [header]);
     if (dataRows.length) {
       await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A2:L${1 + dataRows.length}`, dataRows);
     }
@@ -1106,9 +1106,9 @@ const DataStore = (() => {
     return '';
   }
 
-  // ── RECURRING (Recurring!A2:N) ─────────────────────────────────
+  // ── RECURRING (Recurring!A2:P) ─────────────────────────────────
   async function handleGetRecurring() {
-    const res = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:N`);
+    const res = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:P`);
     const data = res.values || [];
     const rules = [];
     data.forEach(row => {
@@ -1130,6 +1130,9 @@ const DataStore = (() => {
         endMonth: normalizeYearMonth(row[11]) || null,
         installmentTotal: Number(row[12]) || 0,
         installmentStart: normalizeYearMonth(row[13]),
+        // Cols O/P are absent on rows written before yearly support — blank means monthly.
+        frequency: String(row[14] || '').trim().toLowerCase() === 'yearly' ? 'yearly' : 'monthly',
+        monthOfYear: Math.min(12, Math.max(1, Number(row[15]) || 1)),
       });
     });
     return { status: 'ok', rules };
@@ -1150,10 +1153,11 @@ const DataStore = (() => {
       if (hasExistingRows) return { status: 'error', message: 'Refusing empty saveAll over existing rows without allowEmpty' };
     }
 
-    const header = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A1:N1`);
-    if (!(header.values && header.values[0] && header.values[0][0])) {
-      await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:N1`, [[
-        'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart',
+    // Also rewrite when col O is missing so sheets created before yearly support get the new headers.
+    const header = await SheetsClient.getValues(spreadsheetId, `${RECURRING_SHEET}!A1:P1`);
+    if (!(header.values && header.values[0] && header.values[0][0] && header.values[0][14])) {
+      await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:P1`, [[
+        'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart','frequency','monthOfYear',
       ]]);
     }
 
@@ -1163,16 +1167,17 @@ const DataStore = (() => {
       String(r.notes || '').slice(0, 500), Number(r.dayOfMonth) || 1, r.active ? 'TRUE' : 'FALSE',
       String(r.lastFired || '').slice(0, 7), '', String(r.endMonth || '').slice(0, 7),
       Number(r.installmentTotal) || 0, String(r.installmentStart || '').slice(0, 7),
+      r.frequency === 'yearly' ? 'yearly' : 'monthly', Math.min(12, Math.max(1, Number(r.monthOfYear) || 1)),
     ]);
 
     // Pad with empty rows to overwrite deleted rules in a single API request instead of sequential clear+update
-    const emptyRow = Array(14).fill('');
+    const emptyRow = Array(16).fill('');
     while (rows.length < 100) rows.push(emptyRow);
 
     // 'RAW' stores every value literally (no date/number/boolean auto-detection), regardless
     // of the cell's number format — this is what actually stops Sheets from re-parsing bare
     // "YYYY-MM" strings in lastFired/endMonth/installmentStart as full dates on write.
-    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:N${RECURRING_DATA_ROW + rows.length - 1}`, rows, 'RAW');
+    await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A${RECURRING_DATA_ROW}:P${RECURRING_DATA_ROW + rows.length - 1}`, rows, 'RAW');
     return { status: 'ok', count: rows.length };
   }
 

@@ -565,6 +565,14 @@ Following Session 28's fix, ran a full audit (all `.js` files and inline `<scrip
 - **Not covered / deliberately out of scope**: recurring rules don't re-derive a live/avg rate when they fire — a recurring FX Expense stores whatever IDR amount was computed at the time the rule was created/last edited and never revisits it (kept this way specifically to avoid touching the Recurring engine, which has its own fragile history — see the "Recurring Race Condition" section elsewhere in this doc). Editing an FX Invest transaction's Total loses a manual override on re-open (recomputes `lot × price` fresh) — flagged, not fixed, since there's nowhere to persist a native total on the Invest sheet without a schema change.
 - Bumped `APP_VERSION` to `'v4.41'`.
 
+#### Session 65: Yearly Recurring Rules (v4.42) (Claude)
+- **Feature request**: recurring rules were monthly-only; the user wanted yearly (e.g. annual subscriptions). Installments stay monthly-only by design (no yearly installments exist).
+- **Schema**: `Recurring` sheet gained cols **O** `frequency` (`monthly`|`yearly`) and **P** `monthOfYear` (1-12). Blank/absent = monthly, so old rows need no migration. `handleRecurring()` rewrites the header row when col O is missing so existing sheets pick up the new headers; read/write ranges widened `A:N` → `A:P`.
+- **Engine (`ui-settings.js`)**: `lastFired` stays a `"YYYY-MM"` stamp of the month the rule actually fired. A yearly rule is due once this year's target date (`monthOfYear` + `dayOfMonth`, day clamped to month length) has been reached **and** `lastFired` is earlier than the target month. That gives catch-up: a yearly rule missed in its month (app not opened) is still offered later in the year rather than waiting 12 months. Calendar projections show a yearly rule only in its `monthOfYear`. `endMonth` works unchanged.
+- **UI**: Monthly/Yearly selector (plus month dropdown when Yearly) in the input form's recurring row and in the recurring edit modal; the recurring list card reads "Every year on March 15". Works for every type that uses the recurring engine (Expense/Income).
+- **Not done**: weekly/quarterly. The `frequency` field is the extension point if wanted later.
+- Bumped `APP_VERSION` to `'v4.42'`.
+
 ---
 
 ## Sign-In Flow — Do's and Don'ts (Read Before Touching Auth Code)

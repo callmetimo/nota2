@@ -1330,7 +1330,7 @@ async function fetchRecurring() {
             // Preserve local endMonth: if local has a value, prefer it (may be in-flight edit)
             // If local and server both empty, stay empty. If server has it and local doesn't, use server.
             endMonth: (local?.endMonth) ? local.endMonth : (r.endMonth || null),
-            lastFired: (local?.lastFired && local.lastFired > (r.lastFired || ''))
+            lastFired: (local?.lastFired && _firedThrough(local) > _firedThrough(r))
               ? local.lastFired
               : (r.lastFired || '')
           };
@@ -1470,60 +1470,157 @@ function ordinalSuffix(n) {
   return n + (s[(v-20)%10] || s[v] || s[0]);
 }
 const _MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const _DAY_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const _FREQ_UNITS = { daily: ['day', 'days'], weekly: ['week', 'weeks'], monthly: ['month', 'months'], yearly: ['year', 'years'] };
+const _ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// Day clamped to the month's length (day 31 in Feb, Feb 29 in a non-leap year, ...).
-function _clampDay(year, month, day) {
-  return Math.min(day, new Date(year, month, 0).getDate());
+// ── Recurrence engine ─────────────────────────────────────────
+// A rule repeats every `interval` `frequency`-units (daily/weekly/monthly/yearly) from `startDate`.
+// Rules saved before this existed have no frequency/interval/startDate: they read as monthly,
+// every 1, with the start derived from dayOfMonth + lastFired (see _ruleStart) — old rows are
+// never rewritten just to fill these in.
+// lastFired is either a legacy "YYYY-MM" (every occurrence in that month is handled) or a full
+// "YYYY-MM-DD" (everything on or before that day is handled) — see _firedThrough.
+function _p2(n) { return String(n).padStart(2, '0'); }
+function _lastDayOf(year, month) { return new Date(year, month, 0).getDate(); }
+function _isoOf(y, m, d) { return `${y}-${_p2(m)}-${_p2(d)}`; }
+function _isoAddDays(iso, days) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + days));
+  return _isoOf(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+}
+function _isoDiffDays(a, b) {  // b - a, in whole days
+  const pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+  return Math.round((Date.UTC(pb[0], pb[1] - 1, pb[2]) - Date.UTC(pa[0], pa[1] - 1, pa[2])) / 86400000);
 }
 
-// A rule with no `frequency` (everything saved before yearly support) is monthly.
-function _isYearlyRule(r) { return r.frequency === 'yearly'; }
+function _ruleFreq(r) { return _FREQ_UNITS[r.frequency] ? r.frequency : 'monthly'; }
+function _ruleInterval(r) {
+  const n = Math.floor(Number(r.interval));
+  return n >= 1 ? Math.min(n, 999) : 1;
+}
+// Day-of-month used by monthly/yearly rules; sticks to the original day so a Jan 31 rule
+// lands on Feb 28 then back on Mar 31 instead of drifting to the 28th forever.
+function _ruleAnchorDay(r) {
+  return _ISO_DATE_RE.test(r.startDate || '') ? parseInt(r.startDate.slice(8, 10), 10) : (r.dayOfMonth || 1);
+}
+function _ruleStart(r) {
+  if (_ISO_DATE_RE.test(r.startDate || '')) return r.startDate;
+  const lf = r.lastFired || '';
+  const [y, mFromFired] = (lf.length >= 7 ? lf.slice(0, 7) : curMonthKey()).split('-').map(Number);
+  const m = _ruleFreq(r) === 'yearly' ? (r.monthOfYear || 1) : mFromFired;
+  return _isoOf(y, m, Math.min(r.dayOfMonth || 1, _lastDayOf(y, m)));
+}
+function _firedThrough(r) {
+  const lf = r.lastFired || '';
+  if (_ISO_DATE_RE.test(lf)) return lf;
+  if (/^\d{4}-\d{2}$/.test(lf)) return _isoOf(lf.slice(0, 4), lf.slice(5, 7), _lastDayOf(+lf.slice(0, 4), +lf.slice(5, 7)));
+  return '';
+}
+function _stampFiredThrough(rule, date) {
+  if (date && date > _firedThrough(rule)) rule.lastFired = date;
+}
 
-// Reads the Monthly/Yearly selector + month dropdown into rule fields.
-function _getRecurringFreqFields(freqId, monthId) {
-  if (document.getElementById(freqId).value !== 'yearly') return { frequency: 'monthly', monthOfYear: 1 };
-  return { frequency: 'yearly', monthOfYear: parseInt(document.getElementById(monthId).value) || 1 };
+// Every occurrence date (ISO, ascending) of a rule within [fromISO, toISO], ignoring fired state.
+function _ruleOccurrences(r, fromISO, toISO) {
+  const freq = _ruleFreq(r), n = _ruleInterval(r), start = _ruleStart(r), anchor = _ruleAnchorDay(r);
+  const [sy, sm] = start.split('-').map(Number);
+  const [fy, fm] = fromISO.split('-').map(Number);
+  let k = 0;
+  if (fromISO > start) {  // jump close to the window instead of walking from the start date
+    if (freq === 'daily') k = Math.floor(_isoDiffDays(start, fromISO) / n);
+    else if (freq === 'weekly') k = Math.floor(_isoDiffDays(start, fromISO) / (7 * n));
+    else if (freq === 'monthly') k = Math.floor(((fy - sy) * 12 + (fm - sm)) / n);
+    else k = Math.floor((fy - sy) / n);
+    k = Math.max(0, k - 1);
+  }
+  const out = [];
+  for (let guard = 0; guard < 2000; guard++, k++) {
+    let date;
+    if (freq === 'daily') date = _isoAddDays(start, k * n);
+    else if (freq === 'weekly') date = _isoAddDays(start, k * n * 7);
+    else if (freq === 'monthly') {
+      const t = sm - 1 + k * n;
+      const y = sy + Math.floor(t / 12), m = t % 12 + 1;
+      date = _isoOf(y, m, Math.min(anchor, _lastDayOf(y, m)));
+    } else {
+      const y = sy + k * n;
+      date = _isoOf(y, sm, Math.min(anchor, _lastDayOf(y, sm)));
+    }
+    if (date > toISO) break;
+    if (date >= fromISO && date >= start) out.push(date);
+  }
+  return out;
+}
+
+function _ruleDescribe(r) {
+  const freq = _ruleFreq(r), n = _ruleInterval(r), anchor = _ruleAnchorDay(r);
+  const [sy, sm, sd] = _ruleStart(r).split('-').map(Number);
+  const dow = _DAY_FULL[new Date(sy, sm - 1, sd).getDay()];
+  if (freq === 'daily') return n === 1 ? 'Every day' : `Every ${n} days`;
+  if (freq === 'weekly') return n === 1 ? `Every ${dow}` : `Every ${n} weeks on ${dow}`;
+  if (freq === 'monthly') return n === 1 ? `Every ${ordinalSuffix(anchor)} of the month` : `Every ${n} months on the ${ordinalSuffix(anchor)}`;
+  return `${n === 1 ? 'Every year' : `Every ${n} years`} on ${_MONTH_FULL[sm - 1]} ${anchor}`;
+}
+
+// Reads the Repeats / Every / Starts-on fields. Until the user touches the start date it
+// follows the transaction's own date (fallbackStart). Returns null if anything is invalid.
+function _readRecurringSchedule(freqId, intId, startId, fallbackStart) {
+  const frequency = document.getElementById(freqId).value;
+  const interval = parseInt(document.getElementById(intId).value, 10);
+  const startEl = document.getElementById(startId);
+  const startDate = startEl.dataset.touched ? startEl.value : (fallbackStart || startEl.value);
+  if (!_FREQ_UNITS[frequency] || !(interval >= 1 && interval <= 999) || !_ISO_DATE_RE.test(startDate)) return null;
+  const [, monthOfYear, dayOfMonth] = startDate.split('-').map(Number);
+  return { frequency, interval, startDate, dayOfMonth, monthOfYear };
+}
+
+function _updateIntervalUnit(freqId, intId, unitId) {
+  const n = parseInt(document.getElementById(intId).value, 10);
+  const units = _FREQ_UNITS[document.getElementById(freqId).value] || _FREQ_UNITS.monthly;
+  document.getElementById(unitId).textContent = n === 1 ? units[0] : units[1];
 }
 
 function getRecurringDue() {
-  const today = new Date();
-  const mk = curMonthKey();
-  const y = today.getFullYear(), curM = today.getMonth() + 1;
-  return loadRecurring().filter(r => {
-    if (!r.active) return false;
-    if (r.endMonth && r.endMonth < mk) return false;
-    if (_isYearlyRule(r)) {
-      // Catch-up semantics: due once this year's target date has been reached and the rule
-      // hasn't fired since that target month — so a yearly rule missed in its month (app not
-      // opened) is still offered later in the year instead of waiting a whole year.
-      // lastFired is always stamped with the month it actually fired in, so a later stamp
-      // (e.g. created right after paying) also correctly suppresses it.
-      const m = r.monthOfYear || 1;
-      const reached = curM > m || (curM === m && _clampDay(y, m, r.dayOfMonth) <= today.getDate());
-      return reached && (r.lastFired || '') < `${y}-${String(m).padStart(2, '0')}`;
-    }
-    return r.dayOfMonth <= today.getDate() && r.lastFired !== mk;
+  const today = todayISO();
+  const due = [];
+  loadRecurring().forEach(r => {
+    if (!r.active) return;
+    const fired = _firedThrough(r);
+    // Every occurrence on or before today that hasn't been handled yet — a backlog is offered
+    // in full (one entry per missed occurrence), each carrying its own date as `_date`.
+    _ruleOccurrences(r, fired ? _isoAddDays(fired, 1) : '0001-01-01', today).forEach(date => {
+      if (r.endMonth && date.slice(0, 7) > r.endMonth) return;
+      due.push({ ...r, _date: date });
+    });
   });
+  return due.sort((a, b) => a._date.localeCompare(b._date));
 }
 
 function getRecurringProjections(year, month) {
-  const rules = loadRecurring();
-  const mk = `${year}-${String(month).padStart(2,'0')}`;
-  return rules
-    .filter(r => r.active && (!r.endMonth || r.endMonth >= mk) &&
-      (!_isYearlyRule(r) || (r.monthOfYear || 1) === month))
-    .map(r => ({
-      id: `proj_${r.id}`,
-      ruleId: r.id,
-      date: `${year}-${String(month).padStart(2,'0')}-${String(_clampDay(year, month, r.dayOfMonth)).padStart(2,'0')}`,
-      tx: getInstallmentName(r, mk),
-      amount: r.amount,
-      category: r.cat,
-      pm: r.pm,
-      notes: r.notes || '',
-      type: r.type,
-      projected: true,
-    }));
+  const from = _isoOf(year, month, 1), to = _isoOf(year, month, _lastDayOf(year, month));
+  const out = [];
+  loadRecurring().forEach(r => {
+    if (!r.active) return;
+    const fired = _firedThrough(r);
+    _ruleOccurrences(r, from, to).forEach(date => {
+      if (date <= fired) return;
+      if (r.endMonth && date.slice(0, 7) > r.endMonth) return;
+      out.push({
+        id: `proj_${r.id}_${date}`,
+        ruleId: r.id,
+        date,
+        tx: getInstallmentName(r, date.slice(0, 7)),
+        amount: r.amount,
+        category: r.cat,
+        pm: r.pm,
+        notes: r.notes || '',
+        type: r.type,
+        projected: true,
+      });
+    });
+  });
+  return out;
 }
 
 // Remove recurring rules whose end month has fully passed — from the app and, via the normal
@@ -1544,37 +1641,49 @@ function pruneExpiredRecurring() {
   }
 }
 
-// Monthly/Yearly selector in the input form: yearly swaps "of every month" for a month dropdown.
+// Repeats / Every fields in the input form: keep the unit word ("month", "weeks", ...) and the
+// summary line in step with what the user picked.
 function onRecurringFreqChange() {
-  const yearly = document.getElementById('inputRecurringFreq').value === 'yearly';
-  document.getElementById('inputRecurringMonthOfYear').style.display = yearly ? '' : 'none';
-  document.getElementById('inputRecurringDaySuffix').style.display = yearly ? 'none' : '';
-  document.getElementById('inputRecurringDayLabel').textContent = yearly ? 'Repeat every year on' : 'Repeat on day of each month';
+  _updateIntervalUnit('inputRecurringFreq', 'inputRecurringInterval', 'inputRecurringUnit');
+  const sched = _readRecurringSchedule('inputRecurringFreq', 'inputRecurringInterval', 'inputRecurringStart',
+    document.getElementById('inputDateRaw').value);
+  document.getElementById('inputRecurringSummary').textContent = sched
+    ? `${_ruleDescribe(sched)}, starting ${isoDisp(sched.startDate)}` : '';
+}
+
+function onRecurringStartTouched() {
+  document.getElementById('inputRecurringStart').dataset.touched = '1';
+  onRecurringFreqChange();
 }
 
 function onRecurringEditFreqChange() {
-  const yearly = document.getElementById('recurringEditFreq').value === 'yearly';
-  document.getElementById('recurringEditMonthOfYear').style.display = yearly ? '' : 'none';
-  document.getElementById('recurringEditDayLabel').textContent = yearly ? 'Repeat every year on' : 'Repeat on day of month';
+  _updateIntervalUnit('recurringEditFreq', 'recurringEditInterval', 'recurringEditUnit');
 }
 
-// Toggle the day-of-month and end-date rows in the input form
+function resetRecurringScheduleFields() {
+  document.getElementById('inputRecurringFreq').value = 'monthly';
+  document.getElementById('inputRecurringInterval').value = 1;
+  const startEl = document.getElementById('inputRecurringStart');
+  startEl.value = '';
+  delete startEl.dataset.touched;
+  onRecurringFreqChange();
+}
+
+// Toggle the schedule and end-date rows in the input form
 function toggleRecurringRow() {
   const on = document.getElementById('inputRecurring').checked;
   document.getElementById('recurringDayRow').style.display = on ? '' : 'none';
   document.getElementById('recurringEndRow').style.display = on ? '' : 'none';
   if (on) {
-    const raw = document.getElementById('inputDateRaw').value;
-    const day = raw ? parseInt(raw.split('-')[2]) : new Date().getDate();
-    document.getElementById('inputRecurringDay').value = day;
-    document.getElementById('inputRecurringMonthOfYear').value = raw ? parseInt(raw.split('-')[1]) : new Date().getMonth() + 1;
+    const startEl = document.getElementById('inputRecurringStart');
+    startEl.value = document.getElementById('inputDateRaw').value || todayISO();
+    delete startEl.dataset.touched;
+    onRecurringFreqChange();
   } else {
     document.getElementById('inputRecurringEndMonth').value = '';
     document.getElementById('inputRecurringEndYear').value = '';
   }
 }
-
-// ── RECURRING PROMPT (on app load) ───────────────────────────────────────────
 
 let _pendingRecurring = [];
 
@@ -1592,7 +1701,8 @@ function checkRecurringOnLoad() {
   try { promptedIds = JSON.parse(localStorage.getItem(promptedKey) || '[]'); } catch(e) {}
   const promptedSet = new Set(promptedIds.map(String));
 
-  const due = getRecurringDue().filter(r => !promptedSet.has(String(r.id)));
+  // Keyed per occurrence (rule id + date) so a daily/weekly backlog isn't collapsed to one entry.
+  const due = getRecurringDue().filter(r => !promptedSet.has(`${r.id}|${r._date}`));
   if (!due.length) return;
   _pendingRecurring = due;
 
@@ -1602,7 +1712,7 @@ function checkRecurringOnLoad() {
   // so if the app is killed between "popup shown" and "user taps Add" (iOS PWA), the rule
   // stays correctly due and gets prompted again on the next open instead of silently
   // vanishing into an unsynced, permanently-projected calendar entry.
-  due.forEach(r => promptedSet.add(String(r.id)));
+  due.forEach(r => promptedSet.add(`${r.id}|${r._date}`));
   localStorage.setItem(promptedKey, JSON.stringify([...promptedSet]));
   // Clean up stale prompt-tracking keys from previous months (old blanket-flag format too)
   Object.keys(localStorage)
@@ -1623,8 +1733,8 @@ function _renderRecurringPrompt() {
     <label class="recurring-prompt-item">
       <input class="recurring-prompt-check" type="checkbox" data-ridx="${i}" checked onchange="_updateRecurringPromptBtn()">
       <div class="recurring-prompt-info">
-        <div class="recurring-prompt-tx">${esc(getInstallmentName(r, curMonthKey()))}</div>
-        <div class="recurring-prompt-meta">${esc(r.cat)} · ${esc(r.pm)}</div>
+        <div class="recurring-prompt-tx">${esc(getInstallmentName(r, r._date.slice(0, 7)))}</div>
+        <div class="recurring-prompt-meta">${esc(r.cat)} · ${esc(r.pm)} · ${esc(isoDisp(r._date))}</div>
       </div>
       <div class="recurring-prompt-amt ${r.type === 'income' ? 'income' : ''}" style="color:${r.type==='income'?'var(--green)':'var(--text)'}">${r.type === 'income' ? '+' : '-'}${fRp(r.amount)}</div>
     </label>`).join('');
@@ -1639,8 +1749,8 @@ function _updateRecurringPromptBtn() {
 // (single, from tapping a still-projected calendar entry and choosing "Add & Sync") — builds
 // the local optimistic transaction and pushes it to the sheet the same way submitOpex() does.
 function _addAndSyncRecurringRule(r) {
-  const today = todayISO();
-  const txName = getInstallmentName(r, curMonthKey());
+  const today = r._date || todayISO();  // the occurrence's own date (a backlog item may be older)
+  const txName = getInstallmentName(r, today.slice(0, 7));
   const rec = { id: Date.now() + Math.random(), date: today, tx: txName, amount: r.amount,
     category: r.cat, pm: r.pm, notes: r.notes || '', type: r.type, synced: false };
   txHistory.unshift(rec);
@@ -1653,6 +1763,10 @@ function _addAndSyncRecurringRule(r) {
     if (!ok) return;
     queue = queue.filter(q => q.id !== rec.id);
     txHistory = txHistory.map(h => h.id === rec.id ? {...h, synced: true} : h);
+    // Only the current month has a live cache to keep in step; an older backlog occurrence is
+    // picked up from the sheet instead (seeding a cache for a month never loaded would make
+    // that cache look authoritative and hide the rest of the month).
+    if (today.slice(0, 7) !== curMonthKey()) { saveLocal(); return; }
     const cacheKey = curMonthCacheKey();
     const dateParts = rec.date.split('-');
     const optimisticRow = { d: parseInt(dateParts[2]), cat: rec.category, tx: rec.tx, pm: rec.pm,
@@ -1671,14 +1785,16 @@ function _addAndSyncRecurringRule(r) {
 // of immediately syncing, since the user may have already recorded the occurrence another way
 // (in which case "Add & Sync" would create a duplicate sheet row — see skip path below).
 let _projectedActionRuleId = null;
+let _projectedActionDate = null;
 
-function openProjectedActionModal(ruleId) {
+function openProjectedActionModal(ruleId, date) {
   const rules = loadRecurring();
   const r = rules.find(x => String(x.id) === String(ruleId));
   if (!r) return;
   _projectedActionRuleId = ruleId;
+  _projectedActionDate = date || null;
   document.getElementById('projectedActionSubtitle').textContent =
-    `"${r.tx}" (${fRp(r.amount)}) — add & sync to Google Sheets, or skip this occurrence if you've already recorded it another way.`;
+    `"${r.tx}" (${fRp(r.amount)})${date ? ' on ' + isoDisp(date) : ''} — add & sync to Google Sheets, or skip this occurrence if you've already recorded it another way.`;
   document.getElementById('projectedActionModal').classList.add('open');
 }
 
@@ -1689,6 +1805,7 @@ function closeProjectedActionModal() {
 
 function handleProjectedAddSync() {
   const ruleId = _projectedActionRuleId;
+  const date = _projectedActionDate || todayISO();
   closeProjectedActionModal();
   if (isSyncing || !ruleId) return;
   const rules = loadRecurring();
@@ -1696,10 +1813,10 @@ function handleProjectedAddSync() {
   if (idx === -1) return;
   const r = rules[idx];
   isSyncing = true;
-  rules[idx].lastFired = curMonthKey();
+  _stampFiredThrough(rules[idx], date);
   saveRecurring(rules);
   showToast('Saving…', 'loading', 0);
-  _addAndSyncRecurringRule(r).then(() => {
+  _addAndSyncRecurringRule({ ...r, _date: date }).then(() => {
     isSyncing = false;
     saveLocal(); updateStatus();
     showToast('Recurring transaction added ✓', 'success');
@@ -1718,12 +1835,13 @@ function handleProjectedAddSync() {
 // from the calendar day panel instead of the bulk popup.
 function handleProjectedSkip() {
   const ruleId = _projectedActionRuleId;
+  const date = _projectedActionDate || todayISO();
   closeProjectedActionModal();
   if (!ruleId) return;
   const rules = loadRecurring();
   const idx = rules.findIndex(x => String(x.id) === String(ruleId));
   if (idx === -1) return;
-  rules[idx].lastFired = curMonthKey();
+  _stampFiredThrough(rules[idx], date);
   saveRecurring(rules);
   showToast('Occurrence skipped', 'success');
   calInited = false;
@@ -1752,14 +1870,13 @@ function addSelectedRecurring() {
     return;
   }
   const rules = loadRecurring();
-  const mk = curMonthKey();
   const syncPromises = [];
   checked.forEach(cb => {
     const r = _pendingRecurring[+cb.dataset.ridx];
     if (!r) return;
     // Mark rule fired
     const idx = rules.findIndex(x => x.id === r.id);
-    if (idx !== -1) rules[idx].lastFired = mk;
+    if (idx !== -1) _stampFiredThrough(rules[idx], r._date);
     syncPromises.push(_addAndSyncRecurringRule(r));
   });
   saveLocal(); updateStatus(); saveRecurring(rules);
@@ -1783,17 +1900,16 @@ function addSelectedRecurring() {
 
 function dismissRecurringPrompt() {
   document.getElementById('recurringPrompt').classList.remove('open');
-  // Mark every pending rule as handled for this month so the prompt does not
-  // re-appear on the next app open (whether the user added or skipped).
-  const mk = curMonthKey();
+  // Mark every pending occurrence as handled so the prompt does not re-appear on the next
+  // app open (whether the user added or skipped).
   const rules = loadRecurring();
   let changed = false;
   (_pendingRecurring || []).forEach(r => {
     const idx = rules.findIndex(x => x.id === r.id);
-    if (idx !== -1 && rules[idx].lastFired !== mk) {
-      rules[idx].lastFired = mk;
-      changed = true;
-    }
+    if (idx === -1) return;
+    const before = rules[idx].lastFired;
+    _stampFiredThrough(rules[idx], r._date);
+    if (rules[idx].lastFired !== before) changed = true;
   });
   if (changed) saveRecurring(rules);
 }
@@ -1829,9 +1945,7 @@ function _recurringCard(r) {
     <div class="recurring-card-info">
       <div class="recurring-card-tx">${esc(r.tx)}</div>
       <div class="recurring-card-meta">${esc(r.cat)} · ${esc(r.pm)}</div>
-      <div class="recurring-card-day">${_isYearlyRule(r)
-        ? `Every year on ${_MONTH_FULL[(r.monthOfYear || 1) - 1]} ${r.dayOfMonth}`
-        : `Every ${ordinalSuffix(r.dayOfMonth)} of the month`}</div>
+      <div class="recurring-card-day">${esc(_ruleDescribe(r))}</div>
       ${endLabel}
     </div>
     <div class="recurring-card-right">
@@ -1869,9 +1983,9 @@ function openRecurringEdit(id) {
   document.getElementById('recurringEditAmount').value = formatGroupedAmt(r.amount);
   document.getElementById('recurringEditPm').value     = r.pm;
   document.getElementById('recurringEditNotes').value  = r.notes || '';
-  document.getElementById('recurringEditDay').value    = r.dayOfMonth;
-  document.getElementById('recurringEditFreq').value   = _isYearlyRule(r) ? 'yearly' : 'monthly';
-  document.getElementById('recurringEditMonthOfYear').value = r.monthOfYear || 1;
+  document.getElementById('recurringEditFreq').value     = _ruleFreq(r);
+  document.getElementById('recurringEditInterval').value = _ruleInterval(r);
+  document.getElementById('recurringEditStart').value    = _ruleStart(r);
   onRecurringEditFreqChange();
   _setEndMonthValue('recurringEditEndMonth', 'recurringEditEndYear', r.endMonth || null);
   document.getElementById('recurringEditModal').classList.add('open');
@@ -1896,16 +2010,15 @@ function saveRecurringEdit() {
   const amt = parseAmt('recurringEditAmount');
   const pm  = sanitizeInput(document.getElementById('recurringEditPm').value, 50).trim();
   const notes = sanitizeInput(document.getElementById('recurringEditNotes').value, 200);
-  const day = parseInt(document.getElementById('recurringEditDay').value) || 0;
-  if (!tx || !cat || !amt || !pm || day < 1 || day > 31) {
-    showToast('All fields required (day 1–31)', 'error'); return;
+  const sched = _readRecurringSchedule('recurringEditFreq', 'recurringEditInterval', 'recurringEditStart', '');
+  if (!tx || !cat || !amt || !pm || !sched) {
+    showToast('All fields required (every 1–999, valid start date)', 'error'); return;
   }
   const rules = loadRecurring();
   const idx = rules.findIndex(x => x.id === id);
   if (idx === -1) { closeRecurringEditModal(); return; }
   const endMonth = _getEndMonthValue('recurringEditEndMonth', 'recurringEditEndYear');
-  rules[idx] = { ...rules[idx], type: _recurringEditType, tx, cat, amount: amt, pm, notes, dayOfMonth: day, endMonth: endMonth || null,
-    ..._getRecurringFreqFields('recurringEditFreq', 'recurringEditMonthOfYear') };
+  rules[idx] = { ...rules[idx], type: _recurringEditType, tx, cat, amount: amt, pm, notes, endMonth: endMonth || null, ...sched };
   saveRecurring(rules);
   closeRecurringEditModal();
   renderRecurringList();

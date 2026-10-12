@@ -147,9 +147,6 @@ function calGetMonthData(year, month) {
 
   if (isCurrentCalMonth) {
     const mk = curMonthKey();
-    const firedIds = new Set(
-      loadRecurring().filter(r => r.lastFired === mk).map(r => `proj_${r.id}`)
-    );
     // Defensive dedup against real same-day entries, independent of `lastFired`/`firedIds`.
     // txByDay at this point only holds real HIST.opex/txHistory rows (added above), so this
     // catches the case where a projection's own rule already has a matching real transaction
@@ -165,7 +162,6 @@ function calGetMonthData(year, month) {
     const usedProjSigCounts = {};
     getRecurringProjections(year, month)
       .filter(p => {
-        if (firedIds.has(p.id)) return false;
         const sig = sigOfProjection(p);
         usedProjSigCounts[sig] = (usedProjSigCounts[sig] || 0) + 1;
         if (usedProjSigCounts[sig] <= (realSigCounts[sig] || 0)) {
@@ -1096,7 +1092,7 @@ function calSelectDay(cell, dateStr, totalStr) {
       const canTransferEdit = isEditableDay && isTransfer && tx.sheetId;
       // A projected recurring entry is due-and-syncable once its date has arrived (not still upcoming)
       const canSyncProjected = tx.projected && tx.ruleId && dateStr <= todayISO();
-      const tapAttrs = canEdit ? `data-idx="${idx}"` : (canSyncProjected ? `data-ruleid="${tx.ruleId}"` : (canTransferEdit ? `data-idx="${idx}" data-xfrid="${esc(tx.sheetId)}"` : ''));
+      const tapAttrs = canEdit ? `data-idx="${idx}"` : (canSyncProjected ? `data-ruleid="${tx.ruleId}" data-date="${dateStr}"` : (canTransferEdit ? `data-idx="${idx}" data-xfrid="${esc(tx.sheetId)}"` : ''));
       return `<div class="cal-tx-item${canEdit ? ' editable' : ''}${canSyncProjected ? ' projected-tappable' : ''}${canTransferEdit ? ' transfer-deletable' : ''}" ${tapAttrs}>
         <div class="cal-tx-dot ${tx.type||''}${tx.synced===false?' unsynced':''}"></div>
         <div class="cal-tx-info">

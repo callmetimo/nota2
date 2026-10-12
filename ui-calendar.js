@@ -598,31 +598,56 @@ function initCalendar() {
 
   const todayStr = `${year}-${String(month).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
 
-  // Always select today and scroll to its row
+  // Select today (panel only — the scroll below owns positioning)
   setTimeout(() => {
     const todayCells = document.querySelectorAll('#page-home .cal-day.today');
     if (todayCells.length > 0) {
       const tc = todayCells[0];
       const txns = JSON.parse(tc.dataset.txns || '[]');
       if (txns.length > 0) {
-        calSelectDay(tc, todayStr, fRp(txns.reduce((s,t)=>s+(t.amt||0),0)));
+        calSelectDay(tc, todayStr, fRp(txns.reduce((s,t)=>s+(t.amt||0),0)), true);
       } else {
         document.getElementById('calTxDate').textContent =
           today.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
         document.getElementById('calTxTotal').textContent = 'No transactions today';
       }
-      const curMonthEl = document.getElementById('calCurrentMonth');
-      if (curMonthEl && cs) {
-        // Use getBoundingClientRect so the position is relative to #calScroll,
-        // not <body> (offsetTop would overshoot since .cal-scroll is position:static).
-        cs.style.scrollSnapType = 'none';
-        const rect = curMonthEl.getBoundingClientRect();
-        const csRect = cs.getBoundingClientRect();
-        cs.scrollTo({ top: cs.scrollTop + (rect.top - csRect.top), behavior: 'instant' });
-        requestAnimationFrame(() => { cs.style.scrollSnapType = ''; });
-      }
     }
   }, 20);
+
+  calScrollToCurrentMonth();
+}
+
+// Pins #calScroll to the current month. Retries across frames until the container
+// has real layout (clientHeight > 0), since one early measurement can land on a
+// zero-height/hidden container and clamp to scrollTop 0 (= January).
+let calScrollToken = 0;
+function calScrollToCurrentMonth() {
+  const myToken = ++calScrollToken;   // newer call cancels older pending retries
+  const started = performance.now();
+  function attempt() {
+    if (myToken !== calScrollToken) return;
+    const cs = document.getElementById('calScroll');
+    const curMonthEl = document.getElementById('calCurrentMonth');
+    const home = document.getElementById('page-home');
+    const ready = cs && curMonthEl && home && home.classList.contains('active')
+      && cs.clientHeight > 0 && curMonthEl.offsetHeight > 0;
+    if (!ready) {
+      if (performance.now() - started < 1500) requestAnimationFrame(attempt);
+      return;
+    }
+    // getBoundingClientRect: .cal-scroll is position:static, so offsetTop is not relative to it.
+    cs.style.scrollSnapType = 'none';
+    const delta = curMonthEl.getBoundingClientRect().top - cs.getBoundingClientRect().top;
+    cs.scrollTo({ top: cs.scrollTop + delta, behavior: 'instant' });
+    requestAnimationFrame(() => {
+      if (myToken !== calScrollToken) { cs.style.scrollSnapType = ''; return; }
+      // Re-check once after layout settles (sentinels/fonts can shift it), then restore snap.
+      const d2 = curMonthEl.getBoundingClientRect().top - cs.getBoundingClientRect().top;
+      if (Math.abs(d2) > 1) cs.scrollTo({ top: cs.scrollTop + d2, behavior: 'instant' });
+      cs.style.scrollSnapType = '';
+    });
+  }
+  requestAnimationFrame(attempt);
 }
 
 function calOnScroll() { /* all months pre-rendered on init */ }
@@ -1044,7 +1069,7 @@ function calSetPanelH(txCount) {
   // Dynamic height sizing removed as part of two-segment static layout redesign.
 }
 
-function calSelectDay(cell, dateStr, totalStr) {
+function calSelectDay(cell, dateStr, totalStr, noScroll) {
   if (calSelectedCell) calSelectedCell.classList.remove('selected');
   calSelectedCell = cell;
   cell.classList.add('selected');
@@ -1107,7 +1132,7 @@ function calSelectDay(cell, dateStr, totalStr) {
   }
 
   const row = cell.closest('.cal-week-row');
-  if (row) {
+  if (row && !noScroll) {
     // Wait for panel transition to complete (260ms) before checking visibility
     setTimeout(() => {
       const cs = document.getElementById('calScroll');
@@ -1140,7 +1165,7 @@ function calRefreshOpenDayPanel() {
   if (!calCurrentDateStr) return;
   const cell = document.querySelector(`[data-date="${calCurrentDateStr}"]`);
   if (!cell) return;
-  calSelectDay(cell, calCurrentDateStr, cell.dataset.total || '');
+  calSelectDay(cell, calCurrentDateStr, cell.dataset.total || '', true);
 }
 
 function calPopulateFutureMonths() {
@@ -1192,3 +1217,9 @@ function calReinit() {
   initCalendar();
 }
 
+
+// Re-pin to the current month after background sync finishes or the app returns to the foreground.
+window.addEventListener('notaBackgroundSyncComplete', () => calScrollToCurrentMonth());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') calScrollToCurrentMonth();
+});

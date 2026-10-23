@@ -1519,7 +1519,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.45';
+const APP_VERSION = 'v4.46';
 const APP_BUILD = '2026-09-03a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2096,6 +2096,13 @@ function todayISO(){const d=new Date();return`${d.getFullYear()}-${String(d.getM
 function isoDisp(iso){if(!iso)return'';const[y,m,d]=iso.split('-');return`${parseInt(d)} ${MO[parseInt(m)-1]} ${y}`}
 function isoSheetDate(iso){const[y,m,d]=iso.split('-');return`${parseInt(d)} ${MO[parseInt(m)-1]} ${y.slice(-2)}`}
 function isoMonthKey(iso){const[y,m]=iso.split('-');return`${MO[parseInt(m)-1]} ${y}`}
+// Month label for sheet column B: credit-card rows roll into the next month after the billing day.
+function sheetMonthKey(iso, pm){
+  const[y,m,d]=iso.split('-').map(Number);
+  const bd=getCCBillingDate(pm);
+  if(!bd||!d||d<=bd) return isoMonthKey(iso);
+  return m>=12?`${MO[0]} ${y+1}`:`${MO[m]} ${y}`;
+}
 function isFutureTransaction(txDateISO){return txDateISO && txDateISO > todayISO()}
 function curMonthBounds(){return{min:'2019-01-01',max:'2099-12-31'}}
 
@@ -3570,7 +3577,7 @@ async function updateTransaction() {
 
   const payload = {
     type: 'opex', action: 'edit', rowIndex, id,
-    date: isoSheetDate(date), month: isoMonthKey(date),
+    date: isoSheetDate(date), month: sheetMonthKey(date, pm),
     cat, tx, pm, amount, notes, isIncome: isInc, future: isFuture,
     nativeAmount: nativeAmount || '', ccy: ccy || '',
     origDate, origMonth, origTx, origAmt, origIsIncome: origInc
@@ -3868,7 +3875,7 @@ async function syncOpex(r) {
   try {
     const sheetDate = isoSheetDate(r.date);
     const monthHeader = isoMonthKey(r.date);
-    const month = isoMonthKey(r.date);
+    const month = sheetMonthKey(r.date, r.pm);
     const payload = {
       type:'opex', action:r.type,
       date:sheetDate, month, monthHeader,

@@ -1519,7 +1519,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.46';
+const APP_VERSION = 'v4.47';
 const APP_BUILD = '2026-09-03a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -4064,7 +4064,15 @@ function performSearch(query) {
     const r = txHistory[i];
     const txMatch = r.tx && r.tx.toLowerCase().includes(q);
     const notesMatch = r.notes && r.notes.toLowerCase().includes(q);
-    if (txMatch || notesMatch) results.push({source: 'local-opex', idx: i, row: r, type: 'opex'});
+    if (!(txMatch || notesMatch)) continue;
+    // Synced local rows linger in txHistory until pruned; skip when the same tx already came from HIST
+    if (r.synced) {
+      const dt = new Date(r.date);
+      const amt = r.amount || r.exp || r.inc || 0;
+      if (histOpex.some(h => h.tx === (r.tx || r.payee || '') && h.y === dt.getFullYear() && h.m === dt.getMonth() &&
+          h.d === dt.getDate() && (h.exp || h.inc || 0) === amt)) continue;
+    }
+    results.push({source: 'local-opex', idx: i, row: r, type: 'opex'});
   }
   
   for (let i = 0; i < investHistory.length; i++) {

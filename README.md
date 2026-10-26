@@ -599,6 +599,7 @@ Following Session 28's fix, ran a full audit (all `.js` files and inline `<scrip
 : Value`, `Label
 :
 Value`) and refuses to let a blank value swallow the next row's label. **Lesson**: the first samples were pasted with tabs, the real email flattened differently — never assume one text layout from one paste; keep a test per layout.
+- **v4.53 — credit card bill payment is now a Transfer, not ignored.** The BCA "Credit Card & Paylater" journal (paying the card from a bank account) parses with `direction:'transfer'` and a `targetKey` (the card/customer number). The popup shows it as `🔁 Transfer · BCA → card`; the edit sheet swaps Transaction/Category for From/To. Adding it reuses the `submitTransfer()` path (optimistic `txHistory` + `queue` row, `syncTransfer()`, which writes both legs in one append). "Remember" links both numbers to payment methods (`accounts` mapping), so the next bill is pre-filled. The type's default flipped from Ignore to Ask; the user can still set it to Ignore.
 - **Lesson (v4.50)**: test a new page by navigating to it the way the user does (`switchTabFromMore(...)`), not by calling its render function; and never feature-detect a `const`/`let` global via `window.X` — use `typeof X !== 'undefined'`.
 
 ---

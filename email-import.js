@@ -206,12 +206,17 @@ const EmailImport = (() => {
   }
   function seenKeys(it) { return ['g:' + it.gmailId, it.ref && 'r:' + it.ref, signature(it)]; }
 
+  // A card bill payment moves money between two of the user's own accounts: it is recorded as a
+  // Transfer (From = `pm`, To = `toPm`), not as an expense with a category.
+  function isTransfer(it) { return it.direction === 'transfer'; }
+
   function isComplete(it) {
+    if (isTransfer(it)) return !!(it.pm && it.toPm && it.pm !== it.toPm && it.amount > 0 && it.date);
     return !!(it.tx && it.cat && it.pm && it.amount > 0 && it.date);
   }
 
   function buildItem(parsed, gmailId) {
-    const rule = config.rules.find(r => ruleMatches(r, parsed.merchant));
+    const rule = parsed.direction === 'transfer' ? null : config.rules.find(r => ruleMatches(r, parsed.merchant));
     const pmValid = pm => pm && (typeof allPMs === 'undefined' || allPMs.includes(pm));
     const catValid = c => c && (typeof allCategories === 'undefined' || allCategories.includes(c));
     const pm = findAccountPm(parsed.sourceKey);
@@ -226,6 +231,8 @@ const EmailImport = (() => {
       tx: (rule && rule.tx) || parsed.defaultTx || parsed.merchant || parsed.typeLabel,
       cat: catValid(cat) ? cat : '', pm: pmValid(pm) ? pm : '', notes,
       foreign: parsed.ccy !== 'IDR' ? `${parsed.ccy} ${parsed.nativeAmount}` : '',
+      targetKey: parsed.targetKey || '',
+      toPm: pmValid(findAccountPm(parsed.targetKey)) ? findAccountPm(parsed.targetKey) : '',
       checked: false,
     };
     it.checked = isComplete(it);
@@ -326,14 +333,25 @@ const EmailImport = (() => {
     document.getElementById('emailImportList').innerHTML = pending.map((it, i) => {
       const ok = isComplete(it);
       const income = it.direction === 'income';
-      const missing = !it.cat ? 'Pick category' : (!it.pm ? 'Pick payment method' : (!(it.amount > 0) ? 'Enter amount' : ''));
+      const xfer = isTransfer(it);
+      const orange = t => `<span style="color:#ff9500">${esc(t)}</span>`;
+      let meta;
+      if (xfer) {
+        const from = it.pm ? esc(it.pm) : orange('Pick "from"');
+        const to = it.toPm ? esc(it.toPm) : orange('Pick card');
+        meta = `${from} → ${to} · ${esc(isoDisp(it.date))}`;
+      } else {
+        const missing = !it.cat ? 'Pick category' : (!it.pm ? 'Pick payment method' : (!(it.amount > 0) ? 'Enter amount' : ''));
+        meta = `${missing ? orange(missing) : esc(it.cat)} · ${esc(it.pm || '—')} · ${esc(isoDisp(it.date))}`;
+      }
+      const amt = it.amount > 0 ? (xfer ? '' : (income ? '+' : '-')) + fRp(it.amount) : (it.foreign ? esc(it.foreign) : '—');
       return `<div class="recurring-prompt-item" ${ok ? '' : 'style="border-left:2px solid #ff9500;padding-left:8px"'}>
         <input class="recurring-prompt-check" type="checkbox" data-eidx="${i}" ${it.checked && ok ? 'checked' : ''} ${ok ? '' : 'disabled'} onchange="EmailImport.onCheck(${i}, this.checked)">
         <div class="recurring-prompt-info" onclick="EmailImport.openEdit(${i})" style="cursor:pointer">
-          <div class="recurring-prompt-tx">${esc(it.tx)}</div>
-          <div class="recurring-prompt-meta">${missing ? `<span style="color:#ff9500">${esc(missing)}</span>` : esc(it.cat)} · ${esc(it.pm || '—')} · ${esc(isoDisp(it.date))}</div>
+          <div class="recurring-prompt-tx">${xfer ? '🔁 Transfer · ' : ''}${esc(it.tx)}</div>
+          <div class="recurring-prompt-meta">${meta}</div>
         </div>
-        <div class="recurring-prompt-amt" style="color:${income ? 'var(--green)' : 'var(--text)'}">${it.amount > 0 ? (income ? '+' : '-') + fRp(it.amount) : (it.foreign ? esc(it.foreign) : '—')}</div>
+        <div class="recurring-prompt-amt" style="color:${xfer ? '#a78bfa' : (income ? 'var(--green)' : 'var(--text)')}">${amt}</div>
       </div>`;
     }).join('');
     updateAddBtn();
@@ -368,10 +386,12 @@ const EmailImport = (() => {
     isSyncing = true;
     const btn = document.getElementById('emailImportAddBtn');
     btn.disabled = true;
-    const promises = chosen.map(it => _addAndSyncRecurringRule({
-      _date: it.date, tx: it.tx, amount: it.amount, cat: it.cat, pm: it.pm, notes: it.notes,
-      type: it.direction === 'income' ? 'income' : 'expense',
-    }));
+    const promises = chosen.map(it => isTransfer(it)
+      ? addAndSyncTransfer(it)
+      : _addAndSyncRecurringRule({
+        _date: it.date, tx: it.tx, amount: it.amount, cat: it.cat, pm: it.pm, notes: it.notes,
+        type: it.direction === 'income' ? 'income' : 'expense',
+      }));
     markSeen(...chosen.flatMap(seenKeys));
     const done = new Set(chosen);
     pending = pending.filter(it => !done.has(it));
@@ -389,6 +409,25 @@ const EmailImport = (() => {
         calInited = false;
         if (document.getElementById('page-home').classList.contains('active')) initCalendar();
       });
+    });
+  }
+
+  // Same local-first path as submitTransfer() (index.html): optimistic row + queue, then
+  // syncTransfer() writes both legs; a failed sync stays in the queue for retryPendingQueue().
+  function addAndSyncTransfer(it) {
+    const r = { id: Date.now() + Math.random(), date: it.date, fromPm: it.pm, toPm: it.toPm, amount: it.amount,
+      notes: it.notes || '', tx: 'Transfer', type: 'transfer', synced: false, nativeAmount: 0, ccy: '' };
+    txHistory.unshift(r);
+    queue.push({ ...r });
+    saveLocal(); updateStatus();
+    buildAccountBalances();
+    renderAccountBalanceCards();
+    return syncTransfer(r).then(ok => {
+      if (!ok) return;
+      r.synced = true;
+      queue = queue.filter(q => q.id !== r.id);
+      saveLocal(); updateStatus();
+      return loadHistData().then(() => { buildAccountBalances(); renderAccountBalanceCards(); }).catch(() => {});
     });
   }
 
@@ -411,24 +450,41 @@ const EmailImport = (() => {
     editIdx = i;
     document.getElementById('emailEditSubtitle').textContent =
       `From email: ${it.merchant || it.typeLabel} · ${it.typeLabel} · ${isoDisp(it.date)}`;
+    const xfer = isTransfer(it);
+    // A transfer has no name/category, and "payment method" becomes From + To.
+    document.getElementById('emailEditTxWrap').style.display = xfer ? 'none' : '';
+    document.getElementById('emailEditCatWrap').style.display = xfer ? 'none' : '';
+    document.getElementById('emailEditToWrap').style.display = xfer ? '' : 'none';
+    document.getElementById('emailEditPmLabel').textContent = xfer ? 'From' : 'Payment Method';
+    document.getElementById('emailEditToPm').innerHTML = optionsHtml(allPMs, it.toPm, 'Pick the card / account');
+    document.querySelector('#emailEditModal .modal-title').textContent = xfer ? 'Edit transfer' : 'Edit before adding';
     document.getElementById('emailEditTx').value = it.tx;
     document.getElementById('emailEditCat').innerHTML = optionsHtml(allCategories, it.cat, 'Pick a category');
-    document.getElementById('emailEditPm').innerHTML = optionsHtml(allPMs, it.pm, 'Pick a payment method');
+    document.getElementById('emailEditPm').innerHTML = optionsHtml(allPMs, it.pm, xfer ? 'Pick the paying account' : 'Pick a payment method');
     document.getElementById('emailEditAmount').value = it.amount > 0 ? String(it.amount) : '';
     document.getElementById('emailEditAmount').placeholder = it.foreign ? `${it.foreign} → enter Rp` : '0';
     document.getElementById('emailEditDate').value = it.date || '';
     const remember = document.getElementById('emailEditRemember');
     remember.checked = true;
     document.getElementById('emailEditPattern').value = suggestPattern(it.merchant);
-    document.getElementById('emailEditRememberHint').textContent = it.sourceKey
-      ? `Also links ${it.sourceKey} to the payment method above.` : '';
+    document.getElementById('emailEditRememberHint').textContent = xfer
+      ? `Links ${it.sourceKey || 'the paying account'} → From and ${it.targetKey || 'the card'} → To.`
+      : (it.sourceKey ? `Also links ${it.sourceKey} to the payment method above.` : '');
     onRememberToggle();
     document.getElementById('emailEditModal').classList.add('open');
   }
 
   function onRememberToggle() {
     const on = document.getElementById('emailEditRemember').checked;
-    document.getElementById('emailEditPatternWrap').style.display = on ? 'block' : 'none';
+    const xfer = pending[editIdx] && isTransfer(pending[editIdx]);
+    // Transfers have no merchant to match: "remember" only saves the account/card links.
+    document.getElementById('emailEditPatternWrap').style.display = on && !xfer ? 'block' : 'none';
+  }
+
+  function rememberAccount(key, pm) {
+    if (!key || !pm) return;
+    const k = key.replace(/x/gi, '*');
+    if (!config.accounts.some(a => a.key.replace(/x/gi, '*') === k)) config.accounts.push({ key: k, pm });
   }
 
   function closeEdit() { document.getElementById('emailEditModal').classList.remove('open'); editIdx = -1; }
@@ -441,6 +497,26 @@ const EmailImport = (() => {
   function saveEdit() {
     const it = pending[editIdx];
     if (!it) { closeEdit(); return; }
+    if (isTransfer(it)) {
+      const from = document.getElementById('emailEditPm').value;
+      const to = document.getElementById('emailEditToPm').value;
+      const amt = parseAmountInput(document.getElementById('emailEditAmount').value);
+      const dt = document.getElementById('emailEditDate').value;
+      if (!from) { showToast('Pick the paying account', 'error'); return; }
+      if (!to) { showToast('Pick the card / account being paid', 'error'); return; }
+      if (from === to) { showToast('From and To must be different', 'error'); return; }
+      if (!(amt > 0)) { showToast('Enter an amount', 'error'); return; }
+      if (!dt) { showToast('Pick a date', 'error'); return; }
+      Object.assign(it, { pm: from, toPm: to, amount: amt, date: dt, checked: true });
+      if (document.getElementById('emailEditRemember').checked) {
+        rememberAccount(it.sourceKey, from);
+        rememberAccount(it.targetKey, to);
+        save();
+        reapplyToPending(it);
+      }
+      closeEdit(); renderPopup(); renderPage();
+      return;
+    }
     const tx = document.getElementById('emailEditTx').value.trim();
     const cat = document.getElementById('emailEditCat').value;
     const pm = document.getElementById('emailEditPm').value;
@@ -477,6 +553,14 @@ const EmailImport = (() => {
       if (!o.pm) {
         const pm = findAccountPm(o.sourceKey);
         if (pm && allPMs.includes(pm)) o.pm = pm;
+      }
+      if (isTransfer(o)) {
+        if (!o.toPm) {
+          const to = findAccountPm(o.targetKey);
+          if (to && allPMs.includes(to)) o.toPm = to;
+        }
+        if (isComplete(o)) o.checked = true;
+        return;
       }
       if (!o.cat) {
         const rule = config.rules.find(r => ruleMatches(r, o.merchant));
@@ -551,7 +635,7 @@ const EmailImport = (() => {
           <span class="smart-pill ${act === 'ignore' ? 'selected' : ''}" onclick="EmailImport.setType('${t.id}','ignore')">Ignore</span>
         </div></div>`;
     });
-    h += `<p style="font-size:11px;color:var(--text2);margin:4px 4px 0;line-height:1.4">Credit card bill payments are ignored by default: they move money to your card and are not an expense.</p>`;
+    h += `<p style="font-size:11px;color:var(--text2);margin:4px 4px 0;line-height:1.4">Credit card bill payments are recorded as a transfer from your account to the card, so they are not counted as spending twice. Set to Ignore if you would rather skip them.</p>`;
 
     // Accounts
     h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 8px"><span class="form-label" style="margin:0">Account &amp; card → payment method</span><button class="config-add-btn" onclick="EmailImport.openAcct(-1)">+ Add</button></div>`;

@@ -18,7 +18,9 @@
     m9: mk('m9', `We would like to inform you that your transaction for BI FAST Transfer - Mandiri Cash Management is successfully executed.\n\nDate/Time\t:\tOct 23, 2026 15:29:35 (GMT +7)\nCorporate Name\t:\tACME SERVICES\nTransaction Type\t:\tCredit\nFrom Account\t:\t1220000000000 - IDR - ACME SERVICES\nTo Account\t:\t703100000000 - IDR - JOHN DOE\nAmount\t:\tIDR 601,149.00\nReference No\t:\t-\nRemark\t:\tOktober fee\nExtended Payment Detail\t:\tOktober fee 2026`),
     m8: mk('m8', `Nomor Kartu\t: \t472647XXXX4541\nMerchant / ATM\t: \tWARUNG BAKSO PAK DE\nJenis Transaksi\t: \tCONTACTLESS DALAM NEGERI\nPada Tanggal\t:\t25-10-2026 17:24:26 WIB\nSejumlah\t:\tRp68.100,00`),
   };
-  window.__listIds = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9'];
+  // Card bill payment in the "label / ': value' on separate lines" layout (becomes a Transfer).
+  window.__msgs.m10 = mk('m10', `Status\n: Successful\nTransaction Date\n: 26 Oct 2026 15:20:25\nTransaction Type\n: Credit Card & Paylater - BCA\nSource of Fund\n: 1234****56\nCard No. / Customer No.\n: 0000000015****64\nName\n: JOHN **US ***DOE\nTotal Bill\n: IDR 17,908,449.00\nTotal Payment\n: IDR 1,000,000.00\nRemaining Bill\n: IDR 16,908,449.00\nReference No.\n: 9527120261026152025225TPP0000000004`);
+  window.__listIds = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10'];
   window.__gmailStatus = 200;
   window.__log = []; window.__posts = []; window.__opexPosts = [];
   window.__sheet = { exists: false, config: null, seen: [] };
@@ -40,6 +42,7 @@
         const d = JSON.parse(opts.body);
         if (d.type === 'emailimport') { window.__posts.push(d); window.__sheet = { exists: true, config: d.config, seen: d.seen }; }
         if (d.type === 'opex') window.__opexPosts.push(d);
+        if (d.type === 'transfer') (window.__xfrPosts = window.__xfrPosts || []).push(d);
         return json({ status: 'ok' });
       }
       return json({ status: 'ok', rows: [], rules: [], items: [] });

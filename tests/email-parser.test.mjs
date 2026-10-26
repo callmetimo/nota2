@@ -181,6 +181,8 @@ Remaining Bill
 Reference No.
 : 9527120261026152025225TPP0000000004`);
   assert.equal(r.typeId, 'ccbill');
+  assert.equal(r.direction, 'transfer');
+  assert.equal(r.targetKey, '0000000015****64');
   assert.equal(r.amount, 1000000);
   assert.equal(r.date, '2026-10-26');
   assert.equal(r.sourceKey, '1234****56');

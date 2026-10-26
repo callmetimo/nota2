@@ -23,7 +23,7 @@ const EmailParser = (() => {
     { id: 'transfer', label: 'Transfer to account',     defaultAction: 'ask' },
     { id: 'cc',       label: 'Credit card purchase',    defaultAction: 'ask' },
     { id: 'bifast',   label: 'Incoming transfer (BI-FAST)', defaultAction: 'ask' },
-    { id: 'ccbill',   label: 'Credit card bill payment', defaultAction: 'ignore' },
+    { id: 'ccbill',   label: 'Credit card bill payment (transfer)', defaultAction: 'ask' },
     { id: 'other',    label: 'Other bank transactions', defaultAction: 'ask' },
   ];
 
@@ -187,7 +187,11 @@ const EmailParser = (() => {
       const remarks = field(text, ['Remarks']);
       if (remarks && remarks !== '-') out.notes = remarks;
     } else if (typeId === 'ccbill') {
+      // Paying the card from a bank account: money moves between two of the user's own
+      // accounts, so it is a transfer (source account -> card), not spending.
+      out.direction = 'transfer';
       out.merchant = typeLabel;
+      out.targetKey = sourceKey(field(text, ['Card No. / Customer No.', 'Card No.', 'Customer No.']));
       applyAmount(out, field(text, ['Total Payment', 'Amount']));
       out.defaultTx = 'Credit card payment';
     } else {

@@ -31,6 +31,7 @@
     if (u.startsWith('https://gmail.googleapis.com')) {
       window.__log.push(u);
       if (window.__gmailStatus !== 200) return json({ error: 'stub' }, window.__gmailStatus);
+      if (u.includes('/profile')) return json({ emailAddress: 'tester@example.com' });
       if (u.includes('/messages?')) return json({ messages: window.__listIds.map(id => ({ id })) });
       return json(window.__msgs[u.match(/messages\/([^?]+)/)[1]]);
     }

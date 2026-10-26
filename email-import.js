@@ -278,6 +278,50 @@ const EmailImport = (() => {
     catch (e) { showToast('Could not copy', 'error'); }
   }
 
+  // Live diagnostic for "why isn't email X showing?": re-runs the search and, for every message
+  // Gmail returns, shows sender / subject / date and what Nota did with it. Reads headers only (no
+  // email bodies), masks long digit runs, and copies to the clipboard — nothing is sent anywhere.
+  async function copyReport() {
+    if (!Auth.hasGmailScope()) { showToast('Connect Gmail first', 'error'); return; }
+    showToast('Building report…', 'loading', 0);
+    const lines = [];
+    try {
+      const profile = await gmailFetch('/profile');
+      const days = 14;
+      const q = `${QUERY_BASE} newer_than:${days}d`;
+      lines.push(`Nota ${typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?'} · parser v${EmailParser.VERSION}`);
+      lines.push(`Gmail account Nota reads: ${profile.emailAddress}`);
+      lines.push(`Query: ${q}`);
+      lines.push(`Types: ${EmailParser.TYPES.map(t => `${t.id}=${typeAction(t.id)}`).join(', ')}`);
+      lines.push(`Seen entries: g=${seen.filter(s => s[0] === 'g').length} i=${seen.filter(s => s[0] === 'i').length} u=${seen.filter(s => s[0] === 'u').length} r=${seen.filter(s => s[0] === 'r').length} s=${seen.filter(s => s[0] === 's').length}; waiting=${pending.length}`);
+      const list = await gmailFetch('/messages?maxResults=100&q=' + encodeURIComponent(q));
+      const ids = (list.messages || []).map(m => m.id);
+      lines.push(`Gmail returned ${ids.length} message(s):`);
+      const pendingIds = new Set(pending.map(p => p.gmailId));
+      const rows = new Array(ids.length);
+      let next = 0;
+      const worker = async () => {
+        while (next < ids.length) {
+          const i = next++;
+          const id = ids[i];
+          let msg = null;
+          try { msg = await gmailFetch(`/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`); } catch (e) { /* keep going */ }
+          const outcome = pendingIds.has(id) ? 'WAITING in popup'
+            : seenSet.has('g:' + id) ? 'handled (g)' : seenSet.has('i:' + id) ? 'ignored by type (i)'
+            : seenSet.has(unrKey(id)) ? 'could not read (u)' : 'NEW - not yet processed';
+          rows[i] = `${i + 1}. ${msg ? maskDigits(headerOf(msg, 'from')) : '?'} | ${msg ? maskDigits(headerOf(msg, 'subject')) : '?'} | ${msg ? headerOf(msg, 'date') : '?'} | ${outcome}`;
+        }
+      };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      lines.push(...rows);
+    } catch (e) {
+      lines.push('Report failed: ' + e.message);
+    }
+    const text = lines.join('\n');
+    try { await navigator.clipboard.writeText(text); showToast('Report copied — paste it to Claude', 'success'); }
+    catch (e) { window.prompt('Copy this report:', text); }
+  }
+
   // One-time per parser version: emails that an OLDER parser filed as "not a transaction" were
   // recorded as handled forever. Re-read the most recent handled ones, and release any that the
   // current parser understands but that were never actually added/skipped by the user (those
@@ -697,6 +741,7 @@ const EmailImport = (() => {
         <button class="submit-btn" style="margin-top:0;flex:1;background:var(--bg3);color:var(--text)" onclick="EmailImport.checkNow()" ${gm && !checking ? '' : 'disabled'}>Check now</button>
       </div>
       ${pending.length ? `<button class="submit-btn expense" style="margin-top:8px" onclick="EmailImport.reopenPopup()">Review ${pending.length} transaction${pending.length !== 1 ? 's' : ''}</button>` : ''}
+      ${gm ? `<button class="config-add-btn" style="padding:10px 0 0;color:var(--text2)" onclick="EmailImport.copyReport()">Email not showing? Copy a diagnostic report</button>` : ''}
     </div>
     <p style="font-size:12px;color:var(--text2);line-height:1.5;margin:-6px 4px 14px">Bank emails in another Gmail address? In that Gmail, add a filter that auto-forwards them to this account (Gmail → Settings → Forwarding and POP/IMAP, then Filters).</p>`;
 
@@ -841,7 +886,7 @@ const EmailImport = (() => {
 
   return {
     init, check, onToggle, connect, checkNow, reopenPopup, onPageOpen, renderPage,
-    copyUnreadable, onCheck, closePopup, skipAll, addSelected, openEdit, closeEdit, saveEdit, onRememberToggle,
+    copyUnreadable, copyReport, onCheck, closePopup, skipAll, addSelected, openEdit, closeEdit, saveEdit, onRememberToggle,
     setType, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
     _internals,
   };

@@ -593,6 +593,7 @@ Following Session 28's fix, ran a full audit (all `.js` files and inline `<scrip
 - **Local testing without Google**: open `http://localhost:<port>/tests/e2e-seed.html` (seeds a fake returning user), then in the console `eval(await (await fetch('/tests/e2e-stubs.js')).text())` to stub Gmail and the sheet API. Don't run the app unseeded in an automation browser: it opens a Google sign-in popup that can't be closed by the agent.
 - **Setup required once** (Google Cloud Console): enable the **Gmail API** and add `https://www.googleapis.com/auth/gmail.readonly` to the OAuth consent screen's scopes. It is a *restricted* scope, so the app shows Google's "unverified app" screen and is limited to 100 test users; public rollout would need Google's verification + security assessment.
 - Bumped `APP_VERSION` to `'v4.49'`.
+- **v4.50 hotfix — Email Import page opened empty on a real device.** `switchTab()` guarded the render with `window.EmailImport`, but a top-level `const` in a classic script is *not* a `window` property, so the guard was always false and `onPageOpen()` never ran. The first test pass missed it because it called `EmailImport.renderPage()` directly (and stubbed `Auth`), bypassing the navigation path. **Lesson**: test a new page by navigating to it the way the user does (`switchTabFromMore(...)`), not by calling its render function; and never feature-detect a `const`/`let` global via `window.X` — use `typeof X !== 'undefined'`.
 
 ---
 

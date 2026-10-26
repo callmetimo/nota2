@@ -14,6 +14,8 @@ const EmailImport = (() => {
   const LS_STATE = 'notapub_email_import_state';      // { config, seen, dirty }
   const LS_LAST = 'notapub_email_import_last';        // ms timestamp of last successful check
   const LS_STATS = 'notapub_email_import_stats';      // { unreadable }
+  const LS_UNREADABLE = 'notapub_email_import_unreadable'; // latest email the parser could not read (digits masked)
+  const LS_RESCUED = 'notapub_email_import_rescued';  // parser version the one-time re-read already ran for
   const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
   const MIN_INTERVAL_MS = 5 * 60 * 1000;
   const FIRST_RUN_DAYS = 7;
@@ -239,6 +241,69 @@ const EmailImport = (() => {
     return it;
   }
 
+  // ── emails the parser could not read ──────────────────────
+  // Marked per parser version (not forever), so improving the parser re-reads them.
+  function unrKey(id) { return `u${EmailParser.VERSION}:${id}`; }
+
+  function maskDigits(s) {
+    return String(s || '').replace(/\d{6,}/g, m => m.slice(0, 3) + '…' + m.slice(-2));
+  }
+
+  function headerOf(msg, name) {
+    const h = ((msg.payload && msg.payload.headers) || []).find(x => String(x.name).toLowerCase() === name);
+    return h ? h.value : '';
+  }
+
+  // Keeps the latest unreadable email (digits masked, stays on this device) so the user can copy
+  // it into a bug report from the Email Import page.
+  function rememberUnreadable(msg, body) {
+    try {
+      const text = /<\s*(html|body|table|div|br|td|p)\b/i.test(body) ? EmailParser.htmlToText(body) : String(body || '');
+      localStorage.setItem(LS_UNREADABLE, JSON.stringify({
+        from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'),
+        date: localISO(Number(msg.internalDate) || Date.now()), text: maskDigits(text).slice(0, 3000),
+      }));
+    } catch (e) { /* diagnostics only */ }
+  }
+
+  async function copyUnreadable() {
+    let info = null;
+    try { info = JSON.parse(localStorage.getItem(LS_UNREADABLE) || 'null'); } catch (e) {}
+    if (!info) { showToast('No skipped email to copy', 'error'); return; }
+    const out = `From: ${info.from}\nSubject: ${info.subject}\nDate: ${info.date}\n\n${info.text}`;
+    try { await navigator.clipboard.writeText(out); showToast('Copied (long numbers masked)', 'success'); }
+    catch (e) { showToast('Could not copy', 'error'); }
+  }
+
+  // One-time per parser version: emails that an OLDER parser filed as "not a transaction" were
+  // recorded as handled forever. Re-read the most recent handled ones, and release any that the
+  // current parser understands but that were never actually added/skipped by the user (those
+  // leave a reference/signature behind; refless ones can't be told apart, so they may reappear
+  // once and can simply be skipped).
+  async function rescueMisread() {
+    if (localStorage.getItem(LS_RESCUED) === String(EmailParser.VERSION)) return;
+    const ids = seen.filter(s => s.startsWith('g:')).slice(-MAX_FETCH).map(s => s.slice(2));
+    const release = [];
+    for (const id of ids) {
+      let msg;
+      try { msg = await gmailFetch(`/messages/${id}?format=full`); }
+      catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; }
+      const parsed = EmailParser.parse(messageBody(msg), localISO(Number(msg.internalDate) || Date.now()));
+      if (!parsed) continue;
+      const handled = (parsed.ref && seenSet.has('r:' + parsed.ref))
+        || (parsed.typeId === 'bifast' && seenSet.has(`s:${parsed.date}|${parsed.amount}|${parsed.sourceKey}|${parsed.direction}`));
+      if (!handled) release.push('g:' + id);
+    }
+    if (release.length) {
+      const drop = new Set(release);
+      seen = seen.filter(s => !drop.has(s));
+      seenSet = new Set(seen);
+      save();
+    }
+    localStorage.setItem(LS_STATS, JSON.stringify({ unreadable: 0 }));
+    localStorage.setItem(LS_RESCUED, String(EmailParser.VERSION));
+  }
+
   // ── checking for new mail ─────────────────────────────────
   async function check(opts = {}) {
     if (!isEnabled() || checking) return;
@@ -252,8 +317,9 @@ const EmailImport = (() => {
     try {
       await loadFromServer();
       const days = last ? Math.min(35, Math.max(3, Math.ceil((Date.now() - last) / 86400000) + 2)) : FIRST_RUN_DAYS;
+      await rescueMisread();
       const list = await gmailFetch('/messages?maxResults=100&q=' + encodeURIComponent(`${QUERY_BASE} newer_than:${days}d`));
-      const ids = (list.messages || []).map(m => m.id).filter(id => !seenSet.has('g:' + id)).slice(0, MAX_FETCH);
+      const ids = (list.messages || []).map(m => m.id).filter(id => !seenSet.has('g:' + id) && !seenSet.has(unrKey(id))).slice(0, MAX_FETCH);
       const found = [];
       let unreadable = Number((JSON.parse(localStorage.getItem(LS_STATS) || '{}')).unreadable || 0);
       const queue = ids.slice();
@@ -265,7 +331,7 @@ const EmailImport = (() => {
           catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; } // transient: retry next check
           const body = messageBody(msg);
           const parsed = EmailParser.parse(body, localISO(Number(msg.internalDate) || Date.now()));
-          if (!parsed) { markSeen('g:' + id); unreadable++; continue; }
+          if (!parsed) { markSeen(unrKey(id)); unreadable++; rememberUnreadable(msg, body); continue; }
           if (parsed.status === 'failed' || typeAction(parsed.typeId) === 'ignore') { markSeen('g:' + id, parsed.ref && 'r:' + parsed.ref); continue; }
           if (parsed.ref && seenSet.has('r:' + parsed.ref)) { markSeen('g:' + id); continue; }
           found.push(buildItem(parsed, id));
@@ -614,7 +680,8 @@ const EmailImport = (() => {
       <div class="account-info-row"><span class="account-info-label">Gmail</span><span style="color:${gm ? 'var(--green)' : '#ff9500'}">${gm ? 'Connected' : (Auth.hasValidToken() ? 'Not connected' : 'Waiting for sign-in…')}</span></div>
       <div class="account-info-row"><span class="account-info-label">Last check</span><span>${checking ? 'checking…' : esc(fmtAgo(last))}</span></div>
       <div class="account-info-row"><span class="account-info-label">Waiting for review</span><span>${pending.length}</span></div>
-      ${unreadable ? `<div class="account-info-row"><span class="account-info-label">Skipped (not a transaction)</span><span>${unreadable}</span></div>` : ''}
+      ${unreadable ? `<div class="account-info-row"><span class="account-info-label">Skipped (couldn't read)</span><span>${unreadable}</span></div>
+        <button class="config-add-btn" style="padding:6px 0 0" onclick="EmailImport.copyUnreadable()">Copy the skipped email (numbers masked)</button>` : ''}
       ${lastError ? `<p style="font-size:12px;color:var(--red);margin-top:8px;line-height:1.4">${esc(lastError)}</p>` : ''}
       <div style="display:flex;gap:8px;margin-top:12px">
         ${gm ? '' : `<button class="submit-btn expense" style="margin-top:0;flex:1" onclick="EmailImport.connect()">Connect Gmail</button>`}
@@ -758,7 +825,7 @@ const EmailImport = (() => {
 
   return {
     init, check, onToggle, connect, checkNow, reopenPopup, onPageOpen, renderPage,
-    onCheck, closePopup, skipAll, addSelected, openEdit, closeEdit, saveEdit, onRememberToggle,
+    copyUnreadable, onCheck, closePopup, skipAll, addSelected, openEdit, closeEdit, saveEdit, onRememberToggle,
     setType, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
     _internals,
   };

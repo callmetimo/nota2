@@ -26,7 +26,10 @@ const EmailImport = (() => {
   // to the templates email-parser.js understands, so they are fixed here rather than a setting;
   // add a sender here together with its parser.
   const SENDERS = ['bca@bca.co.id', 'kartukreditbca@bca.co.id', 'BIFAST.NOREPLY@cimbniaga.co.id', 'mcm@bankmandiri.co.id'];
-  const QUERY_BASE = `from:(${SENDERS.join(' OR ')})`;
+  // Subjects are a second net: a sender address can differ from what we expect (e.g. a different
+  // BCA mailbox name), and the parser only accepts known templates anyway.
+  const SUBJECTS = ['Internet Transaction Journal', 'Credit Card Transaction Notification', 'Incoming BI FAST', 'BI FAST Transfer'];
+  const QUERY_BASE = `(from:(${SENDERS.join(' OR ')}) OR subject:(${SUBJECTS.map(s => `"${s}"`).join(' OR ')}))`;
 
   let config = { types: {}, accounts: [], rules: [] };
   let seen = [];                 // newest last
@@ -290,9 +293,11 @@ const EmailImport = (() => {
       catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; }
       const parsed = EmailParser.parse(messageBody(msg), localISO(Number(msg.internalDate) || Date.now()));
       if (!parsed) continue;
-      const handled = (parsed.ref && seenSet.has('r:' + parsed.ref))
-        || (parsed.typeId === 'bifast' && seenSet.has(`s:${parsed.date}|${parsed.amount}|${parsed.sourceKey}|${parsed.direction}`));
-      if (!handled) release.push('g:' + id);
+      // Card bill payments were silently ignored (and their reference marked handled) before they
+      // became transfers, and could not have been added by the user — always release those.
+      const handled = parsed.typeId !== 'ccbill' && ((parsed.ref && seenSet.has('r:' + parsed.ref))
+        || (parsed.typeId === 'bifast' && seenSet.has(`s:${parsed.date}|${parsed.amount}|${parsed.sourceKey}|${parsed.direction}`)));
+      if (!handled) { release.push('g:' + id); if (parsed.typeId === 'ccbill' && parsed.ref) release.push('r:' + parsed.ref); }
     }
     if (release.length) {
       const drop = new Set(release);
@@ -319,7 +324,8 @@ const EmailImport = (() => {
       const days = last ? Math.min(35, Math.max(3, Math.ceil((Date.now() - last) / 86400000) + 2)) : FIRST_RUN_DAYS;
       await rescueMisread();
       const list = await gmailFetch('/messages?maxResults=100&q=' + encodeURIComponent(`${QUERY_BASE} newer_than:${days}d`));
-      const ids = (list.messages || []).map(m => m.id).filter(id => !seenSet.has('g:' + id) && !seenSet.has(unrKey(id))).slice(0, MAX_FETCH);
+      const ids = (list.messages || []).map(m => m.id)
+        .filter(id => !seenSet.has('g:' + id) && !seenSet.has('i:' + id) && !seenSet.has(unrKey(id))).slice(0, MAX_FETCH);
       const found = [];
       let unreadable = Number((JSON.parse(localStorage.getItem(LS_STATS) || '{}')).unreadable || 0);
       const queue = ids.slice();
@@ -332,7 +338,10 @@ const EmailImport = (() => {
           const body = messageBody(msg);
           const parsed = EmailParser.parse(body, localISO(Number(msg.internalDate) || Date.now()));
           if (!parsed) { markSeen(unrKey(id)); unreadable++; rememberUnreadable(msg, body); continue; }
-          if (parsed.status === 'failed' || typeAction(parsed.typeId) === 'ignore') { markSeen('g:' + id, parsed.ref && 'r:' + parsed.ref); continue; }
+          if (parsed.status === 'failed') { markSeen('g:' + id, parsed.ref && 'r:' + parsed.ref); continue; }
+          // Ignored by the user's own setting: remembered separately (`i:`) so that switching the type
+          // back to "Ask me" brings these emails back (setType() clears every `i:` entry).
+          if (typeAction(parsed.typeId) === 'ignore') { markSeen('i:' + id); continue; }
           if (parsed.ref && seenSet.has('r:' + parsed.ref)) { markSeen('g:' + id); continue; }
           found.push(buildItem(parsed, id));
         }
@@ -719,7 +728,14 @@ const EmailImport = (() => {
     el.innerHTML = h;
   }
 
-  function setType(id, action) { config.types[id] = action; save(); renderPage(); }
+  function setType(id, action) {
+    config.types[id] = action;
+    // Emails skipped only because their type was set to Ignore become eligible again.
+    seen = seen.filter(s => !s.startsWith('i:'));
+    seenSet = new Set(seen);
+    localStorage.removeItem(LS_LAST);   // next check is a full look, not an incremental one
+    save(); renderPage();
+  }
 
   async function onToggle(input) {
     if (input.checked) {

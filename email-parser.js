@@ -276,7 +276,7 @@ const EmailParser = (() => {
 
   // Bump whenever parsing improves: the importer re-reads emails it could not read under an older
   // version instead of treating them as "not a transaction" forever.
-  const VERSION = 4;
+  const VERSION = 5;
 
   return { parse, parseAmount, parseDate, sourceKey, htmlToText, field, TYPES, VERSION };
 })();

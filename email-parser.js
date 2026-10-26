@@ -51,11 +51,27 @@ const EmailParser = (() => {
 
   // First label that is present wins. Value = rest of that line after the colon (or, for
   // templates like BI-FAST that have no colon, after the tab separating the label cell).
+  //
+  // Layouts seen / expected (all must work, because which one a real email produces depends on
+  // how the sender's HTML flattens):
+  //   "Label<TAB>:<TAB>Value"      one line
+  //   "Label<TAB>Value"            one line, no colon (BI-FAST)
+  //   "Label\n: Value"             label and ": value" on separate lines
+  //   "Label\n:\nValue"            label, colon and value each on their own line
   function field(text, labels) {
     for (const label of labels) {
-      const re = new RegExp('(?:^|\\n)[ \\t]*' + escapeRe(label) + '[ \\t]*(?::|\\t)[ \\t:]*([^\\n]*)', 'i');
-      const m = text.match(re);
+      const lab = '(?:^|\\n)[ \\t]*' + escapeRe(label) + '[ \\t]*';
+      // 1) same-line value (cannot run into the next row when a value is blank)
+      let m = text.match(new RegExp(lab + '(?::|\\t)[ \\t:]*([^\\n]*)', 'i'));
       if (m && m[1].trim()) return m[1].replace(/\t+/g, ' ').trim();
+      // 2) value on a following line. Reject it if it is really the next "Label : value" row.
+      // The lookahead stops a blank value from taking the next row's label: a real value is never
+      // followed by a line that starts with ":" (that line would be *its* value).
+      m = text.match(new RegExp(lab + '\\n[ \\t]*:[ \\t]*(?:\\n[ \\t]*)?([^\\n]*)(?=\\n(?![ \\t]*:)|$)', 'i'));
+      if (m) {
+        const v = m[1].replace(/\t+/g, ' ').trim();
+        if (v && !/:\s|:$/.test(v)) return v;
+      }
     }
     return '';
   }

@@ -159,6 +159,58 @@ Bank Pengirim	PT. BANK MANDIRI (PERSERO), TBK`);
   assert.equal(r.sourceKey, '703100000000');
 });
 
+t('Label and ": value" on separate lines (credit card bill payment)', () => {
+  const r = EmailParser.parse(`Status
+: Successful
+Transaction Date
+: 26 Oct 2026 15:20:25
+Transaction Type
+: Credit Card & Paylater - BCA
+Source of Fund
+: 1234****56
+Card No. / Customer No.
+: 0000000015****64
+Name
+: JOHN **US ***DOE
+Total Bill
+: IDR 17,908,449.00
+Total Payment
+: IDR 1,000,000.00
+Remaining Bill
+: IDR 16,908,449.00
+Reference No.
+: 9527120261026152025225TPP0000000004`);
+  assert.equal(r.typeId, 'ccbill');
+  assert.equal(r.amount, 1000000);
+  assert.equal(r.date, '2026-10-26');
+  assert.equal(r.sourceKey, '1234****56');
+  assert.equal(r.ref, '9527120261026152025225TPP0000000004');
+});
+
+t('Separate-line layout also works for QRIS, and a blank value does not swallow the next row', () => {
+  const r = EmailParser.parse(`Status
+:
+Successful
+Transaction Date
+: 26 Oct 2026 08:47:01
+Transaction Type
+: QRIS Payment
+Payment to
+: WARUNG MAKAN SEJAHTERA
+Merchant Location
+:
+Source of Fund
+: TAHAPAN XPRESI - 1234****56
+Total Payment
+: IDR 7,000.00
+Reference No.
+: REFX`);
+  assert.equal(r.typeId, 'qris');
+  assert.equal(r.merchant, 'WARUNG MAKAN SEJAHTERA');
+  assert.equal(r.amount, 7000);
+  assert.equal(EmailParser.field('Merchant Location\n:\nSource of Fund\n: X', ['Merchant Location']), '');
+});
+
 t('Mandiri Cash Management BI-FAST credit is income, with the remark as notes', () => {
   const r = EmailParser.parse(`Dear Valued Customer,
 

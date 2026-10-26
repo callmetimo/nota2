@@ -22,6 +22,7 @@ const EmailParser = (() => {
     { id: 'flazz',    label: 'Flazz top up',            defaultAction: 'ask' },
     { id: 'transfer', label: 'Transfer to account',     defaultAction: 'ask' },
     { id: 'cc',       label: 'Credit card purchase',    defaultAction: 'ask' },
+    { id: 'ccrefund', label: 'Credit card refund / reversal', defaultAction: 'ask' },
     { id: 'bifast',   label: 'Incoming transfer (BI-FAST)', defaultAction: 'ask' },
     { id: 'ccbill',   label: 'Credit card bill payment (transfer)', defaultAction: 'ask' },
     { id: 'other',    label: 'Other bank transactions', defaultAction: 'ask' },
@@ -258,7 +259,7 @@ const EmailParser = (() => {
 
   // Entry point. `text` may be HTML or plain text. `fallbackDate` is the email's own
   // arrival date (YYYY-MM-DD), used only when the body has no parsable date.
-  function parse(rawBody, fallbackDate) {
+  function parse(rawBody, fallbackDate, subject) {
     const body = String(rawBody || '');
     const text = /<\s*(html|body|table|div|br|td|p)\b/i.test(body) ? htmlToText(body) : body.replace(/\r/g, '');
     // A Mandiri CM email is either an incoming credit or nothing: it also has a "Transaction
@@ -267,6 +268,13 @@ const EmailParser = (() => {
       ? parseMandiriCm(text)
       : (parseBcaJournal(text) || parseCreditCardNotice(text) || parseBifast(text));
     if (!out) return null;
+    // "Credit Card Reversal/Void Transaction Notification": same fields as a purchase, but the money
+    // comes back — a purchase read as an expense would double the cost instead of cancelling it.
+    if (out.typeId === 'cc' && (/reversal|void/i.test(subject || '') || /reversal|void|pembatalan|refund/i.test(out.rawType || ''))) {
+      const t = TYPES.find(x => x.id === 'ccrefund');
+      Object.assign(out, { typeId: 'ccrefund', typeLabel: t.label, direction: 'income',
+        defaultTx: out.merchant ? 'Refund ' + titleCase(out.merchant) : 'Credit card refund' });
+    }
     if (!out.date) out.date = fallbackDate || '';
     if (out.amount === undefined) out.amount = null;
     out.merchant = out.merchant || '';

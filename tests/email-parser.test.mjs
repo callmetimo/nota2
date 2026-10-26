@@ -117,6 +117,23 @@ Sejumlah	:	Rp501.755,00`);
   assert.equal(r.ref, '');
 });
 
+t('Credit card reversal/void notice is a refund (income), not a second expense', () => {
+  const body = `Nomor Kartu	: 	472647XXXX4541
+Merchant / ATM	: 	GOPAYLINKING
+Jenis Transaksi	: 	E-COMMERCE
+Pada Tanggal	:	26-10-2026 08:25:23 WIB
+Sejumlah	:	Rp1.000,00`;
+  const r = EmailParser.parse(body, '', 'Credit Card Reversal/Void Transaction Notification');
+  assert.equal(r.typeId, 'ccrefund');
+  assert.equal(r.direction, 'income');
+  assert.equal(r.amount, 1000);
+  assert.equal(r.defaultTx, 'Refund Gopaylinking');
+  // the same body with a normal subject stays a purchase
+  assert.equal(EmailParser.parse(body, '', 'Credit Card Transaction Notification').typeId, 'cc');
+  // body-only detection (no subject available)
+  assert.equal(EmailParser.parse(body.replace('E-COMMERCE', 'REVERSAL E-COMMERCE')).typeId, 'ccrefund');
+});
+
 t('Credit card notice: empty Otentikasi line does not swallow the next line', () => {
   const r = EmailParser.parse(`Nomor Kartu	: 	472647XXXX4541
 Merchant / ATM	: 	GRAND LUCKY BSD

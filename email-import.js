@@ -16,6 +16,7 @@ const EmailImport = (() => {
   const LS_STATS = 'notapub_email_import_stats';      // { unreadable }
   const LS_UNREADABLE = 'notapub_email_import_unreadable'; // latest email the parser could not read (digits masked)
   const LS_RESCUED = 'notapub_email_import_rescued';  // parser version the one-time re-read already ran for
+  const LS_ACCOUNT = 'notapub_email_import_account';  // Gmail address this app reads (the signed-in account)
   const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
   const MIN_INTERVAL_MS = 5 * 60 * 1000;
   const FIRST_RUN_DAYS = 7;
@@ -335,7 +336,7 @@ const EmailImport = (() => {
       let msg;
       try { msg = await gmailFetch(`/messages/${id}?format=full`); }
       catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; }
-      const parsed = EmailParser.parse(messageBody(msg), localISO(Number(msg.internalDate) || Date.now()));
+      const parsed = EmailParser.parse(messageBody(msg), localISO(Number(msg.internalDate) || Date.now()), headerOf(msg, 'subject'));
       if (!parsed) continue;
       // Card bill payments were silently ignored (and their reference marked handled) before they
       // became transfers, and could not have been added by the user — always release those.
@@ -365,7 +366,10 @@ const EmailImport = (() => {
     renderPage();
     try {
       await loadFromServer();
-      const days = last ? Math.min(35, Math.max(3, Math.ceil((Date.now() - last) / 86400000) + 2)) : FIRST_RUN_DAYS;
+      if (!localStorage.getItem(LS_ACCOUNT)) {
+        try { localStorage.setItem(LS_ACCOUNT, (await gmailFetch('/profile')).emailAddress || ''); } catch (e) { /* shown next time */ }
+      }
+      const days = opts.days || (last ? Math.min(35, Math.max(3, Math.ceil((Date.now() - last) / 86400000) + 2)) : FIRST_RUN_DAYS);
       await rescueMisread();
       const list = await gmailFetch('/messages?maxResults=100&q=' + encodeURIComponent(`${QUERY_BASE} newer_than:${days}d`));
       const ids = (list.messages || []).map(m => m.id)
@@ -380,7 +384,7 @@ const EmailImport = (() => {
           try { msg = await gmailFetch(`/messages/${id}?format=full`); }
           catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; } // transient: retry next check
           const body = messageBody(msg);
-          const parsed = EmailParser.parse(body, localISO(Number(msg.internalDate) || Date.now()));
+          const parsed = EmailParser.parse(body, localISO(Number(msg.internalDate) || Date.now()), headerOf(msg, 'subject'));
           if (!parsed) { markSeen(unrKey(id)); unreadable++; rememberUnreadable(msg, body); continue; }
           if (parsed.status === 'failed') { markSeen('g:' + id, parsed.ref && 'r:' + parsed.ref); continue; }
           // Ignored by the user's own setting: remembered separately (`i:`) so that switching the type
@@ -731,6 +735,7 @@ const EmailImport = (() => {
 
     h += `<div class="account-info-card">
       <div class="account-info-row"><span class="account-info-label">Gmail</span><span style="color:${gm ? 'var(--green)' : '#ff9500'}">${gm ? 'Connected' : (Auth.hasValidToken() ? 'Not connected' : 'Waiting for sign-in…')}</span></div>
+      ${localStorage.getItem(LS_ACCOUNT) ? `<div class="account-info-row"><span class="account-info-label">Reading mailbox</span><span style="font-size:13px">${esc(localStorage.getItem(LS_ACCOUNT))}</span></div>` : ''}
       <div class="account-info-row"><span class="account-info-label">Last check</span><span>${checking ? 'checking…' : esc(fmtAgo(last))}</span></div>
       <div class="account-info-row"><span class="account-info-label">Waiting for review</span><span>${pending.length}</span></div>
       ${unreadable ? `<div class="account-info-row"><span class="account-info-label">Skipped (couldn't read)</span><span>${unreadable}</span></div>
@@ -743,7 +748,8 @@ const EmailImport = (() => {
       ${pending.length ? `<button class="submit-btn expense" style="margin-top:8px" onclick="EmailImport.reopenPopup()">Review ${pending.length} transaction${pending.length !== 1 ? 's' : ''}</button>` : ''}
       ${gm ? `<button class="config-add-btn" style="padding:10px 0 0;color:var(--text2)" onclick="EmailImport.copyReport()">Email not showing? Copy a diagnostic report</button>` : ''}
     </div>
-    <p style="font-size:12px;color:var(--text2);line-height:1.5;margin:-6px 4px 14px">Bank emails in another Gmail address? In that Gmail, add a filter that auto-forwards them to this account (Gmail → Settings → Forwarding and POP/IMAP, then Filters).</p>`;
+    <p style="font-size:12px;color:var(--text2);line-height:1.5;margin:-6px 4px 14px">Nota only reads <b>${esc(localStorage.getItem(LS_ACCOUNT) || 'the Google account you signed in with')}</b>. Bank emails that arrive in a different Gmail address are not seen until you auto-forward them here (in that Gmail: Settings → Forwarding and POP/IMAP, then Filters).</p>
+    ${gm ? `<button class="config-add-btn" style="padding:0 4px 14px;color:var(--text2)" onclick="EmailImport.check({force:true, days:30})">Look back 30 days for older emails</button>` : ''}`;
 
     // Email types
     h += `<div class="config-section-hdr" style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><span class="form-label" style="margin:0">Email types</span></div>`;

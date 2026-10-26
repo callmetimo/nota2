@@ -12,7 +12,7 @@
 </head>
 <body>
 <h1>Privacy Policy</h1>
-<p>Last updated: 2026-07-28</p>
+<p>Last updated: 2026-10-26</p>
 
 <p>Nota is a static web app with no backend server and no database of its own.
 It stores your financial data only in a Google Sheet that it creates in your own
@@ -24,6 +24,20 @@ Google Drive, using your Google account's own storage.</p>
 files that Nota itself creates — it cannot see, read, or modify any of
 your other Google Drive files or Sheets.</p>
 
+<h2>Optional: Email Import (Gmail, read-only)</h2>
+<p>Email Import is off by default. Only if you switch it on (Profile &rsaquo; Email Import),
+Nota additionally asks for the read-only <code>gmail.readonly</code> scope. Nota then searches
+your Gmail for bank transaction notifications from a fixed list of senders (BCA and CIMB Niaga),
+reads those messages inside your browser, and shows them as suggested transactions that you
+confirm one by one. Email content is processed on your device only and is never sent to any
+server run by Nota or to any third party. Only the transactions you confirm, plus your
+matching rules and the IDs of already-handled emails, are saved to your own Google Sheet.
+Nota never sends, deletes or modifies email. Turning the switch off stops Nota from requesting
+Gmail access; you can also remove it entirely from your Google Account permissions page.
+Nota's use of information received from Google APIs adheres to the
+<a href="https://developers.google.com/terms/api-services-user-data-policy#limited-use" target="_blank">Google API Services User Data Policy</a>,
+including the Limited Use requirements.</p>
+
 <h2>What we store</h2>
 <p>Nota has no server, so it cannot and does not store your data anywhere
 outside your own Google account. Your browser keeps a small amount of local
@@ -32,7 +46,7 @@ purely so it can find your data again on your next visit.</p>
 
 <h2>What we don't do</h2>
 <ul>
-  <li>We do not have access to your other Drive files, emails, or contacts.</li>
+  <li>We do not have access to your other Drive files or contacts, and we do not read your email unless you opt in to Email Import above.</li>
   <li>We do not run any analytics or tracking scripts.</li>
   <li>We do not sell, share, or transmit your data to any third party.</li>
 </ul>

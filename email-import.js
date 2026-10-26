@@ -20,8 +20,11 @@ const EmailImport = (() => {
   const MAX_SEEN = 600;
   const MAX_FETCH = 60;
 
-  // Only these senders/subjects are even listed; the parser then decides what is a transaction.
-  const QUERY_BASE = '(subject:"Internet Transaction Journal" OR "Kartu Kredit BCA" OR BIFAST OR from:bca.co.id OR from:klikbca.com OR from:cimbniaga.co.id)';
+  // Only these exact senders are listed (forwarded copies keep the original From). They are tied
+  // to the templates email-parser.js understands, so they are fixed here rather than a setting;
+  // add a sender here together with its parser.
+  const SENDERS = ['bca@bca.co.id', 'kartukreditbca@bca.co.id', 'BIFAST.NOREPLY@cimbniaga.co.id'];
+  const QUERY_BASE = `from:(${SENDERS.join(' OR ')})`;
 
   let config = { types: {}, accounts: [], rules: [] };
   let seen = [];                 // newest last

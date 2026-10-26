@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Nota e2e seed</title>
+<!-- Dev-only: seeds localStorage as a "returning user" with fake config, then opens the app.
+     No Google sign-in is triggered (the app defers its token request until the first tap). -->
+<script>
+// Safety: this wipes localStorage, so refuse to run anywhere but a local dev server.
+if (!['localhost', '127.0.0.1'].includes(location.hostname)) throw new Error('e2e-seed only runs on localhost');
+localStorage.clear();
+localStorage.setItem('notaPublic_spreadsheetId', 'TESTSHEET');
+const mk = (kind, name, i) => ({ kind, name, color: '#c8f060', ccy: 'IDR', assetType: '', archived: false, sortOrder: i,
+  linkedPM: '', balance: null, balanceDate: '', showOnInsights: true, creditCard: false, billingDate: 0, creditLimit: 0 });
+const cats = ['Food & Drink', 'Groceries', 'Transport', 'Bills & Utilities', 'Income', 'Household'];
+const pms = ['IDR BCA', 'IDR CIMB', 'Credit Card BCA'];
+localStorage.setItem('notapub_config_items', JSON.stringify([
+  ...cats.map((n, i) => mk('category', n, i)), ...pms.map((n, i) => mk('pm', n, 10 + i)),
+]));
+localStorage.setItem('notapub_email_import_on', '1');
+location.replace('../index.html');
+</script>

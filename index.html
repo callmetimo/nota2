@@ -96,7 +96,7 @@ body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:
 .page{display:none;padding:0 20px}
 .page.active{display:block}
 /* Non-home pages need their own scroll since body is overflow:hidden */
-#page-insights.active,#page-networth.active,#page-goals.active,#page-recurring.active,#page-profile.active,#page-settings.active,#page-account.active{
+#page-insights.active,#page-networth.active,#page-goals.active,#page-recurring.active,#page-profile.active,#page-settings.active,#page-account.active,#page-emailimport.active{
   display:block;
   height:calc(var(--app-vh,100dvh) - var(--header-height,80px) - var(--bottom-nav-h,56px));
   overflow-y:auto;
@@ -949,6 +949,11 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
       <span>Recurring Transactions</span>
     </button>
     <div class="more-menu-divider"></div>
+    <button class="more-menu-item" onclick="switchTabFromMore('emailimport')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22 6 12 13 2 6"/></svg>
+      <span>Email Import</span>
+    </button>
+    <div class="more-menu-divider"></div>
     <button class="more-menu-item" onclick="switchTabFromMore('settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       <span>Settings</span>
@@ -971,6 +976,18 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Settings</div>
   </div>
   <div id="settingsListsContainer"><div class="chart-loading">Loading…</div></div>
+</div>
+
+<!-- EMAIL IMPORT SUBPAGE -->
+<div class="page" id="page-emailimport">
+  <div style="padding:24px 0 14px">
+    <button class="profile-back-btn" onclick="switchTab('profile', document.getElementById('nav-more'))">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="15 18 9 12 15 6"/></svg>
+      Profile
+    </button>
+    <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">Email Import</div>
+  </div>
+  <div id="emailImportContainer"></div>
 </div>
 
 <!-- ACCOUNT SUBPAGE -->
@@ -1158,6 +1175,119 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
   </button>
 </nav>
+
+<!-- Email Import: review popup (mirrors the Recurring Prompt below) -->
+<div class="modal-overlay" id="emailImportPrompt" onclick="if(event.target===this)EmailImport.closePopup()">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">✉️ New from bank emails</div>
+    <p id="emailImportSubtitle" style="color:var(--text2);font-size:13px;margin:2px 0 14px"></p>
+    <div id="emailImportList"></div>
+    <p style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.4">Orange rows need a category or payment method first — tap them to fill in.</p>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="submit-btn" style="flex:1;background:var(--bg3);color:var(--text);margin-top:0" onclick="EmailImport.skipAll()">Skip all</button>
+      <button class="submit-btn expense" style="flex:2;margin-top:0" id="emailImportAddBtn" onclick="EmailImport.addSelected()">Add</button>
+    </div>
+    <button class="config-add-btn" style="width:100%;text-align:center;margin-top:10px;color:var(--text2)" onclick="EmailImport.closePopup()">Decide later</button>
+  </div>
+</div>
+
+<!-- Email Import: edit one suggested transaction -->
+<div class="modal-overlay" id="emailEditModal" style="z-index:510">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Edit before adding</div>
+    <p id="emailEditSubtitle" style="color:var(--text2);font-size:12px;margin:-6px 0 12px"></p>
+    <div class="form-group">
+      <label class="form-label">Transaction</label>
+      <input type="text" class="form-input" id="emailEditTx" maxlength="100" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Category</label>
+      <select class="form-input" id="emailEditCat"></select>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group">
+        <label class="form-label">Payment Method</label>
+        <select class="form-input" id="emailEditPm"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Amount (Rp)</label>
+        <input type="text" class="form-input" id="emailEditAmount" inputmode="numeric" placeholder="0" autocomplete="off">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Date</label>
+      <input type="date" class="form-input" id="emailEditDate" style="width:100%">
+    </div>
+    <div class="account-info-card" style="margin:6px 0 0">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <div><div style="font-size:14px;font-weight:600">Remember for next time</div>
+        <div id="emailEditRememberHint" style="font-size:11px;color:var(--text2);margin-top:2px"></div></div>
+        <label class="toggle-switch"><input type="checkbox" id="emailEditRemember" checked onchange="EmailImport.onRememberToggle()"><span class="toggle-slider"></span></label>
+      </div>
+      <div id="emailEditPatternWrap" style="margin-top:10px">
+        <label class="form-label">When merchant contains</label>
+        <input type="text" class="form-input" id="emailEditPattern" maxlength="60" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-delete" onclick="EmailImport.closeEdit()">Cancel</button>
+      <button class="btn-save" onclick="EmailImport.saveEdit()">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Email Import: merchant rule editor -->
+<div class="modal-overlay" id="emailRuleModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="emailRuleTitle">Edit rule</div>
+    <div class="form-group">
+      <label class="form-label">If merchant / beneficiary</label>
+      <div style="display:flex;gap:8px">
+        <select class="form-input" id="emailRuleMode" style="flex:1">
+          <option value="contains">contains</option><option value="equals">equals</option><option value="starts">starts with</option>
+        </select>
+        <input type="text" class="form-input" id="emailRulePattern" maxlength="60" placeholder="e.g. ALFAMRT" autocomplete="off" style="flex:2">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Then transaction name <span style="font-weight:400;text-transform:none">(optional)</span></label>
+      <input type="text" class="form-input" id="emailRuleTx" maxlength="100" placeholder="Leave empty to keep the merchant text" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">And category</label>
+      <select class="form-input" id="emailRuleCat"></select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-delete" id="emailRuleDeleteBtn" onclick="EmailImport.deleteRule()">Delete</button>
+      <button class="btn-delete" style="background:var(--bg3);border-color:var(--border);color:var(--text)" onclick="EmailImport.closeRule()">Cancel</button>
+      <button class="btn-save" onclick="EmailImport.saveRule()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Email Import: account / card → payment method -->
+<div class="modal-overlay" id="emailAcctModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Account or card</div>
+    <div class="form-group">
+      <label class="form-label">Number as shown in the email</label>
+      <input type="text" class="form-input" id="emailAcctKey" maxlength="40" placeholder="e.g. 1234****56" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Payment method</label>
+      <select class="form-input" id="emailAcctPm"></select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-delete" id="emailAcctDeleteBtn" onclick="EmailImport.deleteAcct()">Delete</button>
+      <button class="btn-delete" style="background:var(--bg3);border-color:var(--border);color:var(--text)" onclick="EmailImport.closeAcct()">Cancel</button>
+      <button class="btn-save" onclick="EmailImport.saveAcct()">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- Recurring Prompt Modal -->
 <div class="modal-overlay" id="recurringPrompt">
@@ -1519,8 +1649,8 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.48';
-const APP_BUILD = '2026-09-03a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
+const APP_VERSION = 'v4.49';
+const APP_BUILD = '2026-10-26a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
 }
@@ -2650,6 +2780,7 @@ function switchTab(tab, el) {
     renderRecurringList();
     fetchRecurring().then(() => renderRecurringList());
   }
+  if(tab==='emailimport' && window.EmailImport) EmailImport.onPageOpen();
   if(tab==='settings'){
     fetchConfig().then(renderSettingsLists);
   }
@@ -4874,6 +5005,8 @@ async function retryPendingQueue() {
 <!-- async: a stalled/blocked CDN request must never gate DOMContentLoaded, or Auth.markAppReady() (which only runs in that handler) never fires and the sign-in overlay hangs forever even after a successful sign-in. ui-insights.js already guards every Chart.js call site with `typeof Chart === 'undefined'`. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" integrity="sha384-dug+JxfBvklEQdJ4AYuBBAIScUz0bVN73xpy273gcAwHjb3qI0fXmuYNaNfdyYJG" crossorigin="anonymous" async></script>
 <script src="./ui-settings.js"></script>
+<script src="./email-parser.js"></script>
+<script src="./email-import.js"></script>
 <script src="./ui-calendar.js"></script>
 <script src="./ui-insights.js"></script>
 </body>

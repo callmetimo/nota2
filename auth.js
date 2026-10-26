@@ -125,11 +125,24 @@ const Auth = (() => {
     },
   };
 
+  // ── OPTIONAL GMAIL ACCESS (Email Import) ─────────────────────────────────────
+  // Off by default: with the flag unset, the requested scope is exactly what it has always
+  // been (drive.file), so sign-in behaves identically for everyone who never opts in. Once a
+  // user turns Email Import on, the SAME token request also asks for gmail.readonly, so the
+  // normal first-tap sync yields one token that covers both Sheets and Gmail — no second
+  // popup per launch (which iOS would block without a fresh gesture).
+  const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+  const LS_GMAIL_FLAG = 'notapub_email_import_on';
+  let grantedScope = '';
+  function gmailWanted() {
+    try { return localStorage.getItem(LS_GMAIL_FLAG) === '1'; } catch (e) { return false; }
+  }
+
   function initTokenClient() {
     if (tokenClient) return tokenClient;
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: NOTA_PUBLIC_CONFIG.GOOGLE_CLIENT_ID,
-      scope: NOTA_PUBLIC_CONFIG.GOOGLE_SCOPE,
+      scope: NOTA_PUBLIC_CONFIG.GOOGLE_SCOPE + (gmailWanted() ? ' ' + GMAIL_SCOPE : ''),
       callback: () => {}, // overridden per-request below
     });
     return tokenClient;
@@ -176,7 +189,9 @@ const Auth = (() => {
         if (resp.error) { reject(new Error(resp.error)); return; }
         accessToken = resp.access_token;
         tokenExpiresAt = Date.now() + (Number(resp.expires_in || 3300) * 1000);
+        grantedScope = String(resp.scope || '');
         resolve(accessToken);
+        try { window.dispatchEvent(new CustomEvent('notaTokenObtained')); } catch (e) {}
       };
       client.requestAccessToken({ prompt: promptMode });
     });
@@ -336,6 +351,41 @@ const Auth = (() => {
     }
   }
 
+  // Whether the token in hand was granted the Gmail scope (false if the user unticked it on
+  // Google's consent screen, or never opted in).
+  function hasGmailScope() {
+    return hasValidToken() && grantedScope.split(/\s+/).includes(GMAIL_SCOPE);
+  }
+
+  // Must be called from a real tap (opens Google's consent popup). Turns the flag on, rebuilds
+  // the token client with the extra scope and requests a token that includes it. Throws if the
+  // user cancels or leaves the Gmail box unticked; the flag is rolled back in that case.
+  async function enableGmail() {
+    const hadFlag = gmailWanted();
+    try { localStorage.setItem(LS_GMAIL_FLAG, '1'); } catch (e) {}
+    tokenClient = null;
+    try {
+      if (_deferredMode) {
+        await Promise.race([_tokenReady, new Promise((_, rej) => setTimeout(() => rej(new Error('token wait timed out')), 8000))]);
+      }
+      await requestToken('', 120000); // generous: the user is reading a consent screen
+      if (!hasGmailScope()) throw new Error('Gmail permission was not granted');
+      return true;
+    } catch (err) {
+      if (!hadFlag) { try { localStorage.removeItem(LS_GMAIL_FLAG); } catch (e) {} }
+      tokenClient = null;
+      throw err;
+    }
+  }
+
+  // Stops asking for Gmail on future token requests. Does not revoke anything (revoking would
+  // also drop drive.file); the user can remove Gmail access in their Google account settings.
+  function disableGmail() {
+    try { localStorage.removeItem(LS_GMAIL_FLAG); } catch (e) {}
+    tokenClient = null;
+    grantedScope = grantedScope.split(/\s+/).filter(s => s && s !== GMAIL_SCOPE).join(' ');
+  }
+
   async function start() {
     const cachedSpreadsheetId = localStorage.getItem('notaPublic_spreadsheetId');
 
@@ -384,10 +434,13 @@ const Auth = (() => {
     localStorage.removeItem('notaPublic_opexSheetId');
     localStorage.removeItem('notaPublic_investSheetId');
     localStorage.removeItem('notaPublic_splitMigratedV1'); // migration flag — reset so it re-runs if the user signs into a different account
+    // Email Import is per Google account: don't carry the flag (or its cached rules) over to whoever signs in next.
+    Object.keys(localStorage).filter(k => k.startsWith('notapub_email_import')).forEach(k => localStorage.removeItem(k));
     location.reload();
   }
 
-  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, silentRetry, hasValidToken, ready, markAppReady };
+  return { start, signIn, signOut, getAccessToken, triggerFirstTapSync, silentRetry, hasValidToken, ready, markAppReady,
+           hasGmailScope, enableGmail, disableGmail };
 })();
 
 window.addEventListener('DOMContentLoaded', () => Auth.start());

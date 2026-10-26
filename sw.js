@@ -15,6 +15,7 @@ const BYPASS_HOSTS = new Set([
   'script.google.com',
   'sheets.googleapis.com',
   'www.googleapis.com',
+  'gmail.googleapis.com',
   'accounts.google.com',
   'oauth2.googleapis.com',
   'frankfurter.app',

@@ -1308,6 +1308,53 @@ const DataStore = (() => {
     return { status: 'ok', count: rows.length };
   }
 
+  // ── EMAIL IMPORT (EmailImport!A2:B3 — one JSON cell per key) ──
+  // Created lazily, only for users who turn the feature on: reading never creates the tab.
+  // Row 2 = settings/rules/account mapping, row 3 = already-handled email ids (dedup).
+  const EMAIL_IMPORT_SHEET = 'EmailImport';
+  const EMAIL_IMPORT_CELL_MAX = 45000; // Sheets caps a cell at 50,000 chars
+
+  async function emailImportSheetExists() {
+    const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+    return (meta.sheets || []).some(s => s.properties.title === EMAIL_IMPORT_SHEET);
+  }
+
+  async function handleGetEmailImport() {
+    if (!(await emailImportSheetExists())) return { status: 'ok', exists: false, config: null, seen: [] };
+    const res = await SheetsClient.getValues(spreadsheetId, `${EMAIL_IMPORT_SHEET}!A2:B3`);
+    const out = { status: 'ok', exists: true, config: null, seen: [] };
+    (res.values || []).forEach(row => {
+      let parsed = null;
+      try { parsed = JSON.parse(String(row[1] || '')); } catch (e) { return; }
+      if (row[0] === 'config' && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) out.config = parsed;
+      if (row[0] === 'seen' && Array.isArray(parsed)) out.seen = parsed.map(String);
+    });
+    return out;
+  }
+
+  async function handleEmailImport(data) {
+    if (data.action !== 'save') return { status: 'error', message: 'Unknown action' };
+    const config = data.config, seen = data.seen;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return { status: 'error', message: 'config must be an object' };
+    if (!Array.isArray(seen)) return { status: 'error', message: 'seen must be an array' };
+    const configJson = JSON.stringify(config);
+    // Newest ids are at the end; drop the oldest first if the cell would overflow.
+    let seenList = seen.map(String);
+    let seenJson = JSON.stringify(seenList);
+    while (seenJson.length > EMAIL_IMPORT_CELL_MAX && seenList.length > 50) {
+      seenList = seenList.slice(Math.ceil(seenList.length * 0.1));
+      seenJson = JSON.stringify(seenList);
+    }
+    if (configJson.length > EMAIL_IMPORT_CELL_MAX) return { status: 'error', message: 'Email import settings too large' };
+    if (!(await emailImportSheetExists())) {
+      await SheetsClient.batchUpdate(spreadsheetId, [{ addSheet: { properties: { title: EMAIL_IMPORT_SHEET } } }]);
+    }
+    await SheetsClient.updateValues(spreadsheetId, `${EMAIL_IMPORT_SHEET}!A1:B3`, [
+      ['key', 'json'], ['config', configJson], ['seen', seenJson],
+    ], 'RAW');
+    return { status: 'ok' };
+  }
+
   // ── REQUEST ROUTER (mirrors the old doGet/doPost dispatch) ───
   async function handleRequest(urlStr, opts) {
     await requireReady();
@@ -1323,6 +1370,7 @@ const DataStore = (() => {
       if (type === 'goals') return handleGetGoals();
       if (type === 'recurring') return handleGetRecurring();
       if (type === 'config') return handleGetConfig();
+      if (type === 'emailimport') return handleGetEmailImport();
       return { status: 'error', message: 'Unknown type' };
     }
 
@@ -1333,6 +1381,7 @@ const DataStore = (() => {
     if (data.type === 'recurring') return handleRecurring(data);
     if (data.type === 'config') return handleConfig(data);
     if (data.type === 'transfer') return handleTransfer(data);
+    if (data.type === 'emailimport') return handleEmailImport(data);
     return { status: 'error', message: 'Unknown type' };
   }
 

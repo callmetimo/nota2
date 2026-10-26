@@ -159,6 +159,39 @@ Bank Pengirim	PT. BANK MANDIRI (PERSERO), TBK`);
   assert.equal(r.sourceKey, '703100000000');
 });
 
+t('Mandiri Cash Management BI-FAST credit is income, with the remark as notes', () => {
+  const r = EmailParser.parse(`Dear Valued Customer,
+
+We would like to inform you that your transaction for BI FAST Transfer - Mandiri Cash Management is successfully executed.
+
+Date/Time	:	Oct 23, 2026 15:29:35 (GMT +7)
+Corporate Name	:	ACME SERVICES
+Transaction Type	:	Credit
+From Account	:	1220000000000 - IDR - ACME SERVICES
+To Account	:	703100000000 - IDR - JOHN DOE
+Beneficiary Bank	:	CIMB Niaga
+Amount	:	IDR 601,149.00
+Charge	:	2,500.00
+Reference No	:	-
+Remark	:	Oktober fee
+Extended Payment Detail	:	Oktober fee 2026`);
+  assert.equal(r.typeId, 'bifast');
+  assert.equal(r.direction, 'income');
+  assert.equal(r.amount, 601149);
+  assert.equal(r.date, '2026-10-23');
+  assert.equal(r.merchant, 'ACME SERVICES');
+  assert.equal(r.sourceKey, '703100000000');
+  assert.equal(r.ref, '');
+  assert.equal(r.notes, 'Oktober fee 2026');
+});
+
+t('Mandiri CM debit notice is not imported', () => {
+  assert.equal(EmailParser.parse(`BI FAST Transfer - Mandiri Cash Management is successfully executed.
+Transaction Type	:	Debit
+To Account	:	1 - IDR - X
+Amount	:	IDR 1,000.00`), null);
+});
+
 t('HTML table body (label | colon | value cells)', () => {
   const html = `<html><body><p>Hello JOHN,</p><table>
   <tr><td>Status</td><td>:</td><td>Successful</td></tr>

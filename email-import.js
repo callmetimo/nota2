@@ -23,7 +23,7 @@ const EmailImport = (() => {
   // Only these exact senders are listed (forwarded copies keep the original From). They are tied
   // to the templates email-parser.js understands, so they are fixed here rather than a setting;
   // add a sender here together with its parser.
-  const SENDERS = ['bca@bca.co.id', 'kartukreditbca@bca.co.id', 'BIFAST.NOREPLY@cimbniaga.co.id'];
+  const SENDERS = ['bca@bca.co.id', 'kartukreditbca@bca.co.id', 'BIFAST.NOREPLY@cimbniaga.co.id', 'mcm@bankmandiri.co.id'];
   const QUERY_BASE = `from:(${SENDERS.join(' OR ')})`;
 
   let config = { types: {}, accounts: [], rules: [] };
@@ -196,6 +196,16 @@ const EmailImport = (() => {
     return hit ? hit.pm : '';
   }
 
+  // The same incoming transfer can be reported by two banks (the sender's Mandiri notice and
+  // the receiving CIMB notice), with no shared reference number. For BI-FAST only, treat
+  // same day + amount + receiving account as one payment. Not applied to other types: two
+  // identical purchases on one day (e.g. two 50,000 Flazz top-ups) are normal.
+  function signature(it) {
+    return it.typeId === 'bifast' && it.amount > 0 && it.sourceKey
+      ? `s:${it.date}|${it.amount}|${it.sourceKey}|${it.direction}` : '';
+  }
+  function seenKeys(it) { return ['g:' + it.gmailId, it.ref && 'r:' + it.ref, signature(it)]; }
+
   function isComplete(it) {
     return !!(it.tx && it.cat && it.pm && it.amount > 0 && it.date);
   }
@@ -257,12 +267,28 @@ const EmailImport = (() => {
       await Promise.all([worker(), worker(), worker(), worker()]);
       // Same transaction mailed twice (e.g. forwarded copy + original): keep one.
       const byRef = new Set();
+      const bySig = new Map();   // signature -> item kept for this batch
       const existing = new Map(pending.map(it => [it.gmailId, it]));
       // Reuse an item already in the list (same email) so edits the user has made are kept.
       pending = found.filter(it => {
-        if (!it.ref) return true;
-        if (byRef.has(it.ref)) { markSeen('g:' + it.gmailId); return false; }
-        byRef.add(it.ref); return true;
+        const sig = signature(it);
+        if (sig && seenSet.has(sig)) { markSeen('g:' + it.gmailId); return false; }   // already handled via the other bank's email
+        if (it.ref) {
+          if (byRef.has(it.ref)) { markSeen('g:' + it.gmailId); return false; }
+          byRef.add(it.ref);
+        }
+        if (sig) {
+          const kept = bySig.get(sig);
+          if (kept) {   // two emails, one payment: keep whichever carries the sender's note
+            if (!kept.notes && it.notes) kept.notes = it.notes;
+            // Not marked seen yet: until the payment is added/skipped, re-reading this copy next
+            // check is what lets its note reach the kept row again. The signature check above
+            // retires it once the payment is handled.
+            return false;
+          }
+          bySig.set(sig, it);
+        }
+        return true;
       }).map(it => existing.get(it.gmailId) || it)
         .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       localStorage.setItem(LS_LAST, String(Date.now()));
@@ -328,7 +354,7 @@ const EmailImport = (() => {
   }
 
   function skipAll() {
-    markSeen(...pending.flatMap(it => ['g:' + it.gmailId, it.ref && 'r:' + it.ref]));
+    markSeen(...pending.flatMap(seenKeys));
     pending = [];
     closePopup();
     renderPage();
@@ -346,7 +372,7 @@ const EmailImport = (() => {
       _date: it.date, tx: it.tx, amount: it.amount, cat: it.cat, pm: it.pm, notes: it.notes,
       type: it.direction === 'income' ? 'income' : 'expense',
     }));
-    markSeen(...chosen.flatMap(it => ['g:' + it.gmailId, it.ref && 'r:' + it.ref]));
+    markSeen(...chosen.flatMap(seenKeys));
     const done = new Set(chosen);
     pending = pending.filter(it => !done.has(it));
     saveLocal(); updateStatus();

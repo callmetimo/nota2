@@ -106,6 +106,8 @@ const EmailParser = (() => {
     if (m) return iso(+m[3], +m[2], +m[1]);
     m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
     if (m) return iso(+m[1], +m[2], +m[3]);
+    m = s.match(/([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})/);   // "Oct 23, 2026 15:29:35 (GMT +7)"
+    if (m && MONTHS[m[1].toLowerCase()]) return iso(+m[3], MONTHS[m[1].toLowerCase()], +m[2]);
     return '';
   }
 
@@ -210,12 +212,40 @@ const EmailParser = (() => {
     return out;
   }
 
+  // "BI FAST Transfer - Mandiri Cash Management" notification: a company paying the user.
+  // Same payment the CIMB BI-FAST email reports, so both map to typeId 'bifast' and the
+  // importer collapses them (see signature dedup in email-import.js).
+  function parseMandiriCm(text) {
+    if (!/Mandiri Cash Management/i.test(text) || !/To Account/i.test(text)) return null;
+    const direction = field(text, ['Transaction Type']);
+    if (!/^credit/i.test(direction)) return null;           // only money coming in
+    const toAcct = field(text, ['To Account']);
+    const fromAcct = field(text, ['From Account']);
+    const fromName = fromAcct.split(/\s-\s/).pop();
+    const merchant = cleanMerchant(field(text, ['Corporate Name']) || fromName);
+    const out = base('bifast', text);
+    Object.assign(out, {
+      direction: 'income', merchant, ref: '', rawType: 'BI-FAST (Mandiri CM)',
+      date: parseDate(field(text, ['Date/Time', 'Date'])),
+      sourceKey: sourceKey(toAcct) || toAcct.replace(/\D/g, ''),
+      defaultTx: merchant ? titleCase(merchant) : 'Incoming transfer',
+    });
+    const remark = field(text, ['Extended Payment Detail', 'Remark']);
+    if (remark && remark !== '-') out.notes = remark;
+    applyAmount(out, field(text, ['Amount']));
+    return out;
+  }
+
   // Entry point. `text` may be HTML or plain text. `fallbackDate` is the email's own
   // arrival date (YYYY-MM-DD), used only when the body has no parsable date.
   function parse(rawBody, fallbackDate) {
     const body = String(rawBody || '');
     const text = /<\s*(html|body|table|div|br|td|p)\b/i.test(body) ? htmlToText(body) : body.replace(/\r/g, '');
-    const out = parseBcaJournal(text) || parseCreditCardNotice(text) || parseBifast(text);
+    // A Mandiri CM email is either an incoming credit or nothing: it also has a "Transaction
+    // Type" line that parseBcaJournal would otherwise claim as an expense.
+    const out = /Mandiri Cash Management/i.test(text)
+      ? parseMandiriCm(text)
+      : (parseBcaJournal(text) || parseCreditCardNotice(text) || parseBifast(text));
     if (!out) return null;
     if (!out.date) out.date = fallbackDate || '';
     if (out.amount === undefined) out.amount = null;

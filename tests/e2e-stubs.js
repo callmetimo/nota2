@@ -14,9 +14,11 @@
     m5: mk('m5', 'Weekly promo from your bank! 20% off.'),
     m6: mk('m6', qris('REFQRIS1')),
     m7: mk('m7', `Tanggal Transaksi\t23/10/2026\nNo Rekening Penerima\t703100000000\nNominal\tRp. 601.149,00\nNama Pengirim\tACME SERVICES\npenerimaan dana melalui layanan BIFAST`),
+    // Same payment as m7, reported by the sender's bank (Mandiri Cash Management) with a remark.
+    m9: mk('m9', `We would like to inform you that your transaction for BI FAST Transfer - Mandiri Cash Management is successfully executed.\n\nDate/Time\t:\tOct 23, 2026 15:29:35 (GMT +7)\nCorporate Name\t:\tACME SERVICES\nTransaction Type\t:\tCredit\nFrom Account\t:\t1220000000000 - IDR - ACME SERVICES\nTo Account\t:\t703100000000 - IDR - JOHN DOE\nAmount\t:\tIDR 601,149.00\nReference No\t:\t-\nRemark\t:\tOktober fee\nExtended Payment Detail\t:\tOktober fee 2026`),
     m8: mk('m8', `Nomor Kartu\t: \t472647XXXX4541\nMerchant / ATM\t: \tWARUNG BAKSO PAK DE\nJenis Transaksi\t: \tCONTACTLESS DALAM NEGERI\nPada Tanggal\t:\t25-10-2026 17:24:26 WIB\nSejumlah\t:\tRp68.100,00`),
   };
-  window.__listIds = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8'];
+  window.__listIds = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9'];
   window.__gmailStatus = 200;
   window.__log = []; window.__posts = []; window.__opexPosts = [];
   window.__sheet = { exists: false, config: null, seen: [] };

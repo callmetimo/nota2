@@ -34,6 +34,26 @@ Total Bayar	Rp45.000
 Saldo GoPay	Rp120.000`, 'text/plain', 'Gojek <no-reply@gojek.com>', 'Your Gojek receipt');
   window.__msgs.m12 = mk('m12', `Item A Rp10.000
 Item B Rp20.000`, 'text/plain', 'Grab <no-reply@grab.com>', 'Grab receipt');
+  // ---- receipts from other senders (made-up) + one with a PDF attachment ----
+  const pdfBytes = (lines) => {   // a minimal one-page text PDF
+    const content = 'BT /F1 12 Tf 16 TL 50 750 Td ' + lines.map(l => '(' + l.replace(/[()\\]/g, '') + ') Tj T*').join(' ') + ' ET';
+    const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 4 0 R >> >> >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', '<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream'];
+    let out = '%PDF-1.4\n'; const offs = [];
+    objs.forEach((o, i) => { offs.push(out.length); out += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+    const xref = out.length;
+    out += 'xref\n0 6\n0000000000 65535 f \n' + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('') +
+      'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF';
+    return out;
+  };
+  window.__pdfData = b64u(pdfBytes(['Booking No. 2000000002', 'Payment Date August 3, 2026', 'Hotel Name   Ozzy Hotel', 'Total Charge   IDR 2,365,873 (USD 131.28)']));
+  const withPdf = (m) => { m.payload.parts.push({ filename: 'Receipt.pdf', mimeType: 'application/pdf', body: { attachmentId: 'att1', size: 52000 } }); return m; };
+  window.__msgs.m13 = withPdf(mk('m13', 'Hi Sam,\nPlease find the PDF copy of your receipt for your Agoda booking 2000000002\nEnjoy your travels!', 'text/plain', 'Agoda Customer Service <no-reply@agoda.com>', 'Agoda - Customer Receipt from Booking ID: 2000000002'));
+  window.__msgs.m14 = mk('m14', 'Your booking is now confirmed!\nPayment for this booking will be collected by the property.\nPayment details\nRooms\tRp 3,684,786\nTotal Charge\tRp 4,458,497\nPay at The Hotel\tRp 4,458,497', 'text/plain', 'Agoda Customer Service <no-reply@agoda.com>', 'Your booking is now confirmed!');
+  window.__msgs.m15 = mk('m15', 'Jakarta\nID: 80000001\tMonday, 17 Jun 2024\nThank you for using Bluebird~\nCost\tRp194.000\nDiscount\n\nRp10.000\n\nTotal\n\nRp194.000\n\nPayment method\n\ngopay', 'text/plain', 'noreply@info.bluebirdgroup.com', 'MyBluebird Receipt');
+  window.__msgs.m16 = mk('m16', 'Big sale this week! Pay only Rp50.000 for selected items. Total savings Rp120.000', 'text/plain', 'Shop <news@shop.com>', '50% OFF sale - voucher inside');
+  window.__msgs.m17 = mk('m17', 'Senin, 15 Januari 2024\nID pesanan: RB-000000-0000001\nMakasih udah pesan GoRide\nTotal dibayar\tRp26.000\nDibayar pakai kartu debit/kredit\tRp26.000', 'text/plain', 'Gojek Receipts <no-reply@invoicing.gojek.com>', 'Perjalananmu bersama Gojek pada Senin, 15 Januari 2024');
   window.__listIds = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10'];
   window.__gmailStatus = 200;
   window.__log = []; window.__posts = []; window.__opexPosts = [];
@@ -44,6 +64,7 @@ Item B Rp20.000`, 'text/plain', 'Grab <no-reply@grab.com>', 'Grab receipt');
     const json = (o, status = 200) => Promise.resolve(new Response(JSON.stringify(o), { status }));
     if (u.startsWith('https://gmail.googleapis.com')) {
       window.__log.push(u);
+      if (/\/attachments\//.test(u)) return json({ data: window.__pdfData, size: 1000 });
       if (window.__gmailStatus !== 200) return json({ error: 'stub' }, window.__gmailStatus);
       if (u.includes('/profile')) return json({ emailAddress: 'tester@example.com' });
       if (u.includes('/messages?')) return json({ messages: window.__listIds.map(id => ({ id })) });

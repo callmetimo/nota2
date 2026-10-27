@@ -357,6 +357,83 @@ t('generic: user-chosen label overrides scoring; no amount -> null; sender fallb
   assert.equal(noName.merchant, 'Grab');
 });
 
+// ── receipts in the layouts of real senders (made-up names, ids and amounts) ──
+const bluebird = 'Jakarta\nID: 80000001\tMonday, 17 Jun 2024\nHi Sam\nThank you for using Bluebird~\nCost\tRp194.000\nRoute detail\t29,59 km\n\nTransaction Details\tPaid\nFare\n\nRp194.000\n\nDiscount\n\nRp10.000\n\nActual Fare\n\nRp184.000\n\nExtra Cost\n\nRp10.000\n\nTip\n\nRp0\n\nTotal\n\nRp194.000\n\nPayment method\n\ngopay';
+const loket = 'Your ticket purchase was successful\nPayment Status\tPAID\nOrder ID\tABCD1234\nOrder Date\t17 Jun 2026 11:02 WIB\nPayment Method\tCredit / Debit Card\nTotal payment: 3.414.918\nSummary\tPrice per Ticket\tQuantity\tTotal\nCAT 2\tRp. 1.650.000\t2\tRp. 3.300.000\nPlatform Fee\nRp. 114.918\nGrand Total\tRp. 3.414.918';
+const gojek = 'Senin, 15 Januari 2024\nID pesanan: RB-000000-0000001\nHai Sam,\nMakasih udah pesan GoRide\nTotal dibayar\tRp26.000\nRincian pembayaran\nBiaya perjalanan\t\tRp28.000\nBiaya jasa aplikasi\t\tRp3.000\nDiskon\t\t-Rp5.000\nTotal pembayaran\t\tRp26.000\nDibayar pakai kartu debit/kredit\t\tRp26.000';
+const grab = 'Bike Hemat\nHope you enjoyed your ride!\nPicked up on 23 July 2026\nBooking ID: A-0AAAA0AAAA0AAAA\n\nTotal Paid\t\nRP 9.000\nBreakdown\nFare\t\n9.000\nTotal Paid\t\n9.000\nPaid by\nOVO\tOVO\t\n9.000';
+const ovo = 'OVO\nwarteg contoh\nPembayaran Berhasil - Rp10.000\n\n23 Apr 2026, 08:33\n\nNama Acquirer\tBCA\nNama Toko\twarteg contoh\nNo. Referensi\tp01-260423-aaaaaaaa\nMetode Pembayaran\tOVO Cash\nPembayaran\tRp10.000\nTip\tRp0\nTotal\tRp10.000';
+const agodaConfirm = 'Your booking is now confirmed!\nFor reference, your booking ID is 2000000001.\nPayment for this booking will be collected by the property.\nBooking Information\nPayment details\nRooms\tRp 3,684,786\nTaxes And Fees\tRp 773,711\nTotal Charge\tRp 4,458,497\nPay at The Hotel\tRp 4,458,497\nYou will be charged IDR 4,458,497 by the property in accordance with the cancellation policy.';
+const agodaPdf = 'Booking No. 2000000002\nPayment Date August 3, 2026\nHotel Name\tOzzy Hotel\nUSD 131.28\nTotal Charge\nIDR 2,365,873 (USD 131.28)';
+
+t('receipts: the five reference senders are read and score 4 or more', () => {
+  const cases = [
+    ['bluebird', bluebird, 'MyBluebird Receipt', 'noreply@info.bluebirdgroup.com', 194000, '2024-06-17', 'Bluebirdgroup'],
+    ['loket', loket, 'Your ticket purchase was successful', 'Loket.com <noreply@loket.com>', 3414918, '2026-06-17', 'Loket.com'],
+    ['gojek', gojek, 'Perjalananmu bersama Gojek pada Senin, 15 Januari 2024', 'Gojek Receipts <no-reply@invoicing.gojek.com>', 26000, '2024-01-15', 'Gojek Receipts'],
+    ['grab', grab, 'Your Grab E-Receipt', 'Grab <no-reply@grab.com>', 9000, '2026-07-23', 'Grab'],
+    ['ovo', ovo, 'OVO QR Payment Receipt', 'OVO <noreply@ovo.co.id>', 10000, '2026-04-23', 'warteg contoh'],
+  ];
+  for (const [name, body, subj, from, amount, date, merchant] of cases) {
+    const r = EmailParser.parseGeneric(body, '2000-01-01', { from, subject: subj });
+    assert.equal(r.amount, amount, name + ' amount');
+    assert.equal(r.date, date, name + ' date');
+    assert.equal(r.merchant, merchant, name + ' merchant');
+    const sc = EmailParser.receiptScore(body, subj, from, '');
+    assert.ok(sc.score >= 4 && !sc.unpaid, name + ' score ' + sc.score);
+  }
+});
+
+t('receipts: booked-but-unpaid is dropped, a paid wording wins, no amount scores 0', () => {
+  const r = EmailParser.parseGeneric(agodaConfirm, '2026-09-01', { from: 'Agoda <no-reply@agoda.com>' });
+  assert.equal(r.status, 'failed');
+  assert.equal(r.unpaid, true);
+  assert.equal(EmailParser.receiptScore(agodaConfirm, 'Your booking is now confirmed!', 'no-reply@agoda.com', '').unpaid, true);
+  assert.equal(EmailParser.parseGeneric(loket, '2026-06-17', {}).status, 'ok');   // "PAID" beats nothing
+  assert.equal(EmailParser.receiptScore('Please find the PDF copy of your receipt', 'Agoda - Customer Receipt', 'no-reply@agoda.com', 'Receipt.pdf').score, 0);
+  const promo = 'Big sale this week! Pay only Rp50.000 for selected items. Total savings Rp120.000';
+  assert.ok(EmailParser.receiptScore(promo, '50% OFF sale - voucher inside', 'news@shop.com', '').score < 4);
+});
+
+t('receipts: PDF text (IDR charge next to a foreign amount) is read', () => {
+  const r = EmailParser.parseGeneric(agodaPdf, '2026-08-03', { from: 'Agoda <no-reply@agoda.com>' });
+  assert.equal(r.amount, 2365873);
+  assert.equal(r.date, '2026-08-03');
+  assert.equal(r.merchant, 'Ozzy Hotel');
+  assert.ok(EmailParser.receiptScore('Booking No. 2000000002\nTotal Charge\nIDR 2,365,873', 'Agoda - Customer Receipt from Booking ID: 2000000002', 'no-reply@agoda.com', 'Receipt.pdf').score >= 4);
+});
+
+t('generic: date from a line with no colon, and never a "date" built across two lines', () => {
+  const pdf = 'Address:\nAgoda Company Pte, Ltd.\n36 Robinson Road\nCity House #20-01\nSingapore 068877\nBooking No. 2000000002\nPayment Date August 3, 2026\nTotal Charge\tIDR 2,365,873 (USD 131.28)';
+  const r = EmailParser.parseGeneric(pdf, '2026-10-27', { from: 'no-reply@agoda.com' });
+  assert.equal(r.date, '2026-08-03');
+  assert.equal(r.amount, 2365873);
+});
+
+t('subjectPattern keeps the stable start of a subject', () => {
+  assert.equal(EmailParser.subjectPattern('Agoda - Customer Receipt from Booking ID: 2038132945'), 'Agoda - Customer Receipt from Booking ID');
+  assert.equal(EmailParser.subjectPattern('Perjalananmu bersama Gojek pada Senin, 15 Januari 2024'), 'Perjalananmu bersama Gojek');
+  assert.equal(EmailParser.subjectPattern('MyBluebird Receipt'), 'MyBluebird Receipt');
+  assert.equal(EmailParser.subjectPattern('Your Grab E-Receipt'), 'Your Grab E-Receipt');
+  assert.equal(EmailParser.subjectPattern('Money transfer receipt'), 'Money transfer receipt');
+  assert.equal(EmailParser.subjectPattern('Order 12345'), '');
+});
+
+t('pdfItemsToText joins a row and tabs wide gaps', () => {
+  const txt = EmailParser.pdfItemsToText([
+    { str: 'Total', x: 10, y: 700, w: 25 }, { str: 'Charge', x: 38, y: 700, w: 30 }, { str: 'IDR 2,365,873', x: 300, y: 700, w: 70 },
+    { str: 'Booking No. 2000000002', x: 10, y: 740, w: 110 },
+  ]);
+  assert.equal(txt, 'Booking No. 2000000002\nTotal Charge\tIDR 2,365,873');
+});
+
+t('senderName uses the main domain, not a subdomain', () => {
+  assert.equal(EmailParser.senderName('noreply@info.bluebirdgroup.com'), 'Bluebirdgroup');
+  assert.equal(EmailParser.senderName('no-reply@invoicing.gojek.com'), 'Gojek');
+  assert.equal(EmailParser.senderName('no-reply@agoda.com'), 'Agoda');
+  assert.equal(EmailParser.senderName('mcm@bankmandiri.co.id'), 'Bankmandiri');
+});
+
 t('guessKeyword: names the kind of email, not the direction or purchase category', () => {
   assert.equal(EmailParser.guessKeyword(qris), 'QRIS Payment');
   assert.equal(EmailParser.guessKeyword('Transaction Type\t:\tCredit\nAmount\t:\tIDR 1,000.00'), '');

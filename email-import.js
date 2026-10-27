@@ -490,7 +490,12 @@ const EmailImport = (() => {
           // Ignored by the user's own setting: remembered separately (`i:`) so that switching the type
           // back to "Ask me" brings these emails back (setSourceAction() clears every `i:` entry).
           if (src.action === 'ignore') { markSeen('i:' + id); continue; }
-          const parsed = readWith(src, body, localISO(Number(msg.internalDate) || Date.now()), subject, from);
+          const day = localISO(Number(msg.internalDate) || Date.now());
+          let parsed = readWith(src, body, day, subject, from);
+          if (!parsed && src.reader === 'receipt' && pdfParts(msg).length) {
+            const withPdf = await bodyWithPdf(msg, body);
+            if (withPdf.body !== body) parsed = readWith(src, withPdf.body, day, subject, from);
+          }
           if (!parsed) { markSeen(unrKey(id)); unreadable++; rememberUnreadable(msg, body); continue; }
           if (parsed.status === 'failed') { markSeen('g:' + id, parsed.ref && 'r:' + parsed.ref); continue; }
           if (parsed.ref && seenSet.has('r:' + parsed.ref)) { markSeen('g:' + id); continue; }
@@ -1050,7 +1055,8 @@ const EmailImport = (() => {
       previewMsgs = [];
       for (const id of ids) {
         const msg = await gmailFetch(`/messages/${id}?format=full`);
-        const body = messageBody(msg);
+        let body = messageBody(msg);
+        if (s.reader === 'receipt') body = (await bodyWithPdf(msg, body)).body;
         if (tokens(s.keyword).length && !tokens(s.keyword).some(k => plainText(body).toLowerCase().includes(k.toLowerCase()))) continue;
         previewMsgs.push({ id, body, from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'),
           date: localISO(Number(msg.internalDate) || Date.now()) });
@@ -1068,6 +1074,7 @@ const EmailImport = (() => {
     if (!previewMsgs.length) { out.innerHTML = '<p style="font-size:12px;color:var(--text2)">No matching emails in the last 30 days. Check the sender spelling, or that the mail reaches this Gmail account.</p>'; return; }
     const cards = previewMsgs.map(m => {
       const p = s.reader === 'bank' ? EmailParser.parse(m.body, m.date, m.subject) : readWith(s, m.body, m.date, m.subject, m.from);
+      if (p && p.status === 'failed') return `<div class="account-info-card" style="margin:0 0 8px;border-left:2px solid var(--text3)"><div style="font-size:13px;font-weight:600">${esc(maskDigits(m.subject) || 'Email')}</div><div style="font-size:11px;color:var(--text2);margin-top:2px">Not paid yet, so it is skipped</div></div>`;
       if (!p) return `<div class="account-info-card" style="margin:0 0 8px;border-left:2px solid #ff9500"><div style="font-size:13px;font-weight:600">${esc(maskDigits(m.subject) || 'Email')}</div><div style="font-size:11px;color:#ff9500;margin-top:2px">Could not find an amount in this email</div></div>`;
       const chips = (s.reader === 'receipt' && p.ambiguous)
         ? `<div style="font-size:11px;color:#ff9500;margin-top:6px">Several amounts found. Which one is the total?</div><div>${p.candidates.slice(0, 6).map(c =>
@@ -1085,6 +1092,88 @@ const EmailImport = (() => {
     renderPreview();
   }
 
+  // ── PDF attachments ───────────────────────────────────────
+  // Some receipts carry the amount only in an attached PDF. The text is read on this device with
+  // pdf.js (loaded from cdnjs only the first time a PDF is needed; scanned or password-protected
+  // PDFs have no readable text and are simply skipped).
+  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  const PDFJS_SRI = 'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e';
+  const PDFJS_WORKER_SRI = 'sha384-SnzOobpRMLXZ52iJvZm/C0fYw0OQemTXzTjIsdsfMcrCtCEe9qgzxTd3RSklO5x2';
+  const PDF_MAX_BYTES = 2000000;
+  const PDF_MAX_PAGES = 4;
+  let pdfjsPromise = null;
+
+  function b64ToBytes(data) {
+    const bin = atob(String(data || '').replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  function loadPdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (pdfjsPromise) return pdfjsPromise;
+    pdfjsPromise = new Promise((resolve, reject) => {
+      const sc = document.createElement('script');
+      sc.src = PDFJS + 'pdf.min.js'; sc.integrity = PDFJS_SRI; sc.crossOrigin = 'anonymous';
+      sc.onerror = () => reject(new Error('Could not load the PDF reader'));
+      sc.onload = async () => {
+        try {
+          // The worker must be same-origin: fetch it, check its hash, and run it from a blob.
+          const buf = await (await fetch(PDFJS + 'pdf.worker.min.js')).arrayBuffer();
+          const sum = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-384', buf))));
+          if ('sha384-' + sum !== PDFJS_WORKER_SRI) throw new Error('PDF reader failed its integrity check');
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([buf], { type: 'text/javascript' }));
+          resolve(window.pdfjsLib);
+        } catch (e) { reject(e); }
+      };
+      document.head.appendChild(sc);
+    }).catch(e => { pdfjsPromise = null; throw e; });
+    return pdfjsPromise;
+  }
+
+  function pdfParts(msg) {
+    const out = [];
+    (function walk(part) {
+      if (!part) return;
+      const att = part.body && part.body.attachmentId;
+      if (att && (/\.pdf$/i.test(part.filename || '') || /^application\/pdf/i.test(part.mimeType || '')) && (part.body.size || 0) <= PDF_MAX_BYTES) {
+        out.push({ id: att, name: part.filename || 'attachment.pdf' });
+      }
+      (part.parts || []).forEach(walk);
+    })(msg.payload);
+    return out;
+  }
+
+  // Text of the first PDF attached to a message ('' when there is none or it cannot be read).
+  async function pdfTextOf(msg) {
+    const part = pdfParts(msg)[0];
+    if (!part) return { text: '', name: '' };
+    try {
+      const att = await gmailFetch('/messages/' + msg.id + '/attachments/' + part.id);
+      const lib = await loadPdfJs();
+      const doc = await lib.getDocument({ data: b64ToBytes(att.data) }).promise;
+      const pages = [];
+      for (let i = 1; i <= Math.min(doc.numPages, PDF_MAX_PAGES); i++) {
+        const tc = await (await doc.getPage(i)).getTextContent();
+        pages.push(EmailParser.pdfItemsToText(tc.items.map(it => ({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width }))));
+      }
+      doc.destroy();
+      return { text: pages.join('\n'), name: part.name };
+    } catch (e) {
+      if (e.status === 401 || e.status === 403) throw e;
+      console.warn('[email-import] pdf not read', e && e.message);
+      return { text: '', name: part.name };
+    }
+  }
+
+  // Body text plus, when the email text has no amount but a PDF is attached, that PDF's text.
+  async function bodyWithPdf(msg, body) {
+    if (EmailParser.receiptScore(body, '', '', '').amount > 0) return { body, names: '' };
+    const pdf = await pdfTextOf(msg);
+    return pdf.text ? { body: body + '\n' + pdf.text, names: pdf.name } : { body, names: pdf.name };
+  }
+
   // ── adding email types the easy way: pick an email, or scan the mailbox ──
   // A message is turned into a ready-to-edit type: sender from the real From header, a keyword that
   // tells this kind of email apart ("Transaction Type" value), and the bank reader when one of the
@@ -1095,11 +1184,14 @@ const EmailImport = (() => {
   function suggestSource(m) {
     const keyword = EmailParser.guessKeyword(m.body);
     const bank = !!EmailParser.parse(m.body, m.date, m.subject);
-    const subj = String(m.subject || '').trim();
-    const subject = (!keyword && subj && !/\d{3,}/.test(subj)) ? subj.slice(0, 60) : '';
+    // Bank emails are told apart by a word inside; receipts by the stable start of the subject
+    // (the same sender can send a paid receipt and an unpaid confirmation).
+    const subject = (bank && keyword) ? '' : EmailParser.subjectPattern(m.subject);
     const brand = brandOf(m.from);
-    return { name: `${brand} - ${keyword || subject || 'emails'}`.slice(0, 60), senders: addrOf(m.from), subject, keyword,
-      reader: bank ? 'bank' : 'receipt', kind: bank ? '' : 'expense' };
+    const label = keyword || subject;
+    const first = brand.split(/\s+/)[0].toLowerCase();
+    const name = label ? (label.toLowerCase().includes(first) ? label : `${brand} - ${label}`) : `${brand} - receipts`;
+    return { name: name.slice(0, 60), senders: addrOf(m.from), subject, keyword, reader: bank ? 'bank' : 'receipt', kind: bank ? '' : 'expense' };
   }
 
   // Specific types (with a keyword) go above a general type for the same sender, which must stay last.
@@ -1113,7 +1205,9 @@ const EmailImport = (() => {
   }
 
   let pickRows = [];
-  const MONEY_QUERY = 'newer_than:30d ("Rp" OR "IDR")';
+  // Words a receipt or payment notice contains. Folders are ignored on purpose (receipts also land in
+// Promotions / Updates / Social); the score in EmailParser.receiptScore does the real filtering.
+  const RECEIPT_QUERY = 'newer_than:30d (total OR receipt OR struk OR invoice OR pembayaran OR payment OR order OR pesanan OR purchase OR transaction OR booking)';
   function pickModal(title, body, foot) {
     document.getElementById('emailPickTitle').textContent = title;
     document.getElementById('emailPickBody').innerHTML = body;
@@ -1126,7 +1220,7 @@ const EmailImport = (() => {
   const cancelBtn = `<button class="btn-save" onclick="EmailImport.closePick()">Cancel</button>`;
 
   async function listMoneyEmails(max) {
-    const list = await gmailFetch(`/messages?maxResults=${max}&q=` + encodeURIComponent(MONEY_QUERY));
+    const list = await gmailFetch(`/messages?maxResults=${max}&q=` + encodeURIComponent(RECEIPT_QUERY));
     return (list.messages || []).map(m => m.id);
   }
 
@@ -1181,6 +1275,8 @@ const EmailImport = (() => {
   // Looks through the last 30 days of emails that carry an amount and proposes one type per
   // sender + kind, skipping what an existing type already covers.
   let scanGroups = [];
+  let scanAll = false;       // show every find, not just the strongest 8
+  const SCAN_TOP = 8;
   async function openScan() {
     if (!Auth.hasGmailScope()) { showToast('Connect Gmail first', 'error'); return; }
     pickModal('Scan my mailbox', `<p style="font-size:12px;color:var(--text2)">Reading your last 30 days of emails that contain an amount. This stays on your device.</p>`, cancelBtn);
@@ -1195,17 +1291,23 @@ const EmailImport = (() => {
           try { msg = await gmailFetch(`/messages/${id}?format=full`); } catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; }
           const m = { body: messageBody(msg), from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'), date: localISO(Number(msg.internalDate) || Date.now()) };
           if (sourceFor(m.from, m.subject, plainText(m.body))) continue;   // already covered
+          const pdf = await bodyWithPdf(msg, m.body);
+          m.body = pdf.body;
+          // Only what looks like a paid receipt / payment notice (score 4+); unpaid bookings never count.
+          const sc = EmailParser.receiptScore(m.body, m.subject, m.from, pdf.names);
+          if (sc.unpaid || !(sc.amount > 0)) continue;
           const sug = suggestSource(m);
-          const p = sug.reader === 'bank' ? EmailParser.parse(m.body, m.date, m.subject) : EmailParser.parseGeneric(m.body, m.date, { from: m.from, subject: m.subject });
-          if (!p || !(p.amount > 0)) continue;
+          if (sug.reader === 'bank') sc.score += 3;   // a built-in bank template recognised it
+          if (sc.score < 4) continue;
           const key = `${sug.senders.toLowerCase()}|${sug.keyword.toLowerCase()}|${sug.subject.toLowerCase()}`;
-          const g = groups.get(key) || { sug, count: 0, sample: p.amount, on: true };
-          g.count++;
+          const g = groups.get(key) || { sug, count: 0, scoreSum: 0, sample: sc.amount, on: true };
+          g.count++; g.scoreSum += sc.score;
           groups.set(key, g);
         }
       };
       await Promise.all([worker(), worker(), worker(), worker()]);
-      scanGroups = [...groups.values()].sort((a, b) => b.count - a.count);
+      scanGroups = [...groups.values()].sort((a, b) => (b.scoreSum / b.count) - (a.scoreSum / a.count) || b.count - a.count);
+      scanAll = false;
       if (!scanGroups.length) {
         pickModal('Scan my mailbox', `<p style="font-size:13px;color:var(--text2);line-height:1.5">Nothing new found. Emails with an amount are either already covered by one of your types, or none arrived in the last 30 days.</p>`, manualBtn + cancelBtn);
         return;
@@ -1218,16 +1320,19 @@ const EmailImport = (() => {
 
   function renderScan() {
     const n = scanGroups.filter(g => g.on).length;
-    pickModal('Found in your mailbox', `<p style="font-size:12px;color:var(--text2);margin-bottom:8px">Untick any you do not want. You can change each one later.</p>` + scanGroups.map((g, i) => `<label class="config-row" style="cursor:pointer">
+    const shown = scanAll ? scanGroups : scanGroups.slice(0, SCAN_TOP);
+    const more = scanGroups.length - shown.length;
+    pickModal('Found in your mailbox', `<p style="font-size:12px;color:var(--text2);margin-bottom:8px">Receipts and payment notices, best matches first. Untick any you do not want; you can change each one later.</p>` + shown.map((g, i) => `<label class="config-row" style="cursor:pointer">
         <div style="min-width:0"><div class="config-row-name">${esc(g.sug.name)}</div>
         <div class="config-row-meta">${g.count} email${g.count !== 1 ? 's' : ''} · from ${esc(g.sug.senders)} · e.g. ${esc(fRp(g.sample))}</div></div>
-        <input type="checkbox" ${g.on ? 'checked' : ''} onchange="EmailImport.toggleScan(${i}, this.checked)"></label>`).join(''),
+        <input type="checkbox" ${g.on ? 'checked' : ''} onchange="EmailImport.toggleScan(${scanGroups.indexOf(g)}, this.checked)"></label>`).join('') + (more > 0 ? `<button class="config-add-btn" style="padding:8px 0 0;color:var(--text2)" onclick="EmailImport.showMoreScan()">Show ${more} more</button>` : ''),
       `<button class="btn-delete" style="${GHOST}" onclick="EmailImport.closePick()">Cancel</button><button class="btn-save" ${n ? '' : 'disabled style="opacity:.4"'} onclick="EmailImport.addScanned()">Add ${n} type${n !== 1 ? 's' : ''}</button>`);
   }
+  function showMoreScan() { scanAll = true; renderScan(); }
   function toggleScan(i, on) { if (scanGroups[i]) scanGroups[i].on = !!on; renderScan(); }
 
   function addScanned() {
-    const chosen = scanGroups.filter(g => g.on);
+    const chosen = scanGroups.filter(g => g.on);   // includes any not currently shown only if ticked (all start ticked)
     chosen.forEach(g => insertSource(newSource(g.sug)));
     scanGroups = [];
     reconsiderEmails();
@@ -1361,7 +1466,7 @@ const EmailImport = (() => {
     init, check, onToggle, connect, checkNow, reopenPopup, onPageOpen, renderPage,
     copyUnreadable, copyReport, onCheck, closePopup, skipAll, addSelected, openEdit, closeEdit, saveEdit, onRememberToggle,
     setEditKind, onRuleTypeChange, openSource, closeSource, saveSource, deleteSource, previewSource,
-    setSourceAction, onSourceReaderChange, openPick, closePick, pickEmail, openScan, toggleScan, addScanned, pickAmountLabel, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
+    setSourceAction, onSourceReaderChange, openPick, closePick, pickEmail, openScan, toggleScan, showMoreScan, addScanned, pickAmountLabel, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
     _internals,
   };
 })();

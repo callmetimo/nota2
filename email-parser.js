@@ -288,30 +288,44 @@ const EmailParser = (() => {
   // best. `opts.amountLabel` (a label the user picked in the preview) overrides the scoring.
   // Returns null when no amount is found. `candidates` lets the UI offer the other amounts.
   const GOOD_LABEL = [
-    [/grand total|total (bayar|pembayaran|dibayar|tagihan|belanja)|jumlah (bayar|pembayaran|dibayar)|amount paid|total paid|total charged/i, 10],
-    [/\btotal\b/i, 6],
+    [/grand total|total (bayar|pembayaran|dibayar|tagihan|belanja)|jumlah (bayar|pembayaran|dibayar)|amount paid|total paid|total charge(d)?/i, 10],
+    [/\btotal\b|sejumlah|nominal|jumlah transaksi|transaction amount/i, 6],
     [/bayar|paid|pembayaran|tagihan|amount|charged/i, 3],
   ];
   const BAD_LABEL = /sub ?total|diskon|discount|promo|ongkir|biaya|fee|pajak|tax|ppn|saldo|balance|cashback|potongan|voucher|kembalian|\btip\b|harga dasar|base fare/i;
   const AMOUNT_RE = /(?:Rp\.?|IDR)\s*(\d[\d.,]*)/gi;
-  const MERCHANT_LABELS = ['Merchant', 'Merchant Name', 'Nama Merchant', 'Restoran', 'Restaurant', 'Toko', 'Store', 'Penjual',
-    'Dibayar ke', 'Paid to', 'Payment to', 'Pembayaran ke'];
-  const DATE_LABELS = ['Transaction Date', 'Tanggal Transaksi', 'Tanggal', 'Date', 'Waktu', 'Time'];
+  const MERCHANT_LABELS = ['Merchant', 'Merchant Name', 'Nama Merchant', 'Nama Toko', 'Restoran', 'Restaurant', 'Toko', 'Store', 'Penjual',
+    'Hotel Name', 'Dibayar ke', 'Paid to', 'Payment to', 'Pembayaran ke'];
+  const DATE_LABELS = ['Transaction Date', 'Tanggal Transaksi', 'Payment Date', 'Order Date', 'Booking Date', 'Tanggal Pesanan',
+    'Picked up on', 'Tanggal', 'Date', 'Waktu', 'Time'];
+  // A purchase that is confirmed but not paid yet (pay at the hotel, awaiting transfer...): nothing
+  // has left the account, so it is not a transaction. An explicit "paid" wording wins.
+  const UNPAID_RE = /(collected|charged) by the (property|hotel)|pay at (the )?(property|hotel)|bayar di (hotel|tempat)|belum dibayar|menunggu pembayaran|awaiting payment|payment (is )?pending|pay later|\bunpaid\b|selesaikan pembayaran|complete your payment/i;
+  const PAID_RE = /payment status\s*[:\t ]*paid|status pembayaran\s*[:\t ]*(lunas|berhasil)|pembayaran berhasil|payment (was )?successful|\blunas\b|total paid|total dibayar|\bpaid by\b|dibayar pakai/i;
+  function looksUnpaid(text) { return UNPAID_RE.test(text) && !PAID_RE.test(text); }
 
   function labelKey(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
 
+  // "BCA <bca@bca.co.id>" -> "BCA"; "noreply@info.bluebirdgroup.com" -> "Bluebirdgroup" (the main domain
+  // name, not a subdomain like info / invoicing / mail).
   function senderName(from) {
     const f = String(from || '');
     const name = f.replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
     if (name && !/@/.test(name)) return name;
-    const dom = (f.match(/@([a-z0-9-]+)\./i) || [])[1];
-    return dom ? titleCase(dom) : '';
+    const host = (f.match(/@([a-z0-9.-]+)/i) || [])[1];
+    if (!host) return '';
+    const parts = host.toLowerCase().split('.').filter(Boolean);
+    const sld = /^(co|com|net|org|ac|go|or|web)$/.test(parts[parts.length - 2] || '') ? 3 : 2;
+    return titleCase(parts[Math.max(0, parts.length - sld)] || parts[0]);
   }
 
-  function parseGeneric(rawBody, fallbackDate, opts) {
-    opts = opts || {};
+  function flatten(rawBody) {
     const body = String(rawBody || '');
-    const text = /<\s*(html|body|table|div|br|td|p)\b/i.test(body) ? htmlToText(body) : body.replace(/\r/g, '');
+    return /<\s*(html|body|table|div|br|td|p)\b/i.test(body) ? htmlToText(body) : body.replace(/\r/g, '');
+  }
+
+  // Every Rp / IDR amount in the text with the label in front of it and a "looks like the total" score.
+  function scanAmounts(text) {
     const lines = text.split('\n');
     const found = [];
     lines.forEach((line, i) => {
@@ -329,6 +343,25 @@ const EmailParser = (() => {
         found.push({ label: label.slice(0, 60), key: labelKey(label), value, score, pos: found.length });
       }
     });
+    return found;
+  }
+
+  // First date near the top of the text ("Senin, 15 Januari 2024"), for emails with no date label.
+  function topDate(text) {
+    const head = text.split('\n').slice(0, 25).join('\n');
+    // Same-line only ([ \t], never a newline), and the first match that is a real date wins.
+    const re = /\d{1,2}[ \t\-\/]+[A-Za-z]{3,9}[ \t\-\/,]+\d{4}|[A-Za-z]{3,9}[ \t]+\d{1,2},?[ \t]+\d{4}|\d{1,2}[\-\/.]\d{1,2}[\-\/.]\d{4}/g;
+    let m;
+    while ((m = re.exec(head))) { const d = parseDate(m[0]); if (d) return d; }
+    return '';
+  }
+
+  function parseGeneric(rawBody, fallbackDate, opts) {
+    opts = opts || {};
+    const text = flatten(rawBody);
+    // Booked but not paid yet: not a transaction. status 'failed' makes the importer drop it for good.
+    if (looksUnpaid(text)) return { typeId: 'custom', typeLabel: opts.name || 'Email', status: 'failed', unpaid: true, amount: null };
+    const found = scanAmounts(text);
     if (!found.length) return null;
     let pick = null;
     if (opts.amountLabel) {
@@ -342,12 +375,73 @@ const EmailParser = (() => {
     const candidates = found.filter(c => { const k = c.key + '|' + c.value; if (seenC.has(k)) return false; seenC.add(k); return true; })
       .map(c => ({ label: c.label, value: c.value }));
     const merchant = cleanMerchant(field(text, MERCHANT_LABELS)) || senderName(opts.from) || cleanMerchant(opts.subject);
-    const date = parseDate(field(text, DATE_LABELS)) || fallbackDate || '';
+    const date = parseDate(field(text, DATE_LABELS)) || topDate(text) || fallbackDate || '';
     return {
       typeId: 'custom', typeLabel: opts.name || 'Email', direction: 'expense', status: 'ok', ccy: 'IDR', nativeAmount: null,
       date, amount: pick.value, merchant, defaultTx: merchant, sourceKey: '', ref: '',
       amountLabel: pick.label, candidates, ambiguous: candidates.length > 1 && !opts.amountLabel && pick.score <= 0,
     };
+  }
+
+  // How much an email looks like a paid receipt (the mailbox scan keeps 4 and above). Looks at the
+  // body text plus anything read from an attached PDF, the subject, the attachment names and sender.
+  //   +3 a total-style label with an amount   +2 an ID / order / reference line with a value
+  //   +2 receipt wording in subject or file name   +1 a payment-method line   +1 a no-reply style sender
+  //   -3 promo wording in the subject
+  // Not paid yet (pay at the hotel...) is reported separately: those are never suggested.
+  function receiptScore(rawBody, subject, from, filenames) {
+    const text = flatten(rawBody);
+    const out = { score: 0, amount: 0, unpaid: false };
+    const found = scanAmounts(text);
+    if (!found.length) return out;
+    out.amount = found.reduce((a, b) => (b.score >= a.score ? b : a)).value;
+    if (looksUnpaid(text)) { out.unpaid = true; return out; }
+    const head = String(subject || '') + ' ' + String(filenames || '');
+    let score = 0;
+    if (found.some(c => c.score >= 6)) score += 3;
+    if (/(^|\n)[ \t]*(order id|booking id|booking no\.?|id pesanan|no\.? ?pesanan|order no\.?|invoice (no|number)\.?|no\.? ?referensi|reference no\.?|ref(erence)? ?(no|number)\.?|transaction id|id transaksi|receipt no\.?|id)[ \t]*[:\t ][ \t:]*[A-Za-z0-9-]{5,}/i.test(text)) score += 2;
+    if (/receipt|struk|invoice|bukti (pembayaran|transaksi)|pembayaran|payment|purchase|pesanan|order|transaksi|transaction|transfer|tagihan|perjalanan|booking|\bride\b|\btrip\b/i.test(head)) score += 2;
+    if (/payment method|metode pembayaran|paid by|dibayar (pakai|dengan)|pay(ment)? with/i.test(text)) score += 1;
+    if (/no-?reply|invoice|receipt|billing|notification/i.test(from || '')) score += 1;
+    if (/promo|\bsale\b|voucher|cashback|% ?off|newsletter|diskon hingga|flash/i.test(head)) score -= 3;
+    out.score = score;
+    return out;
+  }
+
+  // The stable beginning of a subject whose later part varies per email (dates, ids, names):
+  // "Agoda - Customer Receipt from Booking ID: 2038132945" -> "Agoda - Customer Receipt from Booking ID".
+  // '' when too little is left to be a useful filter.
+  const DATE_WORD = /(^|[^a-z])(mon(day)?|tue(s|sday)?|wed(nesday)?|thu(rs|rsday)?|fri(day)?|sat(urday)?|sun(day)?|senin|selasa|rabu|kamis|jumat|sabtu|minggu|jan(uary|uari)?|feb(ruary|ruari)?|mar(ch|et)?|apr(il)?|may|mei|jun(e|i)?|jul(y|i)?|aug(ust)?|agu(stus)?|sept?(ember)?|oct(ober)?|okt(ober)?|nov(ember)?|dec(ember)?|des(ember)?)([^a-z]|$)/i;
+  function subjectPattern(subject) {
+    let t = String(subject || '').replace(/^\s*((re|fwd?|fw)\s*:\s*)+/i, '').trim();
+    const d = t.search(/\d/);
+    if (d >= 0) t = t.slice(0, d);
+    const m = DATE_WORD.exec(t);
+    if (m) t = t.slice(0, m.index + m[1].length);
+    t = t.replace(/[\s:,;#.\-–|]+$/, '').replace(/\s+(pada|on|at|untuk|for|from|dari)$/i, '').trim();
+    return t.length >= 6 ? t.slice(0, 60) : '';
+  }
+
+  // Rebuilds readable lines from a PDF page's text items ({ str, x, y, w }): items on the same
+  // baseline form a line, a wide gap becomes a tab, so "Total Charge   IDR 2,365,873" stays one line.
+  function pdfItemsToText(items) {
+    const rows = [];
+    items.filter(it => String(it.str || '').trim()).forEach(it => {
+      let row = rows.find(r => Math.abs(r.y - it.y) <= 2.5);
+      if (!row) { row = { y: it.y, items: [] }; rows.push(row); }
+      row.items.push(it);
+    });
+    rows.sort((a, b) => b.y - a.y);
+    return rows.map(r => {
+      r.items.sort((a, b) => a.x - b.x);
+      let out = '', end = null;
+      r.items.forEach(it => {
+        const gap = end === null ? 0 : it.x - end;
+        out += (end === null ? '' : (gap > 12 ? '\t' : (gap > 1 ? ' ' : ''))) + it.str;
+        end = it.x + (it.w || it.str.length * 5);
+      });
+      return out;
+    }).join('\n');
   }
 
   // A short phrase that tells this kind of email apart from the sender's others, e.g. the value of
@@ -366,7 +460,7 @@ const EmailParser = (() => {
   // version instead of treating them as "not a transaction" forever.
   const VERSION = 5;
 
-  return { parse, parseGeneric, guessKeyword, senderName, parseAmount, parseDate, sourceKey, htmlToText, field, TYPES, VERSION };
+  return { parse, parseGeneric, receiptScore, subjectPattern, pdfItemsToText, guessKeyword, senderName, parseAmount, parseDate, sourceKey, htmlToText, field, TYPES, VERSION };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = EmailParser;

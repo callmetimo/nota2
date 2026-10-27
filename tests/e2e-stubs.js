@@ -3,8 +3,8 @@
 // Fakes Gmail + the Sheets-backed API so no Google sign-in is needed. Fake emails use made-up data.
 (() => {
   const b64u = s => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  const mk = (id, body, mime = 'text/plain') => ({ id, internalDate: String(Date.now()),
-    payload: { mimeType: 'multipart/alternative', parts: [{ mimeType: mime, body: { data: b64u(body) } }] } });
+  const mk = (id, body, mime = 'text/plain', from = 'bca@bca.co.id', subject = 'Internet Transaction Journal') => ({ id, internalDate: String(Date.now()),
+    payload: { headers: [{ name: 'From', value: from }, { name: 'Subject', value: subject }], mimeType: 'multipart/alternative', parts: [{ mimeType: mime, body: { data: b64u(body) } }] } });
   const qris = (ref) => `Status\t:\tSuccessful\nTransaction Date\t:\t26 Oct 2026 08:47:01\nTransaction Type\t:\tQRIS Payment\nPayment to\t:\tWARUNG MAKAN SEJAHTERA\nSource of Fund\t:\tTAHAPAN XPRESI - 1234****56\nTotal Payment\t:\tIDR 7,000.00\nReference No.\t:\t${ref}`;
   window.__msgs = {
     m1: mk('m1', qris('REFQRIS1')),
@@ -20,6 +20,20 @@
   };
   // Card bill payment in the "label / ': value' on separate lines" layout (becomes a Transfer).
   window.__msgs.m10 = mk('m10', `Status\n: Successful\nTransaction Date\n: 26 Oct 2026 15:20:25\nTransaction Type\n: Credit Card & Paylater - BCA\nSource of Fund\n: 1234****56\nCard No. / Customer No.\n: 0000000015****64\nName\n: JOHN **US ***DOE\nTotal Bill\n: IDR 17,908,449.00\nTotal Payment\n: IDR 1,000,000.00\nRemaining Bill\n: IDR 16,908,449.00\nReference No.\n: 9527120261026152025225TPP0000000004`);
+  const setFrom = (id, from, subject) => { window.__msgs[id].payload.headers = [{ name: 'From', value: from }, { name: 'Subject', value: subject }]; };
+  ['m3', 'm8'].forEach(id => setFrom(id, 'kartukreditbca@bca.co.id', 'Credit Card Transaction Notification'));
+  setFrom('m7', 'BIFAST.NOREPLY@cimbniaga.co.id', 'Incoming BI FAST');
+  setFrom('m9', 'mcm@bankmandiri.co.id', 'BI FAST Transfer - Mandiri Cash Management');
+  // Receipt emails (made-up) for user-defined email types.
+  window.__msgs.m11 = mk('m11', `Tanggal	:	19 Oct 2026
+Tarif dasar	Rp40.000
+Biaya layanan	Rp5.000
+Diskon	-Rp10.000
+Subtotal	Rp35.000
+Total Bayar	Rp45.000
+Saldo GoPay	Rp120.000`, 'text/plain', 'Gojek <no-reply@gojek.com>', 'Your Gojek receipt');
+  window.__msgs.m12 = mk('m12', `Item A Rp10.000
+Item B Rp20.000`, 'text/plain', 'Grab <no-reply@grab.com>', 'Grab receipt');
   window.__listIds = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10'];
   window.__gmailStatus = 200;
   window.__log = []; window.__posts = []; window.__opexPosts = [];

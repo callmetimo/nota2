@@ -282,11 +282,79 @@ const EmailParser = (() => {
     return out;
   }
 
+  // ── generic receipt reader (user-defined email types) ──────────
+  // For senders Nota has no template for (Gojek, Grab, ...): finds every Rp/IDR amount, scores each
+  // by the label in front of it ("Total Bayar" up, "Subtotal"/"Diskon"/"Saldo" down) and takes the
+  // best. `opts.amountLabel` (a label the user picked in the preview) overrides the scoring.
+  // Returns null when no amount is found. `candidates` lets the UI offer the other amounts.
+  const GOOD_LABEL = [
+    [/grand total|total (bayar|pembayaran|dibayar|tagihan|belanja)|jumlah (bayar|pembayaran|dibayar)|amount paid|total paid|total charged/i, 10],
+    [/\btotal\b/i, 6],
+    [/bayar|paid|pembayaran|tagihan|amount|charged/i, 3],
+  ];
+  const BAD_LABEL = /sub ?total|diskon|discount|promo|ongkir|biaya|fee|pajak|tax|ppn|saldo|balance|cashback|potongan|voucher|kembalian|\btip\b|harga dasar|base fare/i;
+  const AMOUNT_RE = /(?:Rp\.?|IDR)\s*(\d[\d.,]*)/gi;
+  const MERCHANT_LABELS = ['Merchant', 'Merchant Name', 'Nama Merchant', 'Restoran', 'Restaurant', 'Toko', 'Store', 'Penjual',
+    'Dibayar ke', 'Paid to', 'Payment to', 'Pembayaran ke'];
+  const DATE_LABELS = ['Transaction Date', 'Tanggal Transaksi', 'Tanggal', 'Date', 'Waktu', 'Time'];
+
+  function labelKey(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
+
+  function senderName(from) {
+    const f = String(from || '');
+    const name = f.replace(/<[^>]*>/, '').replace(/["']/g, '').trim();
+    if (name && !/@/.test(name)) return name;
+    const dom = (f.match(/@([a-z0-9-]+)\./i) || [])[1];
+    return dom ? titleCase(dom) : '';
+  }
+
+  function parseGeneric(rawBody, fallbackDate, opts) {
+    opts = opts || {};
+    const body = String(rawBody || '');
+    const text = /<\s*(html|body|table|div|br|td|p)\b/i.test(body) ? htmlToText(body) : body.replace(/\r/g, '');
+    const lines = text.split('\n');
+    const found = [];
+    lines.forEach((line, i) => {
+      AMOUNT_RE.lastIndex = 0;
+      let m;
+      while ((m = AMOUNT_RE.exec(line))) {
+        const value = parseAmount(m[0]).value;
+        if (!(value > 0)) continue;
+        let label = line.slice(0, m.index).replace(/[\t:]+/g, ' ').trim();
+        // "Total\n Rp 45.000": the label sits on the previous non-blank line.
+        for (let k = i - 1; !label && k >= 0 && k >= i - 2; k--) label = lines[k].replace(/[\t:]+/g, ' ').trim();
+        let score = 0;
+        for (const [re, pts] of GOOD_LABEL) if (re.test(label)) { score = Math.max(score, pts); }
+        if (BAD_LABEL.test(label)) score -= 8;
+        found.push({ label: label.slice(0, 60), key: labelKey(label), value, score, pos: found.length });
+      }
+    });
+    if (!found.length) return null;
+    let pick = null;
+    if (opts.amountLabel) {
+      const want = labelKey(opts.amountLabel);
+      const hits = found.filter(c => c.key === want);
+      if (hits.length) pick = hits[hits.length - 1];
+    }
+    // Best score; on a tie the later one (receipts end with the total).
+    if (!pick) pick = found.reduce((a, b) => (b.score >= a.score ? b : a));
+    const seenC = new Set();
+    const candidates = found.filter(c => { const k = c.key + '|' + c.value; if (seenC.has(k)) return false; seenC.add(k); return true; })
+      .map(c => ({ label: c.label, value: c.value }));
+    const merchant = cleanMerchant(field(text, MERCHANT_LABELS)) || senderName(opts.from) || cleanMerchant(opts.subject);
+    const date = parseDate(field(text, DATE_LABELS)) || fallbackDate || '';
+    return {
+      typeId: 'custom', typeLabel: opts.name || 'Email', direction: 'expense', status: 'ok', ccy: 'IDR', nativeAmount: null,
+      date, amount: pick.value, merchant, defaultTx: merchant, sourceKey: '', ref: '',
+      amountLabel: pick.label, candidates, ambiguous: candidates.length > 1 && !opts.amountLabel && pick.score <= 0,
+    };
+  }
+
   // Bump whenever parsing improves: the importer re-reads emails it could not read under an older
   // version instead of treating them as "not a transaction" forever.
   const VERSION = 5;
 
-  return { parse, parseAmount, parseDate, sourceKey, htmlToText, field, TYPES, VERSION };
+  return { parse, parseGeneric, parseAmount, parseDate, sourceKey, htmlToText, field, TYPES, VERSION };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = EmailParser;

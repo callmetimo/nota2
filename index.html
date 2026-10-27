@@ -1261,6 +1261,60 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
   </div>
 </div>
 
+<!-- Email Import: add / edit an email type (which emails to read) -->
+<div class="modal-overlay" id="emailSrcModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="emailSrcTitle">New email type</div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input type="text" class="form-input" id="emailSrcName" maxlength="60" placeholder="e.g. Gojek receipts" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Emails from (sender)</label>
+      <input type="text" class="form-input" id="emailSrcSenders" maxlength="200" placeholder="e.g. no-reply@gojek.com or @gojek.com" autocomplete="off" autocapitalize="off">
+      <div style="font-size:11px;color:var(--text2);margin-top:5px">A full address or just a domain. Separate several with commas.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Subject contains <span style="font-weight:400;text-transform:none">(optional)</span></label>
+      <input type="text" class="form-input" id="emailSrcSubject" maxlength="200" placeholder="e.g. receipt" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Read the email as</label>
+      <select class="form-input" id="emailSrcReader" onchange="EmailImport.onSourceReaderChange()">
+        <option value="receipt">Receipt (finds the total and merchant)</option>
+        <option value="bank">Bank template (BCA / CIMB / Mandiri notices)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Record as</label>
+      <select class="form-input" id="emailSrcKind"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Transaction name</label>
+      <select class="form-input" id="emailSrcTxMode" onchange="EmailImport.onSourceReaderChange()">
+        <option value="email">Read from the email</option><option value="fixed">Fixed text</option>
+      </select>
+      <input type="text" class="form-input" id="emailSrcTxFixed" maxlength="100" placeholder="e.g. Gojek ride" autocomplete="off" style="margin-top:6px;display:none">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label class="form-label">Category</label><select class="form-input" id="emailSrcCat"></select></div>
+      <div class="form-group"><label class="form-label">Payment method</label><select class="form-input" id="emailSrcPm"></select></div>
+    </div>
+    <div id="emailSrcKindsWrap" style="display:none">
+      <label class="form-label">Kinds of transaction in these emails</label>
+      <div id="emailSrcKinds"></div>
+    </div>
+    <button class="config-add-btn" style="width:100%;text-align:center;margin:10px 0 0" onclick="EmailImport.previewSource()">Find matching emails</button>
+    <div id="emailSrcPreview" style="margin-top:10px"></div>
+    <div class="modal-actions">
+      <button class="btn-delete" id="emailSrcDeleteBtn" onclick="EmailImport.deleteSource()">Delete</button>
+      <button class="btn-delete" style="background:var(--bg3);border-color:var(--border);color:var(--text)" onclick="EmailImport.closeSource()">Cancel</button>
+      <button class="btn-save" onclick="EmailImport.saveSource()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Email Import: merchant rule editor -->
 <div class="modal-overlay" id="emailRuleModal">
   <div class="modal">
@@ -1684,8 +1738,8 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.58';
-const APP_BUILD = '2026-10-27a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
+const APP_VERSION = 'v4.59';
+const APP_BUILD = '2026-10-27b'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
 }

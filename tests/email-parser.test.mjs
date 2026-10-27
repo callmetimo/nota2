@@ -322,4 +322,45 @@ t('parseDate formats', () => {
   assert.equal(EmailParser.parseDate('nonsense'), '');
 });
 
+// ── generic receipt reader (made-up receipt text) ─────────────
+const ride = `Terima kasih sudah naik bersama kami
+Tanggal\t:\t19 Oct 2026
+Tarif dasar\tRp40.000
+Biaya layanan\tRp5.000
+Diskon\t-Rp10.000
+Subtotal\tRp35.000
+Total Bayar\tRp45.000
+Saldo GoPay\tRp120.000`;
+
+t('generic: picks the labelled total, not subtotal/discount/balance', () => {
+  const r = EmailParser.parseGeneric(ride, '2026-10-20', { from: 'Gojek <no-reply@gojek.com>', subject: 'Your receipt' });
+  assert.equal(r.amount, 45000);
+  assert.equal(r.merchant, 'Gojek');
+  assert.equal(r.date, '2026-10-19');
+  assert.equal(r.ambiguous, false);
+  assert.ok(r.candidates.length >= 5);
+});
+
+t('generic: label found on the line before the amount (HTML table)', () => {
+  const html = '<table><tr><td>Merchant</td><td>Warung Bu Tini</td></tr><tr><td>Total</td></tr><tr><td>Rp 73.500</td></tr></table>';
+  const r = EmailParser.parseGeneric(html, '2026-10-22', { from: 'GoFood <x@gojek.com>' });
+  assert.equal(r.amount, 73500);
+  assert.equal(r.merchant, 'Warung Bu Tini');
+  assert.equal(r.date, '2026-10-22');
+});
+
+t('generic: user-chosen label overrides scoring; no amount -> null; sender fallback', () => {
+  const r = EmailParser.parseGeneric(ride, '2026-10-20', { from: 'x@gojek.com', amountLabel: 'Subtotal' });
+  assert.equal(r.amount, 35000);
+  assert.equal(EmailParser.parseGeneric('Hello, no money here', '2026-10-20', {}), null);
+  const noName = EmailParser.parseGeneric('Bayar Rp 9.000', '2026-10-20', { from: 'no-reply@grab.com' });
+  assert.equal(noName.merchant, 'Grab');
+});
+
+t('generic: ambiguous when nothing looks like a total', () => {
+  const r = EmailParser.parseGeneric('Item A Rp10.000\nItem B Rp20.000', '2026-10-20', { from: 'a@b.com' });
+  assert.equal(r.ambiguous, true);
+  assert.equal(r.candidates.length, 2);
+});
+
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

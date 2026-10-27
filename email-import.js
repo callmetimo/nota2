@@ -42,6 +42,7 @@ const EmailImport = (() => {
   let pushTimer = null;
   let lastError = '';
   let editIdx = -1;              // popup item being edited
+  let editKind = 'expense';      // type chosen in the edit sheet
   let editRuleIdx = -1;          // rules[] index being edited (-1 = new)
   let editAcctIdx = -1;
   let popupWaitTimer = null;
@@ -74,6 +75,8 @@ const EmailImport = (() => {
       out.rules = c.rules.filter(r => r && r.pattern).map(r => ({
         mode: ['contains', 'equals', 'starts'].includes(r.mode) ? r.mode : 'contains',
         pattern: String(r.pattern), tx: String(r.tx || ''), cat: String(r.cat || ''),
+        type: ['expense', 'income', 'invest', 'transfer'].includes(r.type) ? r.type : '',
+        toPm: String(r.toPm || ''),
       }));
     }
     return out;
@@ -214,10 +217,15 @@ const EmailImport = (() => {
 
   // A card bill payment moves money between two of the user's own accounts: it is recorded as a
   // Transfer (From = `pm`, To = `toPm`), not as an expense with a category.
-  function isTransfer(it) { return it.direction === 'transfer'; }
+  // `it.kind` is what gets recorded (expense | income | invest | transfer). It starts as the
+  // parsed direction and the user (or a merchant rule) can change it; `it.direction` stays as
+  // parsed so duplicate detection keeps working.
+  function isTransfer(it) { return it.kind === 'transfer'; }
+  const KINDS = ['expense', 'income', 'invest', 'transfer'];
 
   function isComplete(it) {
     if (isTransfer(it)) return !!(it.pm && it.toPm && it.pm !== it.toPm && it.amount > 0 && it.date);
+    if (it.kind === 'invest') return !!(it.tx && it.pm && it.amount > 0 && it.lot > 0 && it.date);
     return !!(it.tx && it.cat && it.pm && it.amount > 0 && it.date);
   }
 
@@ -239,8 +247,11 @@ const EmailImport = (() => {
       foreign: parsed.ccy !== 'IDR' ? `${parsed.ccy} ${parsed.nativeAmount}` : '',
       targetKey: parsed.targetKey || '',
       toPm: pmValid(findAccountPm(parsed.targetKey)) ? findAccountPm(parsed.targetKey) : '',
+      kind: (rule && KINDS.includes(rule.type)) ? rule.type : parsed.direction,
+      action: parsed.direction === 'income' ? 'Sell' : 'Buy', lot: 1,
       checked: false,
     };
+    if (!it.toPm && rule && rule.toPm && pmValid(rule.toPm)) it.toPm = rule.toPm;
     it.checked = isComplete(it);
     return it;
   }
@@ -455,11 +466,14 @@ const EmailImport = (() => {
       `${n} new transaction${n !== 1 ? 's' : ''} found in your bank emails. Tap one to edit.`;
     document.getElementById('emailImportList').innerHTML = pending.map((it, i) => {
       const ok = isComplete(it);
-      const income = it.direction === 'income';
+      const income = it.kind === 'income';
       const xfer = isTransfer(it);
+      const inv = it.kind === 'invest';
       const orange = t => `<span style="color:#ff9500">${esc(t)}</span>`;
       let meta;
-      if (xfer) {
+      if (inv) {
+        meta = `${esc(it.action)} · ${it.pm ? esc(it.pm) : orange('Pick account')} · ${esc(isoDisp(it.date))}`;
+      } else if (xfer) {
         const from = it.pm ? esc(it.pm) : orange('Pick "from"');
         const to = it.toPm ? esc(it.toPm) : orange('Pick card');
         meta = `${from} → ${to} · ${esc(isoDisp(it.date))}`;
@@ -467,14 +481,14 @@ const EmailImport = (() => {
         const missing = !it.cat ? 'Pick category' : (!it.pm ? 'Pick payment method' : (!(it.amount > 0) ? 'Enter amount' : ''));
         meta = `${missing ? orange(missing) : esc(it.cat)} · ${esc(it.pm || '—')} · ${esc(isoDisp(it.date))}`;
       }
-      const amt = it.amount > 0 ? (xfer ? '' : (income ? '+' : '-')) + fRp(it.amount) : (it.foreign ? esc(it.foreign) : '—');
+      const amt = it.amount > 0 ? ((xfer || inv) ? '' : (income ? '+' : '-')) + fRp(it.amount) : (it.foreign ? esc(it.foreign) : '—');
       return `<div class="recurring-prompt-item" ${ok ? '' : 'style="border-left:2px solid #ff9500;padding-left:8px"'}>
         <input class="recurring-prompt-check" type="checkbox" data-eidx="${i}" ${it.checked && ok ? 'checked' : ''} ${ok ? '' : 'disabled'} onchange="EmailImport.onCheck(${i}, this.checked)">
         <div class="recurring-prompt-info" onclick="EmailImport.openEdit(${i})" style="cursor:pointer">
-          <div class="recurring-prompt-tx">${xfer ? '🔁 Transfer · ' : ''}${esc(it.tx)}</div>
+          <div class="recurring-prompt-tx">${xfer ? '🔁 Transfer · ' : (inv ? '📈 Invest · ' : '')}${esc(it.tx)}</div>
           <div class="recurring-prompt-meta">${meta}</div>
         </div>
-        <div class="recurring-prompt-amt" style="color:${xfer ? '#a78bfa' : (income ? 'var(--green)' : 'var(--text)')}">${amt}</div>
+        <div class="recurring-prompt-amt" style="color:${xfer ? '#a78bfa' : (inv ? 'var(--blue)' : (income ? 'var(--green)' : 'var(--text)'))}">${amt}</div>
       </div>`;
     }).join('');
     updateAddBtn();
@@ -511,10 +525,12 @@ const EmailImport = (() => {
     btn.disabled = true;
     const promises = chosen.map(it => isTransfer(it)
       ? addAndSyncTransfer(it)
-      : _addAndSyncRecurringRule({
-        _date: it.date, tx: it.tx, amount: it.amount, cat: it.cat, pm: it.pm, notes: it.notes,
-        type: it.direction === 'income' ? 'income' : 'expense',
-      }));
+      : it.kind === 'invest'
+        ? addAndSyncInvest(it)
+        : _addAndSyncRecurringRule({
+          _date: it.date, tx: it.tx, amount: it.amount, cat: it.cat, pm: it.pm, notes: it.notes,
+          type: it.kind === 'income' ? 'income' : 'expense',
+        }));
     markSeen(...chosen.flatMap(seenKeys));
     const done = new Set(chosen);
     pending = pending.filter(it => !done.has(it));
@@ -554,6 +570,27 @@ const EmailImport = (() => {
     });
   }
 
+  // Same local-first path as submitInvest() (index.html). The email gives only a total, so
+  // price per unit = total / lot; totalIdr is the exact email amount.
+  function addAndSyncInvest(it) {
+    const lot = it.lot > 0 ? it.lot : 1;
+    const r = { id: Date.now() + Math.random(), date: it.date, stock: it.tx, account: it.pm, action: it.action,
+      lot, price: it.amount / lot, totalIdr: it.amount, type: 'invest', synced: false };
+    investHistory.unshift(r);
+    queue.push({ ...r });
+    saveLocal(); updateStatus();
+    buildAccountBalances();
+    renderAccountBalanceCards();
+    return syncInvest(r).then(ok => {
+      if (!ok) return;
+      queue = queue.filter(q => q.id !== r.id);
+      investHistory = investHistory.map(h => h.id === r.id ? { ...h, synced: true } : h);
+      saveLocal(); updateStatus();
+      localStorage.removeItem(curMonthCacheKey());
+      return fetchLiveInvest().then(() => buildAccountBalances()).catch(() => {});
+    });
+  }
+
   // ── edit one suggested transaction ────────────────────────
   function optionsHtml(list, selected, placeholder) {
     return `<option value="">${esc(placeholder)}</option>` +
@@ -573,35 +610,54 @@ const EmailImport = (() => {
     editIdx = i;
     document.getElementById('emailEditSubtitle').textContent =
       `From email: ${it.merchant || it.typeLabel} · ${it.typeLabel} · ${isoDisp(it.date)}`;
-    const xfer = isTransfer(it);
-    // A transfer has no name/category, and "payment method" becomes From + To.
-    document.getElementById('emailEditTxWrap').style.display = xfer ? 'none' : '';
-    document.getElementById('emailEditCatWrap').style.display = xfer ? 'none' : '';
-    document.getElementById('emailEditToWrap').style.display = xfer ? '' : 'none';
-    document.getElementById('emailEditPmLabel').textContent = xfer ? 'From' : 'Payment Method';
+    editKind = it.kind;
     document.getElementById('emailEditToPm').innerHTML = optionsHtml(allPMs, it.toPm, 'Pick the card / account');
-    document.querySelector('#emailEditModal .modal-title').textContent = xfer ? 'Edit transfer' : 'Edit before adding';
     document.getElementById('emailEditTx').value = it.tx;
     document.getElementById('emailEditCat').innerHTML = optionsHtml(allCategories, it.cat, 'Pick a category');
-    document.getElementById('emailEditPm').innerHTML = optionsHtml(allPMs, it.pm, xfer ? 'Pick the paying account' : 'Pick a payment method');
+    document.getElementById('emailEditPm').innerHTML = optionsHtml(allPMs, it.pm, 'Pick a payment method');
     document.getElementById('emailEditAmount').value = it.amount > 0 ? String(it.amount) : '';
     document.getElementById('emailEditAmount').placeholder = it.foreign ? `${it.foreign} → enter Rp` : '0';
     document.getElementById('emailEditDate').value = it.date || '';
-    const remember = document.getElementById('emailEditRemember');
-    remember.checked = true;
+    document.getElementById('emailEditAction').value = it.action;
+    document.getElementById('emailEditLot').value = it.lot > 0 ? String(it.lot) : '1';
+    document.getElementById('emailEditRemember').checked = true;
     document.getElementById('emailEditPattern').value = suggestPattern(it.merchant);
-    document.getElementById('emailEditRememberHint').textContent = xfer
-      ? `Links ${it.sourceKey || 'the paying account'} → From and ${it.targetKey || 'the card'} → To.`
-      : (it.sourceKey ? `Also links ${it.sourceKey} to the payment method above.` : '');
-    onRememberToggle();
+    applyEditKind();
     document.getElementById('emailEditModal').classList.add('open');
+  }
+
+  // Shows the fields that belong to the chosen type. Values already typed are kept.
+  function setEditKind(k) {
+    if (!KINDS.includes(k) || k === editKind) return;
+    // Sell for money-in emails, Buy otherwise — only a default, the user can change it.
+    if (k === 'invest') document.getElementById('emailEditAction').value = pending[editIdx]?.direction === 'income' ? 'Sell' : 'Buy';
+    editKind = k;
+    applyEditKind();
+  }
+
+  function applyEditKind() {
+    const it = pending[editIdx];
+    const k = editKind, xfer = k === 'transfer', inv = k === 'invest';
+    document.querySelectorAll('#emailEditKind [data-kind]').forEach(el => el.classList.toggle('selected', el.dataset.kind === k));
+    document.getElementById('emailEditTxWrap').style.display = xfer ? 'none' : '';
+    document.getElementById('emailEditTxLabel').textContent = inv ? 'Asset' : 'Transaction';
+    document.getElementById('emailEditCatWrap').style.display = (xfer || inv) ? 'none' : '';
+    document.getElementById('emailEditToWrap').style.display = xfer ? '' : 'none';
+    document.getElementById('emailEditInvestWrap').style.display = inv ? 'grid' : 'none';
+    document.getElementById('emailEditPmLabel').textContent = xfer ? 'From' : (inv ? 'Account' : 'Payment Method');
+    document.querySelector('#emailEditModal .modal-title').textContent = xfer ? 'Edit transfer' : 'Edit before adding';
+    document.getElementById('emailEditAmount').previousElementSibling.textContent = inv ? 'Total (Rp)' : 'Amount (Rp)';
+    document.getElementById('emailEditRememberHint').textContent = xfer
+      ? (it.targetKey ? `Links ${it.sourceKey || 'the paying account'} → From and ${it.targetKey} → To.` : 'Also remembers the type and the To account for this merchant.')
+      : (it.sourceKey ? `Also links ${it.sourceKey} to the account above.` : '');
+    onRememberToggle();
   }
 
   function onRememberToggle() {
     const on = document.getElementById('emailEditRemember').checked;
-    const xfer = pending[editIdx] && isTransfer(pending[editIdx]);
-    // Transfers have no merchant to match: "remember" only saves the account/card links.
-    document.getElementById('emailEditPatternWrap').style.display = on && !xfer ? 'block' : 'none';
+    const it = pending[editIdx];
+    // A card bill payment has no merchant to match: "remember" only saves the account/card links.
+    document.getElementById('emailEditPatternWrap').style.display = on && it && it.direction !== 'transfer' ? 'block' : 'none';
   }
 
   function rememberAccount(key, pm) {
@@ -620,20 +676,27 @@ const EmailImport = (() => {
   function saveEdit() {
     const it = pending[editIdx];
     if (!it) { closeEdit(); return; }
-    if (isTransfer(it)) {
-      const from = document.getElementById('emailEditPm').value;
+    const kind = editKind;
+    const remember = document.getElementById('emailEditRemember').checked;
+    const pattern = document.getElementById('emailEditPattern').value.trim();
+    // Only carry the name into the rule if the user actually changed it — otherwise a broad
+    // match text like "WARUNG" would rename every merchant containing it.
+    const ruleBase = tx => ({ mode: 'contains', pattern, tx: tx === it.defaultTx ? '' : tx, type: kind === it.direction ? '' : kind });
+    const amount = parseAmountInput(document.getElementById('emailEditAmount').value);
+    const date = document.getElementById('emailEditDate').value;
+    const pm = document.getElementById('emailEditPm').value;
+    if (kind === 'transfer') {
       const to = document.getElementById('emailEditToPm').value;
-      const amt = parseAmountInput(document.getElementById('emailEditAmount').value);
-      const dt = document.getElementById('emailEditDate').value;
-      if (!from) { showToast('Pick the paying account', 'error'); return; }
+      if (!pm) { showToast('Pick the paying account', 'error'); return; }
       if (!to) { showToast('Pick the card / account being paid', 'error'); return; }
-      if (from === to) { showToast('From and To must be different', 'error'); return; }
-      if (!(amt > 0)) { showToast('Enter an amount', 'error'); return; }
-      if (!dt) { showToast('Pick a date', 'error'); return; }
-      Object.assign(it, { pm: from, toPm: to, amount: amt, date: dt, checked: true });
-      if (document.getElementById('emailEditRemember').checked) {
-        rememberAccount(it.sourceKey, from);
+      if (pm === to) { showToast('From and To must be different', 'error'); return; }
+      if (!(amount > 0)) { showToast('Enter an amount', 'error'); return; }
+      if (!date) { showToast('Pick a date', 'error'); return; }
+      Object.assign(it, { kind, pm, toPm: to, amount, date, checked: true });
+      if (remember) {
+        rememberAccount(it.sourceKey, pm);
         rememberAccount(it.targetKey, to);
+        if (it.direction !== 'transfer' && pattern) upsertRule({ ...ruleBase(''), cat: '', toPm: to });
         save();
         reapplyToPending(it);
       }
@@ -642,24 +705,20 @@ const EmailImport = (() => {
     }
     const tx = document.getElementById('emailEditTx').value.trim();
     const cat = document.getElementById('emailEditCat').value;
-    const pm = document.getElementById('emailEditPm').value;
-    const amount = parseAmountInput(document.getElementById('emailEditAmount').value);
-    const date = document.getElementById('emailEditDate').value;
-    if (!tx) { showToast('Enter a transaction name', 'error'); return; }
-    if (!cat) { showToast('Pick a category', 'error'); return; }
-    if (!pm) { showToast('Pick a payment method', 'error'); return; }
+    const inv = kind === 'invest';
+    const lot = Number(String(document.getElementById('emailEditLot').value).replace(',', '.')) || 0;
+    if (!tx) { showToast(inv ? 'Enter the asset' : 'Enter a transaction name', 'error'); return; }
+    if (!inv && !cat) { showToast('Pick a category', 'error'); return; }
+    if (!pm) { showToast(inv ? 'Pick an account' : 'Pick a payment method', 'error'); return; }
+    if (inv && !(lot > 0)) { showToast('Enter lot / units', 'error'); return; }
     if (!(amount > 0)) { showToast('Enter an amount', 'error'); return; }
     if (!date) { showToast('Pick a date', 'error'); return; }
-    Object.assign(it, { tx, cat, pm, amount, date });
-    it.checked = true;
-    if (document.getElementById('emailEditRemember').checked) {
-      const pattern = document.getElementById('emailEditPattern').value.trim();
-      // Only carry the name into the rule if the user actually changed it — otherwise a broad
-      // match text like "WARUNG" would rename every merchant containing it.
-      if (pattern) upsertRule({ mode: 'contains', pattern, tx: tx === it.defaultTx ? '' : tx, cat });
-      if (it.sourceKey && !config.accounts.some(a => a.key.replace(/x/gi, '*') === it.sourceKey)) {
-        config.accounts.push({ key: it.sourceKey, pm });
-      }
+    Object.assign(it, { kind, tx, pm, amount, date, checked: true });
+    if (inv) Object.assign(it, { lot, action: document.getElementById('emailEditAction').value });
+    else it.cat = cat;
+    if (remember) {
+      if (pattern) upsertRule({ ...ruleBase(tx), cat: inv ? '' : cat });
+      rememberAccount(it.sourceKey, pm);
       save();
       reapplyToPending(it);
     }
@@ -677,7 +736,7 @@ const EmailImport = (() => {
         const pm = findAccountPm(o.sourceKey);
         if (pm && allPMs.includes(pm)) o.pm = pm;
       }
-      if (isTransfer(o)) {
+      if (o.direction === 'transfer') {   // card bill payment: no merchant rules
         if (!o.toPm) {
           const to = findAccountPm(o.targetKey);
           if (to && allPMs.includes(to)) o.toPm = to;
@@ -685,11 +744,13 @@ const EmailImport = (() => {
         if (isComplete(o)) o.checked = true;
         return;
       }
-      if (!o.cat) {
+      if (!isComplete(o)) {
         const rule = config.rules.find(r => ruleMatches(r, o.merchant));
-        if (rule && allCategories.includes(rule.cat)) {
-          o.cat = rule.cat;
+        if (rule) {
+          if (KINDS.includes(rule.type)) o.kind = rule.type;
           if (rule.tx) o.tx = rule.tx;
+          if (!o.cat && rule.cat && allCategories.includes(rule.cat)) o.cat = rule.cat;
+          if (!o.toPm && rule.toPm && allPMs.includes(rule.toPm)) o.toPm = rule.toPm;
         }
       }
       if (isComplete(o)) o.checked = true;
@@ -712,6 +773,13 @@ const EmailImport = (() => {
   }
 
   const MODE_LABEL = { contains: 'contains', equals: 'equals', starts: 'starts with' };
+  const KIND_LABEL = { expense: 'Expense', income: 'Income', invest: 'Invest', transfer: 'Transfer' };
+  function ruleSummary(r) {
+    const t = KIND_LABEL[r.type];
+    if (r.type === 'transfer') return `${t} → ${r.toPm || 'no account'}`;
+    if (r.type === 'invest') return t;
+    return (t ? t + ' · ' : '') + (r.cat || 'no category');
+  }
 
   function renderPage() {
     const el = document.getElementById('emailImportContainer');
@@ -773,7 +841,7 @@ const EmailImport = (() => {
     // Rules
     h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 8px"><span class="form-label" style="margin:0">Merchant rules</span><button class="config-add-btn" onclick="EmailImport.openRule(-1)">+ Add</button></div>`;
     h += config.rules.length ? config.rules.map((r, i) => `<div class="config-row" onclick="EmailImport.openRule(${i})">
-      <div><div class="config-row-name">${esc(r.pattern)}</div><div class="config-row-meta">${esc(MODE_LABEL[r.mode])}${r.tx ? ' → ' + esc(r.tx) : ''} · ${esc(r.cat || 'no category')}</div></div><span class="config-row-meta">›</span></div>`).join('')
+      <div><div class="config-row-name">${esc(r.pattern)}</div><div class="config-row-meta">${esc(MODE_LABEL[r.mode])}${r.tx ? ' → ' + esc(r.tx) : ''} · ${esc(ruleSummary(r))}</div></div><span class="config-row-meta">›</span></div>`).join('')
       : `<p style="font-size:12px;color:var(--text3);padding:4px 4px 0">None yet. Fix a transaction in the popup with "Remember" on and it appears here.</p>`;
     h += `<div style="height:24px"></div>`;
     el.innerHTML = h;
@@ -821,22 +889,40 @@ const EmailImport = (() => {
   // rule editor
   function openRule(i) {
     editRuleIdx = i;
-    const r = i >= 0 ? config.rules[i] : { mode: 'contains', pattern: '', tx: '', cat: '' };
+    const r = i >= 0 ? config.rules[i] : { mode: 'contains', pattern: '', tx: '', cat: '', type: '', toPm: '' };
     document.getElementById('emailRuleTitle').textContent = i >= 0 ? 'Edit rule' : 'New rule';
     document.getElementById('emailRuleMode').value = r.mode;
     document.getElementById('emailRulePattern').value = r.pattern;
+    document.getElementById('emailRuleType').value = KINDS.includes(r.type) ? r.type : '';
     document.getElementById('emailRuleTx').value = r.tx;
     document.getElementById('emailRuleCat').innerHTML = optionsHtml(allCategories, r.cat, 'Pick a category');
+    document.getElementById('emailRuleToPm').innerHTML = optionsHtml(allPMs, r.toPm || '', 'Pick the card / account');
     document.getElementById('emailRuleDeleteBtn').style.display = i >= 0 ? '' : 'none';
+    onRuleTypeChange();
     document.getElementById('emailRuleModal').classList.add('open');
+  }
+  function onRuleTypeChange() {
+    const t = document.getElementById('emailRuleType').value;
+    document.getElementById('emailRuleCatWrap').style.display = (t === 'invest' || t === 'transfer') ? 'none' : '';
+    document.getElementById('emailRuleToWrap').style.display = t === 'transfer' ? '' : 'none';
+    document.getElementById('emailRuleTxLabel').innerHTML = t === 'invest'
+      ? 'Then asset <span style="font-weight:400;text-transform:none">(optional)</span>'
+      : 'Then transaction name <span style="font-weight:400;text-transform:none">(optional)</span>';
+    document.getElementById('emailRuleTx').closest('.form-group').style.display = t === 'transfer' ? 'none' : '';
   }
   function closeRule() { document.getElementById('emailRuleModal').classList.remove('open'); editRuleIdx = -1; }
   function saveRule() {
     const pattern = document.getElementById('emailRulePattern').value.trim();
     const cat = document.getElementById('emailRuleCat').value;
     if (!pattern) { showToast('Enter the merchant text to match', 'error'); return; }
-    if (!cat) { showToast('Pick a category', 'error'); return; }
-    const rule = { mode: document.getElementById('emailRuleMode').value, pattern, tx: document.getElementById('emailRuleTx').value.trim(), cat };
+    const type = document.getElementById('emailRuleType').value;
+    const toPm = document.getElementById('emailRuleToPm').value;
+    if (type === 'transfer') {
+      if (!toPm) { showToast('Pick the card / account the money goes to', 'error'); return; }
+    } else if (type !== 'invest' && !cat) { showToast('Pick a category', 'error'); return; }
+    const rule = { mode: document.getElementById('emailRuleMode').value, pattern, type,
+      tx: type === 'transfer' ? '' : document.getElementById('emailRuleTx').value.trim(),
+      cat: (type === 'invest' || type === 'transfer') ? '' : cat, toPm: type === 'transfer' ? toPm : '' };
     if (editRuleIdx >= 0) config.rules[editRuleIdx] = rule; else config.rules.push(rule);
     save(); closeRule(); renderPage();
   }
@@ -893,7 +979,7 @@ const EmailImport = (() => {
   return {
     init, check, onToggle, connect, checkNow, reopenPopup, onPageOpen, renderPage,
     copyUnreadable, copyReport, onCheck, closePopup, skipAll, addSelected, openEdit, closeEdit, saveEdit, onRememberToggle,
-    setType, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
+    setType, setEditKind, onRuleTypeChange, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
     _internals,
   };
 })();

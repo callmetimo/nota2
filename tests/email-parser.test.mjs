@@ -357,6 +357,15 @@ t('generic: user-chosen label overrides scoring; no amount -> null; sender fallb
   assert.equal(noName.merchant, 'Grab');
 });
 
+t('guessKeyword: names the kind of email, not the direction or purchase category', () => {
+  assert.equal(EmailParser.guessKeyword(qris), 'QRIS Payment');
+  assert.equal(EmailParser.guessKeyword('Transaction Type\t:\tCredit\nAmount\t:\tIDR 1,000.00'), '');
+  assert.equal(EmailParser.guessKeyword('Jenis Transaksi\t: \tE-COMMERCE\nSejumlah\t:\tRp1.000,00'), '');
+  assert.equal(EmailParser.guessKeyword('no label here'), '');
+  assert.equal(EmailParser.senderName('Gojek <no-reply@gojek.com>'), 'Gojek');
+  assert.equal(EmailParser.senderName('bca@bca.co.id'), 'Bca');
+});
+
 t('generic: ambiguous when nothing looks like a total', () => {
   const r = EmailParser.parseGeneric('Item A Rp10.000\nItem B Rp20.000', '2026-10-20', { from: 'a@b.com' });
   assert.equal(r.ambiguous, true);

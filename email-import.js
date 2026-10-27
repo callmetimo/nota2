@@ -24,28 +24,38 @@ const EmailImport = (() => {
   const MAX_FETCH = 60;
 
   // Which emails to read is the user's setting: a list of "email types" (config.sources), each a
-  // sender + optional subject text and a reader. The built-in bank ones below are only the starting
-  // list for a new user — they can be edited or deleted like any other. reader 'bank' = the
-  // templates in email-parser.js; 'receipt' = the generic amount/merchant reader.
-  // `kinds` = the transaction kinds a bank email can turn out to be (Ask me / Ignore each).
+  // sender + optional subject / keyword and a reader. A new user starts with none and adds them by
+  // picking an email (openPick) or scanning the mailbox (openScan). reader 'bank' = the templates in
+  // email-parser.js; 'receipt' = the generic amount/merchant reader.
   const READERS = ['bank', 'receipt'];
   const KIND_IDS = ['expense', 'income', 'invest', 'transfer'];
+  // Only used to migrate people who already had Email Import before the list became editable (a new
+  // user starts with an empty list). One type per kind of bank email; sender + a word inside the
+  // email tell them apart, and the last BCA one (no keyword) catches the rest. Order matters.
   function defaultSources() {
-    const mk = (id, name, senders, kinds) => ({ id, name, senders, subject: '', reader: 'bank', action: 'ask',
-      kind: '', txMode: 'email', txFixed: '', cat: '', pm: '', amountLabel: '', builtin: true, kinds });
+    const mk = (id, name, senders, keyword) => ({ id, name, senders, subject: '', keyword: keyword || '', reader: 'bank',
+      action: 'ask', kind: '', txMode: 'email', txFixed: '', cat: '', pm: '', amountLabel: '' });
     return [
-      mk('bca-journal', 'BCA transaction journal', 'bca@bca.co.id', ['qris', 'flazz', 'transfer', 'ccbill', 'other']),
-      mk('bca-card', 'BCA credit card notice', 'kartukreditbca@bca.co.id', ['cc', 'ccrefund']),
-      mk('cimb-bifast', 'CIMB incoming BI-FAST', 'BIFAST.NOREPLY@cimbniaga.co.id', ['bifast']),
-      mk('mandiri-cm', 'Mandiri BI-FAST (Cash Management)', 'mcm@bankmandiri.co.id', ['bifast']),
+      mk('bca-qris', 'BCA - QRIS', 'bca@bca.co.id', 'QRIS'),
+      mk('bca-flazz', 'BCA - Flazz', 'bca@bca.co.id', 'Flazz'),
+      mk('bca-ccpay', 'BCA - CC payment', 'bca@bca.co.id', 'Paylater, Kartu Kredit'),
+      mk('bca-other', 'BCA - other bank transaction', 'bca@bca.co.id', ''),
+      mk('bca-ccnotice', 'BCA - CC notice', 'kartukreditbca@bca.co.id', ''),
+      mk('cimb-bifast', 'CIMB - BI Fast', 'BIFAST.NOREPLY@cimbniaga.co.id', ''),
+      mk('mandiri-bifast', 'Mandiri - BI Fast', 'mcm@bankmandiri.co.id', ''),
     ];
   }
   const tokens = s => String(s || '').split(/[,;\n]+/).map(x => x.trim()).filter(Boolean);
+  const plainText = body => /<\s*(html|body|table|div|br|td|p)\b/i.test(body) ? EmailParser.htmlToText(body) : String(body || '');
 
-  // Gmail search for every active source: (from:(a OR b) subject:("x")) OR (...). Sender and subject
-  // narrow each other when both are given.
+  // Gmail search for the user's email types: (from:(a OR b) subject:("x")) OR (...). Sender and
+  // subject narrow each other when both are given. The keyword (text inside the email) is checked
+  // after fetching. Types set to Ignore are still searched so their emails are recognised and
+  // skipped, not handed to a broader type.
   function buildQuery(sources) {
-    const parts = (sources || config.sources).filter(s => s.action !== 'ignore').map(s => {
+    const all = sources || config.sources;
+    if (!all.some(s => s.action !== 'ignore')) return '';
+    const parts = all.map(s => {
       const f = tokens(s.senders), j = tokens(s.subject);
       const bits = [];
       if (f.length) bits.push(`from:(${f.join(' OR ')})`);
@@ -56,12 +66,19 @@ const EmailImport = (() => {
   }
 
   // First source whose sender and subject both match this message (Gmail's own search is looser).
-  function sourceFor(from, subject, sources) {
-    const f = String(from || '').toLowerCase(), j = String(subject || '').toLowerCase();
-    return (sources || config.sources).find(s => s.action !== 'ignore'
-      && (!tokens(s.senders).length || tokens(s.senders).some(t => f.includes(t.toLowerCase())))
+  // First type (in list order) whose sender, subject and keyword all match. `text` is the email
+  // body as plain text. Ignored types still match, so they swallow their emails.
+  function sourceFor(from, subject, text, sources) {
+    const j = String(subject || '').toLowerCase(), b = String(text || '').toLowerCase();
+    const addr = String(from || '').toLowerCase().replace(/^.*</, '').replace(/>.*$/, '').trim();
+    // A full address must match exactly (bca@bca.co.id is not kartukreditbca@bca.co.id); "@domain"
+    // matches the domain; a bare word matches anywhere in the sender.
+    const senderOk = t => { t = t.toLowerCase(); return t.includes('@') ? (t.startsWith('@') ? addr.endsWith(t) : addr === t) : String(from || '').toLowerCase().includes(t); };
+    return (sources || config.sources).find(s =>
+      (tokens(s.senders).length || tokens(s.subject).length || tokens(s.keyword).length)
+      && (!tokens(s.senders).length || tokens(s.senders).some(senderOk))
       && (!tokens(s.subject).length || tokens(s.subject).some(t => j.includes(t.toLowerCase())))
-      && (tokens(s.senders).length || tokens(s.subject).length)) || null;
+      && (!tokens(s.keyword).length || tokens(s.keyword).some(t => b.includes(t.toLowerCase())))) || null;
   }
 
   // Reads one email with a source's reader. Returns the parsed object or null (unreadable).
@@ -74,7 +91,7 @@ const EmailImport = (() => {
     return EmailParser.parse(body, fallbackDate, subject);
   }
 
-  let config = { types: {}, accounts: [], rules: [], sources: defaultSources() };
+  let config = { types: {}, accounts: [], rules: [], sources: [] };
   let seen = [];                 // newest last
   let seenSet = new Set();
   let dirty = false;
@@ -107,22 +124,38 @@ const EmailImport = (() => {
 
   function normalizeConfig(c) {
     const out = { types: {}, accounts: [], rules: [], sources: [] };
-    // No list saved yet (existing users, new users): start from the built-in bank types. A saved
-    // empty list means the user deleted them all and stays empty.
-    if (Array.isArray(c.sources)) {
-      out.sources = c.sources.filter(s => s && s.id).map(s => ({
-        id: String(s.id), name: String(s.name || 'Email type').slice(0, 60),
-        senders: String(s.senders || ''), subject: String(s.subject || ''),
-        reader: READERS.includes(s.reader) ? s.reader : 'receipt', action: s.action === 'ignore' ? 'ignore' : 'ask',
-        kind: KIND_IDS.includes(s.kind) ? s.kind : '', txMode: s.txMode === 'fixed' ? 'fixed' : 'email',
-        txFixed: String(s.txFixed || ''), cat: String(s.cat || ''), pm: String(s.pm || ''),
-        amountLabel: String(s.amountLabel || ''), builtin: !!s.builtin,
-        kinds: Array.isArray(s.kinds) ? s.kinds.map(String) : [],
-      }));
-    } else out.sources = defaultSources();
     if (c.types && typeof c.types === 'object') {
       Object.keys(c.types).forEach(k => { if (c.types[k] === 'ask' || c.types[k] === 'ignore') out.types[k] = c.types[k]; });
     }
+    const cleanSource = s => ({
+      id: String(s.id), name: String(s.name || 'Email type').slice(0, 60),
+      senders: String(s.senders || ''), subject: String(s.subject || ''), keyword: String(s.keyword || ''),
+      reader: READERS.includes(s.reader) ? s.reader : 'receipt', action: s.action === 'ignore' ? 'ignore' : 'ask',
+      kind: KIND_IDS.includes(s.kind) ? s.kind : '', txMode: s.txMode === 'fixed' ? 'fixed' : 'email',
+      txFixed: String(s.txFixed || ''), cat: String(s.cat || ''), pm: String(s.pm || ''),
+      amountLabel: String(s.amountLabel || ''),
+    });
+    const list = Array.isArray(c.sources) ? c.sources.filter(s => s && s.id) : null;
+    const hadAnything = (c.rules && c.rules.length) || (c.accounts && c.accounts.length) || Object.keys(out.types).length;
+    if (list && list.some(s => ['bca-journal', 'bca-card', 'mandiri-cm'].includes(s.id) || (Array.isArray(s.kinds) && s.kinds.length))) {
+      // v4.59 shape (4 bank types with the kinds nested inside): split into one type per kind,
+      // carrying over each Ask/Ignore choice. Types the user added themselves are kept.
+      const old = id => list.find(s => s.id === id) || {};
+      const t = out.types;
+      const ign = (...flags) => flags.some(f => f === 'ignore');
+      const act = { 'bca-qris': ign(old('bca-journal').action, t.qris), 'bca-flazz': ign(old('bca-journal').action, t.flazz),
+        'bca-ccpay': ign(old('bca-journal').action, t.ccbill),
+        'bca-other': ign(old('bca-journal').action) || (t.other === 'ignore' && t.transfer === 'ignore'),
+        'bca-ccnotice': ign(old('bca-card').action) || (t.cc === 'ignore' && t.ccrefund === 'ignore'),
+        'cimb-bifast': ign(old('cimb-bifast').action, t.bifast), 'mandiri-bifast': ign(old('mandiri-cm').action, t.bifast) };
+      out.sources = defaultSources().map(d => ({ ...d, action: act[d.id] ? 'ignore' : 'ask' }))
+        .concat(list.filter(s => !s.builtin).map(cleanSource));
+    } else if (list) {
+      out.sources = list.map(cleanSource);
+    } else if (hadAnything) {
+      // Used Email Import before the list was editable: start from the bank types they had.
+      out.sources = defaultSources().map(d => ({ ...d, action: 'ask' }));
+    }   // else: a new user starts with an empty list
     if (Array.isArray(c.accounts)) {
       out.accounts = c.accounts.filter(a => a && a.key && a.pm).map(a => ({ key: String(a.key), pm: String(a.pm) }));
     }
@@ -247,12 +280,6 @@ const EmailImport = (() => {
     return t.includes(p);
   }
 
-  function typeAction(typeId) {
-    if (config.types[typeId]) return config.types[typeId];
-    const t = EmailParser.TYPES.find(x => x.id === typeId);
-    return t ? t.defaultAction : 'ask';
-  }
-
   function findAccountPm(sourceKey) {
     if (!sourceKey) return '';
     const k = sourceKey.replace(/x/gi, '*');
@@ -364,8 +391,7 @@ const EmailImport = (() => {
       lines.push(`Nota ${typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?'} · parser v${EmailParser.VERSION}`);
       lines.push(`Gmail account Nota reads: ${profile.emailAddress}`);
       lines.push(`Query: ${q}`);
-      lines.push(`Email types: ${config.sources.map(s => `${s.name}[${s.reader},${s.action}] from=${s.senders || '-'} subject=${s.subject || '-'}`).join(' ; ')}`);
-      lines.push(`Kinds: ${EmailParser.TYPES.map(t => `${t.id}=${typeAction(t.id)}`).join(', ')}`);
+      lines.push(`Email types: ${config.sources.map(s => `${s.name}[${s.reader},${s.action}] from=${s.senders || '-'} subject=${s.subject || '-'} keyword=${s.keyword || '-'}`).join(' ; ')}`);
       lines.push(`Seen entries: g=${seen.filter(s => s[0] === 'g').length} i=${seen.filter(s => s[0] === 'i').length} u=${seen.filter(s => s[0] === 'u').length} r=${seen.filter(s => s[0] === 'r').length} s=${seen.filter(s => s[0] === 's').length}; waiting=${pending.length}`);
       const list = await gmailFetch('/messages?maxResults=100&q=' + encodeURIComponent(q));
       const ids = (list.messages || []).map(m => m.id);
@@ -459,14 +485,14 @@ const EmailImport = (() => {
           catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; } // transient: retry next check
           const body = messageBody(msg);
           const from = headerOf(msg, 'from'), subject = headerOf(msg, 'subject');
-          const src = sourceFor(from, subject);
+          const src = sourceFor(from, subject, plainText(body));
           if (!src) { markSeen('i:' + id); continue; }   // Gmail's search matched loosely; not one of the user's types
+          // Ignored by the user's own setting: remembered separately (`i:`) so that switching the type
+          // back to "Ask me" brings these emails back (setSourceAction() clears every `i:` entry).
+          if (src.action === 'ignore') { markSeen('i:' + id); continue; }
           const parsed = readWith(src, body, localISO(Number(msg.internalDate) || Date.now()), subject, from);
           if (!parsed) { markSeen(unrKey(id)); unreadable++; rememberUnreadable(msg, body); continue; }
           if (parsed.status === 'failed') { markSeen('g:' + id, parsed.ref && 'r:' + parsed.ref); continue; }
-          // Ignored by the user's own setting: remembered separately (`i:`) so that switching the type
-          // back to "Ask me" brings these emails back (setType() clears every `i:` entry).
-          if (src.reader === 'bank' && typeAction(parsed.typeId) === 'ignore') { markSeen('i:' + id); continue; }
           if (parsed.ref && seenSet.has('r:' + parsed.ref)) { markSeen('g:' + id); continue; }
           found.push(buildItem(parsed, id, src));
         }
@@ -891,21 +917,21 @@ const EmailImport = (() => {
     ${gm ? `<button class="config-add-btn" style="padding:0 4px 14px;color:var(--text2)" onclick="EmailImport.check({force:true, days:30})">Look back 30 days for older emails</button>` : ''}`;
 
     // Email types
-    h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><span class="form-label" style="margin:0">Email types</span><button class="config-add-btn" onclick="EmailImport.openSource(-1)">+ Add</button></div>`;
+    h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><span class="form-label" style="margin:0">Email types</span><button class="config-add-btn" onclick="EmailImport.openPick()">+ Add</button></div>`;
     h += config.sources.length ? config.sources.map((s, i) => {
-      const where = [tokens(s.senders).length ? 'from ' + tokens(s.senders).join(', ') : '', tokens(s.subject).length ? 'subject: ' + tokens(s.subject).join(', ') : ''].filter(Boolean).join(' · ');
-      const what = s.reader === 'bank' ? 'bank template' : ((KIND_LABEL[s.kind] || 'Expense') + (s.cat ? ' · ' + s.cat : ''));
+      const where = [tokens(s.senders).length ? 'from ' + tokens(s.senders).join(', ') : '', tokens(s.subject).length ? 'subject: ' + tokens(s.subject).join(', ') : '',
+        tokens(s.keyword).length ? 'contains: ' + tokens(s.keyword).join(', ') : ''].filter(Boolean).join(' · ');
+      const what = s.reader === 'bank' ? '' : ' · ' + (KIND_LABEL[s.kind] || 'Expense') + (s.cat ? ' · ' + s.cat : '');
       return `<div class="config-row" onclick="EmailImport.openSource(${i})">
-        <div style="min-width:0"><div class="config-row-name">${esc(s.name)}${s.builtin ? '' : ' <span style="font-size:9px;padding:2px 6px;border-radius:10px;background:rgba(96,160,240,.15);color:var(--blue);vertical-align:middle">YOURS</span>'}</div>
-        <div class="config-row-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(where || 'no sender set')} · ${esc(what)}</div></div>
+        <div style="min-width:0"><div class="config-row-name">${esc(s.name)}</div>
+        <div class="config-row-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(where || 'no sender set')}${esc(what)}</div></div>
         <div class="pill-toggle" style="display:flex;gap:4px;flex-shrink:0;white-space:nowrap" onclick="event.stopPropagation()">
           <span class="smart-pill ${s.action === 'ask' ? 'selected' : ''}" onclick="EmailImport.setSourceAction(${i},'ask')">Ask me</span>
           <span class="smart-pill ${s.action === 'ignore' ? 'selected' : ''}" onclick="EmailImport.setSourceAction(${i},'ignore')">Ignore</span>
         </div></div>`;
-    }).join('') : `<p style="font-size:12px;color:var(--text3);padding:4px 4px 0">No email types. Nothing is read until you add one.</p>`;
-    const missing = defaultSources().filter(d => !config.sources.some(s => s.id === d.id));
-    if (missing.length) h += `<button class="config-add-btn" style="padding:6px 4px 0;color:var(--text2)" onclick="EmailImport.restoreDefaults()">Restore ${missing.length} built-in bank type${missing.length > 1 ? 's' : ''}</button>`;
-    h += `<p style="font-size:11px;color:var(--text2);margin:4px 4px 0;line-height:1.4">Tap a type to change the sender, subject or defaults. Credit card bill payments are recorded as a transfer from your account to the card, so they are not counted as spending twice (see the kinds inside a bank type).</p>`;
+    }).join('') : `<p style="font-size:12px;color:var(--text2);padding:4px 4px 0;line-height:1.5">No email types yet, so nothing is read. Tap <b>+ Add</b> and pick an email you received (for example a bank notice or a receipt): Nota fills in the sender and reads it for you.</p>`;
+    h += gm ? `<button class="config-add-btn" style="padding:8px 4px 0;color:var(--accent)" onclick="EmailImport.openScan()">Scan my mailbox for email types</button>` : '';
+    h += `<p style="font-size:11px;color:var(--text2);margin:4px 4px 0;line-height:1.4">Tap a type to change it. The first type that matches an email is used, so put specific types above general ones. Credit card bill payments are recorded as a transfer from your account to the card, so they are not counted as spending twice.</p>`;
 
     // Accounts
     h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 8px"><span class="form-label" style="margin:0">Account &amp; card → payment method</span><button class="config-add-btn" onclick="EmailImport.openAcct(-1)">+ Add</button></div>`;
@@ -941,24 +967,21 @@ const EmailImport = (() => {
     save(); renderPage();
   }
 
-  function restoreDefaults() {
-    defaultSources().forEach(d => { if (!config.sources.some(s => s.id === d.id)) config.sources.push(d); });
-    reconsiderEmails();
-    save(); renderPage();
-    showToast('Built-in types restored', 'success');
+  function newSource(preset) {
+    return { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: '', senders: '', subject: '', keyword: '',
+      reader: 'receipt', action: 'ask', kind: 'expense', txMode: 'email', txFixed: '', cat: '', pm: '', amountLabel: '', ...(preset || {}) };
   }
 
-  function openSource(i) {
+  function openSource(i, preset) {
     editSrcIdx = i;
-    draftSrc = i >= 0 ? JSON.parse(JSON.stringify(config.sources[i]))
-      : { id: 'c' + Date.now().toString(36), name: '', senders: '', subject: '', reader: 'receipt', action: 'ask',
-        kind: 'expense', txMode: 'email', txFixed: '', cat: '', pm: '', amountLabel: '', builtin: false, kinds: [] };
+    draftSrc = i >= 0 ? JSON.parse(JSON.stringify(config.sources[i])) : newSource(preset);
     previewMsgs = [];
     const $ = id => document.getElementById(id);
     $('emailSrcTitle').textContent = i >= 0 ? 'Edit email type' : 'New email type';
     $('emailSrcName').value = draftSrc.name;
     $('emailSrcSenders').value = draftSrc.senders;
     $('emailSrcSubject').value = draftSrc.subject;
+    $('emailSrcKeyword').value = draftSrc.keyword;
     $('emailSrcReader').value = draftSrc.reader;
     $('emailSrcTxMode').value = draftSrc.txMode;
     $('emailSrcTxFixed').value = draftSrc.txFixed;
@@ -969,6 +992,7 @@ const EmailImport = (() => {
     onSourceReaderChange();
     $('emailSrcKind').value = draftSrc.kind;
     $('emailSrcModal').classList.add('open');
+    if (i < 0 && preset && Auth.hasGmailScope()) previewSource();   // came from a picked email: show what Nota reads
   }
 
   function onSourceReaderChange() {
@@ -979,24 +1003,12 @@ const EmailImport = (() => {
       + '<option value="expense">Expense</option><option value="income">Income</option><option value="invest">Invest</option><option value="transfer">Transfer</option>';
     $('emailSrcKind').value = (!bank && !keep) ? 'expense' : keep;
     $('emailSrcTxFixed').style.display = $('emailSrcTxMode').value === 'fixed' ? '' : 'none';
-    // Bank emails can turn out to be several kinds of transaction; each can be skipped on its own.
-    const kinds = bank ? draftSrc.kinds : [];
-    $('emailSrcKindsWrap').style.display = kinds.length ? '' : 'none';
-    $('emailSrcKinds').innerHTML = kinds.map(k => {
-      const t = EmailParser.TYPES.find(x => x.id === k);
-      const act = typeAction(k);
-      return `<div class="config-row" style="cursor:default"><div class="config-row-name">${esc(t ? t.label : k)}</div>
-        <div class="pill-toggle" style="display:flex;gap:4px">
-          <span class="smart-pill ${act === 'ask' ? 'selected' : ''}" onclick="EmailImport.setType('${k}','ask')">Ask me</span>
-          <span class="smart-pill ${act === 'ignore' ? 'selected' : ''}" onclick="EmailImport.setType('${k}','ignore')">Ignore</span>
-        </div></div>`;
-    }).join('');
   }
 
   function readDraft() {
     const $ = id => document.getElementById(id);
     Object.assign(draftSrc, {
-      name: $('emailSrcName').value.trim(), senders: $('emailSrcSenders').value.trim(), subject: $('emailSrcSubject').value.trim(),
+      name: $('emailSrcName').value.trim(), senders: $('emailSrcSenders').value.trim(), subject: $('emailSrcSubject').value.trim(), keyword: $('emailSrcKeyword').value.trim(),
       reader: $('emailSrcReader').value, kind: $('emailSrcKind').value, txMode: $('emailSrcTxMode').value,
       txFixed: $('emailSrcTxFixed').value.trim(), cat: $('emailSrcCat').value, pm: $('emailSrcPm').value,
     });
@@ -1010,7 +1022,7 @@ const EmailImport = (() => {
     if (!s.name) { showToast('Give this email type a name', 'error'); return; }
     if (!tokens(s.senders).length && !tokens(s.subject).length) { showToast('Enter a sender or a subject to look for', 'error'); return; }
     if (s.txMode === 'fixed' && !s.txFixed) { showToast('Enter the transaction name', 'error'); return; }
-    if (editSrcIdx >= 0) config.sources[editSrcIdx] = s; else config.sources.push(s);
+    if (editSrcIdx >= 0) config.sources[editSrcIdx] = s; else insertSource(s);
     reconsiderEmails();
     save(); closeSource(); renderPage();
     check({ force: true });
@@ -1038,7 +1050,9 @@ const EmailImport = (() => {
       previewMsgs = [];
       for (const id of ids) {
         const msg = await gmailFetch(`/messages/${id}?format=full`);
-        previewMsgs.push({ id, body: messageBody(msg), from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'),
+        const body = messageBody(msg);
+        if (tokens(s.keyword).length && !tokens(s.keyword).some(k => plainText(body).toLowerCase().includes(k.toLowerCase()))) continue;
+        previewMsgs.push({ id, body, from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'),
           date: localISO(Number(msg.internalDate) || Date.now()) });
       }
       renderPreview();
@@ -1071,14 +1085,155 @@ const EmailImport = (() => {
     renderPreview();
   }
 
-  function setType(id, action) {
-    config.types[id] = action;
-    // Emails skipped only because their type was set to Ignore become eligible again.
-    seen = seen.filter(s => !s.startsWith('i:'));
-    seenSet = new Set(seen);
-    localStorage.removeItem(LS_LAST);   // next check is a full look, not an incremental one
-    save(); renderPage();
-    if (draftSrc) onSourceReaderChange();   // the type editor shows these kinds
+  // ── adding email types the easy way: pick an email, or scan the mailbox ──
+  // A message is turned into a ready-to-edit type: sender from the real From header, a keyword that
+  // tells this kind of email apart ("Transaction Type" value), and the bank reader when one of the
+  // built-in templates understands it (so reference numbers / card numbers keep working).
+  function addrOf(from) { return ((String(from || '').match(/<([^>]+)>/) || [])[1] || String(from || '')).trim(); }
+  function brandOf(from) { const n = EmailParser.senderName(from) || addrOf(from); return n.length <= 4 ? n.toUpperCase() : n; }
+
+  function suggestSource(m) {
+    const keyword = EmailParser.guessKeyword(m.body);
+    const bank = !!EmailParser.parse(m.body, m.date, m.subject);
+    const subj = String(m.subject || '').trim();
+    const subject = (!keyword && subj && !/\d{3,}/.test(subj)) ? subj.slice(0, 60) : '';
+    const brand = brandOf(m.from);
+    return { name: `${brand} - ${keyword || subject || 'emails'}`.slice(0, 60), senders: addrOf(m.from), subject, keyword,
+      reader: bank ? 'bank' : 'receipt', kind: bank ? '' : 'expense' };
+  }
+
+  // Specific types (with a keyword) go above a general type for the same sender, which must stay last.
+  function insertSource(src) {
+    const sameSender = s => tokens(s.senders).some(t => tokens(src.senders).some(u => u.toLowerCase() === t.toLowerCase()));
+    if (tokens(src.keyword).length) {
+      const at = config.sources.findIndex(s => sameSender(s) && !tokens(s.keyword).length);
+      if (at >= 0) { config.sources.splice(at, 0, src); return; }
+    }
+    config.sources.push(src);
+  }
+
+  let pickRows = [];
+  const MONEY_QUERY = 'newer_than:30d ("Rp" OR "IDR")';
+  function pickModal(title, body, foot) {
+    document.getElementById('emailPickTitle').textContent = title;
+    document.getElementById('emailPickBody').innerHTML = body;
+    document.getElementById('emailPickFoot').innerHTML = foot;
+    document.getElementById('emailPickModal').classList.add('open');
+  }
+  function closePick() { document.getElementById('emailPickModal').classList.remove('open'); }
+  const GHOST = 'background:var(--bg3);border-color:var(--border);color:var(--text)';
+  const manualBtn = `<button class="btn-delete" style="${GHOST}" onclick="EmailImport.closePick();EmailImport.openSource(-1)">Enter it manually</button>`;
+  const cancelBtn = `<button class="btn-save" onclick="EmailImport.closePick()">Cancel</button>`;
+
+  async function listMoneyEmails(max) {
+    const list = await gmailFetch(`/messages?maxResults=${max}&q=` + encodeURIComponent(MONEY_QUERY));
+    return (list.messages || []).map(m => m.id);
+  }
+
+  async function openPick() {
+    if (!Auth.hasGmailScope()) {
+      pickModal('Add an email type', `<p style="font-size:13px;color:var(--text2);line-height:1.5">Connect Gmail (switch at the top of this page) and Nota can show your recent emails to pick from. Or enter the sender yourself.</p>`, manualBtn + cancelBtn);
+      return;
+    }
+    pickModal('Pick an email', `<p style="font-size:12px;color:var(--text2)">Looking through the last 30 days…</p>`, manualBtn + cancelBtn);
+    try {
+      const ids = await listMoneyEmails(40);
+      pickRows = [];
+      const q = ids.slice();
+      const worker = async () => {
+        while (q.length) {
+          const id = q.shift();
+          try {
+            const msg = await gmailFetch(`/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`);
+            pickRows.push({ id, from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'), t: Number(msg.internalDate) || 0 });
+          } catch (e) { if (e.status === 401 || e.status === 403) throw e; }
+        }
+      };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      pickRows.sort((a, b) => b.t - a.t);
+      const body = pickRows.length
+        ? `<p style="font-size:12px;color:var(--text2);margin-bottom:8px">Tap an email that is the kind you want Nota to record.</p>` + pickRows.map((r, i) => {
+          const cov = sourceFor(r.from, r.subject, '');
+          return `<div class="config-row" onclick="EmailImport.pickEmail(${i})">
+            <div style="min-width:0"><div class="config-row-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(brandOf(r.from))} · ${esc(maskDigits(r.subject) || '(no subject)')}</div>
+            <div class="config-row-meta">${esc(addrOf(r.from))} · ${esc(isoDisp(localISO(r.t)))}${cov && !tokens(cov.keyword).length ? ' · already covered' : ''}</div></div><span class="config-row-meta">›</span></div>`;
+        }).join('')
+        : `<p style="font-size:13px;color:var(--text2);line-height:1.5">No emails with an amount (Rp / IDR) in the last 30 days in <b>${esc(localStorage.getItem(LS_ACCOUNT) || 'this mailbox')}</b>. If your bank emails go to another Gmail, forward them here first.</p>`;
+      pickModal('Pick an email', body, manualBtn + cancelBtn);
+    } catch (e) {
+      pickModal('Pick an email', `<p style="font-size:13px;color:#ff6b6b">Could not read Gmail: ${esc(e.message)}</p>`, manualBtn + cancelBtn);
+    }
+  }
+
+  async function pickEmail(i) {
+    const r = pickRows[i];
+    if (!r) return;
+    showToast('Reading the email…', 'loading', 0);
+    try {
+      const msg = await gmailFetch(`/messages/${r.id}?format=full`);
+      const m = { body: messageBody(msg), from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'), date: localISO(Number(msg.internalDate) || Date.now()) };
+      closePick();
+      openSource(-1, suggestSource(m));
+      showToast('Check the details, then Save', 'success');
+    } catch (e) { showToast('Could not read that email', 'error'); }
+  }
+
+  // Looks through the last 30 days of emails that carry an amount and proposes one type per
+  // sender + kind, skipping what an existing type already covers.
+  let scanGroups = [];
+  async function openScan() {
+    if (!Auth.hasGmailScope()) { showToast('Connect Gmail first', 'error'); return; }
+    pickModal('Scan my mailbox', `<p style="font-size:12px;color:var(--text2)">Reading your last 30 days of emails that contain an amount. This stays on your device.</p>`, cancelBtn);
+    try {
+      const ids = await listMoneyEmails(60);
+      const groups = new Map();
+      const q = ids.slice();
+      const worker = async () => {
+        while (q.length) {
+          const id = q.shift();
+          let msg;
+          try { msg = await gmailFetch(`/messages/${id}?format=full`); } catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; }
+          const m = { body: messageBody(msg), from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'), date: localISO(Number(msg.internalDate) || Date.now()) };
+          if (sourceFor(m.from, m.subject, plainText(m.body))) continue;   // already covered
+          const sug = suggestSource(m);
+          const p = sug.reader === 'bank' ? EmailParser.parse(m.body, m.date, m.subject) : EmailParser.parseGeneric(m.body, m.date, { from: m.from, subject: m.subject });
+          if (!p || !(p.amount > 0)) continue;
+          const key = `${sug.senders.toLowerCase()}|${sug.keyword.toLowerCase()}|${sug.subject.toLowerCase()}`;
+          const g = groups.get(key) || { sug, count: 0, sample: p.amount, on: true };
+          g.count++;
+          groups.set(key, g);
+        }
+      };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      scanGroups = [...groups.values()].sort((a, b) => b.count - a.count);
+      if (!scanGroups.length) {
+        pickModal('Scan my mailbox', `<p style="font-size:13px;color:var(--text2);line-height:1.5">Nothing new found. Emails with an amount are either already covered by one of your types, or none arrived in the last 30 days.</p>`, manualBtn + cancelBtn);
+        return;
+      }
+      renderScan();
+    } catch (e) {
+      pickModal('Scan my mailbox', `<p style="font-size:13px;color:#ff6b6b">Could not read Gmail: ${esc(e.message)}</p>`, cancelBtn);
+    }
+  }
+
+  function renderScan() {
+    const n = scanGroups.filter(g => g.on).length;
+    pickModal('Found in your mailbox', `<p style="font-size:12px;color:var(--text2);margin-bottom:8px">Untick any you do not want. You can change each one later.</p>` + scanGroups.map((g, i) => `<label class="config-row" style="cursor:pointer">
+        <div style="min-width:0"><div class="config-row-name">${esc(g.sug.name)}</div>
+        <div class="config-row-meta">${g.count} email${g.count !== 1 ? 's' : ''} · from ${esc(g.sug.senders)} · e.g. ${esc(fRp(g.sample))}</div></div>
+        <input type="checkbox" ${g.on ? 'checked' : ''} onchange="EmailImport.toggleScan(${i}, this.checked)"></label>`).join(''),
+      `<button class="btn-delete" style="${GHOST}" onclick="EmailImport.closePick()">Cancel</button><button class="btn-save" ${n ? '' : 'disabled style="opacity:.4"'} onclick="EmailImport.addScanned()">Add ${n} type${n !== 1 ? 's' : ''}</button>`);
+  }
+  function toggleScan(i, on) { if (scanGroups[i]) scanGroups[i].on = !!on; renderScan(); }
+
+  function addScanned() {
+    const chosen = scanGroups.filter(g => g.on);
+    chosen.forEach(g => insertSource(newSource(g.sug)));
+    scanGroups = [];
+    reconsiderEmails();
+    save(); closePick(); renderPage();
+    showToast(`${chosen.length} email type${chosen.length !== 1 ? 's' : ''} added`, 'success');
+    check({ force: true });
   }
 
   async function onToggle(input) {
@@ -1199,14 +1354,14 @@ const EmailImport = (() => {
   const _internals = {
     get config() { return config; }, get pending() { return pending; }, get seen() { return seen; },
     setPending(p) { pending = p; }, buildItem, messageBody, ruleMatches, findAccountPm, isComplete, suggestPattern,
-    buildQuery, sourceFor, readWith, defaultSources, normalizeConfig,
+    buildQuery, sourceFor, readWith, defaultSources, normalizeConfig, suggestSource, insertSource, newSource,
   };
 
   return {
     init, check, onToggle, connect, checkNow, reopenPopup, onPageOpen, renderPage,
     copyUnreadable, copyReport, onCheck, closePopup, skipAll, addSelected, openEdit, closeEdit, saveEdit, onRememberToggle,
-    setType, setEditKind, onRuleTypeChange, openSource, closeSource, saveSource, deleteSource, previewSource,
-    setSourceAction, restoreDefaults, onSourceReaderChange, pickAmountLabel, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
+    setEditKind, onRuleTypeChange, openSource, closeSource, saveSource, deleteSource, previewSource,
+    setSourceAction, onSourceReaderChange, openPick, closePick, pickEmail, openScan, toggleScan, addScanned, pickAmountLabel, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
     _internals,
   };
 })();

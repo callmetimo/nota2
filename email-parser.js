@@ -350,11 +350,23 @@ const EmailParser = (() => {
     };
   }
 
+  // A short phrase that tells this kind of email apart from the sender's others, e.g. the value of
+  // "Transaction Type" ("QRIS Payment"). '' when the email has no such line.
+  function guessKeyword(rawBody) {
+    const body = String(rawBody || '');
+    const text = /<\s*(html|body|table|div|br|td|p)\b/i.test(body) ? htmlToText(body) : body.replace(/\r/g, '');
+    // Only labels that name the kind of email. "Jenis Transaksi" on card notices is the purchase
+    // category (E-COMMERCE...), and a bare "Credit" is just the direction: both would split one
+    // kind of email into many types.
+    const v = field(text, ['Transaction Type', 'Transfer Type']);
+    return v && v.length <= 40 && !/\d{4,}/.test(v) && !/^(credit|debit|transfer|kredit)$/i.test(v) ? v : '';
+  }
+
   // Bump whenever parsing improves: the importer re-reads emails it could not read under an older
   // version instead of treating them as "not a transaction" forever.
   const VERSION = 5;
 
-  return { parse, parseGeneric, parseAmount, parseDate, sourceKey, htmlToText, field, TYPES, VERSION };
+  return { parse, parseGeneric, guessKeyword, senderName, parseAmount, parseDate, sourceKey, htmlToText, field, TYPES, VERSION };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = EmailParser;

@@ -164,7 +164,7 @@ const EmailImport = (() => {
         mode: ['contains', 'equals', 'starts'].includes(r.mode) ? r.mode : 'contains',
         pattern: String(r.pattern), tx: String(r.tx || ''), cat: String(r.cat || ''),
         type: ['expense', 'income', 'invest', 'transfer'].includes(r.type) ? r.type : '',
-        toPm: String(r.toPm || ''),
+        toPm: String(r.toPm || ''), pm: String(r.pm || ''),
       }));
     }
     return out;
@@ -328,7 +328,7 @@ const EmailImport = (() => {
       defaultTx: parsed.defaultTx || parsed.merchant || parsed.typeLabel,
       tx: (rule && rule.tx) || (srcDef && srcDef.txMode === 'fixed' && srcDef.txFixed) || parsed.defaultTx || parsed.merchant || parsed.typeLabel,
       cat: catValid(cat) ? cat : '',
-      pm: pmValid(pm) ? pm : (srcDef && pmValid(srcDef.pm) ? srcDef.pm : ''), notes,
+      pm: pmValid(rule && rule.pm) ? rule.pm : (pmValid(pm) ? pm : (srcDef && pmValid(srcDef.pm) ? srcDef.pm : '')), notes,
       ambiguous: !!parsed.ambiguous, sourceId: src ? src.id : '',
       foreign: parsed.ccy !== 'IDR' ? `${parsed.ccy} ${parsed.nativeAmount}` : '',
       targetKey: parsed.targetKey || '',
@@ -706,6 +706,33 @@ const EmailImport = (() => {
     return (words[0].length >= 5 || words.length === 1) ? words[0] : words.slice(0, 2).join(' ');
   }
 
+  // Same model as the main input form: an exact (case-insensitive) match of the transaction name in
+  // history gives the category / payment method most used with it.
+  function historyDefaults(name) {
+    const low = String(name || '').toLowerCase().trim();
+    const H = typeof HIST !== 'undefined' ? HIST : {};
+    const first = map => { const k = low && Object.keys(map || {}).find(x => x.toLowerCase() === low); return k && map[k].length ? map[k][0] : ''; };
+    return { cat: first(H.txCat), pm: first(H.txPm) };
+  }
+
+  // onlyBlank: opening the sheet fills empty fields only; typing a name that matches history
+  // replaces them, like the main form.
+  function autoFillFromHistory(onlyBlank, includeMerchant) {
+    if (editKind === 'transfer' || editKind === 'invest') return;
+    const it = pending[editIdx];
+    const names = [document.getElementById('emailEditTx').value];
+    if (includeMerchant && it) names.push(it.merchant);
+    const catEl = document.getElementById('emailEditCat'), pmEl = document.getElementById('emailEditPm');
+    for (const n of names) {
+      const h = historyDefaults(n);
+      if (!h.cat && !h.pm) continue;
+      if (h.cat && allCategories.includes(h.cat) && (!onlyBlank || !catEl.value)) catEl.value = h.cat;
+      if (h.pm && allPMs.includes(h.pm) && (!onlyBlank || !pmEl.value)) pmEl.value = h.pm;
+      break;
+    }
+  }
+  function onEditTxInput() { autoFillFromHistory(false, false); }
+
   function openEdit(i) {
     const it = pending[i];
     if (!it) return;
@@ -725,6 +752,7 @@ const EmailImport = (() => {
     document.getElementById('emailEditRemember').checked = true;
     document.getElementById('emailEditPattern').value = suggestPattern(it.merchant);
     applyEditKind();
+    autoFillFromHistory(true, true);
     document.getElementById('emailEditModal').classList.add('open');
   }
 
@@ -735,6 +763,7 @@ const EmailImport = (() => {
     if (k === 'invest') document.getElementById('emailEditAction').value = pending[editIdx]?.direction === 'income' ? 'Sell' : 'Buy';
     editKind = k;
     applyEditKind();
+    autoFillFromHistory(true, true);
   }
 
   function applyEditKind() {
@@ -751,7 +780,7 @@ const EmailImport = (() => {
     document.getElementById('emailEditAmount').previousElementSibling.textContent = inv ? 'Total (Rp)' : 'Amount (Rp)';
     document.getElementById('emailEditRememberHint').textContent = xfer
       ? (it.targetKey ? `Links ${it.sourceKey || 'the paying account'} → From and ${it.targetKey} → To.` : 'Also remembers the type and the To account for this merchant.')
-      : (it.sourceKey ? `Also links ${it.sourceKey} to the account above.` : '');
+      : (k === 'invest' ? '' : 'Remembers the name, category and payment method for this merchant.') + (it.sourceKey ? ` Also links ${it.sourceKey} to the payment method.` : '');
     onRememberToggle();
   }
 
@@ -783,7 +812,7 @@ const EmailImport = (() => {
     const pattern = document.getElementById('emailEditPattern').value.trim();
     // Only carry the name into the rule if the user actually changed it — otherwise a broad
     // match text like "WARUNG" would rename every merchant containing it.
-    const ruleBase = tx => ({ mode: 'contains', pattern, tx: tx === it.defaultTx ? '' : tx, type: kind === it.direction ? '' : kind });
+    const ruleBase = tx => ({ mode: 'contains', pattern, tx: tx === it.defaultTx ? '' : tx, type: kind === it.direction ? '' : kind, pm });
     const amount = parseAmountInput(document.getElementById('emailEditAmount').value);
     const date = document.getElementById('emailEditDate').value;
     const pm = document.getElementById('emailEditPm').value;
@@ -853,6 +882,7 @@ const EmailImport = (() => {
           if (rule.tx) o.tx = rule.tx;
           if (!o.cat && rule.cat && allCategories.includes(rule.cat)) o.cat = rule.cat;
           if (!o.toPm && rule.toPm && allPMs.includes(rule.toPm)) o.toPm = rule.toPm;
+          if (!o.pm && rule.pm && allPMs.includes(rule.pm)) o.pm = rule.pm;
         }
       }
       if (isComplete(o)) o.checked = true;
@@ -878,9 +908,10 @@ const EmailImport = (() => {
   const KIND_LABEL = { expense: 'Expense', income: 'Income', invest: 'Invest', transfer: 'Transfer' };
   function ruleSummary(r) {
     const t = KIND_LABEL[r.type];
-    if (r.type === 'transfer') return `${t} → ${r.toPm || 'no account'}`;
-    if (r.type === 'invest') return t;
-    return (t ? t + ' · ' : '') + (r.cat || 'no category');
+    const pm = r.pm ? ' · ' + r.pm : '';
+    if (r.type === 'transfer') return `${t}${r.pm ? ' from ' + r.pm : ''} → ${r.toPm || 'no account'}`;
+    if (r.type === 'invest') return t + pm;
+    return (t ? t + ' · ' : '') + (r.cat || 'no category') + pm;
   }
 
   function renderPage() {
@@ -1374,7 +1405,7 @@ const EmailImport = (() => {
   // rule editor
   function openRule(i) {
     editRuleIdx = i;
-    const r = i >= 0 ? config.rules[i] : { mode: 'contains', pattern: '', tx: '', cat: '', type: '', toPm: '' };
+    const r = i >= 0 ? config.rules[i] : { mode: 'contains', pattern: '', tx: '', cat: '', type: '', toPm: '', pm: '' };
     document.getElementById('emailRuleTitle').textContent = i >= 0 ? 'Edit rule' : 'New rule';
     document.getElementById('emailRuleMode').value = r.mode;
     document.getElementById('emailRulePattern').value = r.pattern;
@@ -1382,6 +1413,7 @@ const EmailImport = (() => {
     document.getElementById('emailRuleTx').value = r.tx;
     document.getElementById('emailRuleCat').innerHTML = optionsHtml(allCategories, r.cat, 'Pick a category');
     document.getElementById('emailRuleToPm').innerHTML = optionsHtml(allPMs, r.toPm || '', 'Pick the card / account');
+    document.getElementById('emailRulePm').innerHTML = optionsHtml(allPMs, r.pm || '', 'No default');
     document.getElementById('emailRuleDeleteBtn').style.display = i >= 0 ? '' : 'none';
     onRuleTypeChange();
     document.getElementById('emailRuleModal').classList.add('open');
@@ -1390,6 +1422,7 @@ const EmailImport = (() => {
     const t = document.getElementById('emailRuleType').value;
     document.getElementById('emailRuleCatWrap').style.display = (t === 'invest' || t === 'transfer') ? 'none' : '';
     document.getElementById('emailRuleToWrap').style.display = t === 'transfer' ? '' : 'none';
+    document.getElementById('emailRulePmLabel').textContent = t === 'transfer' ? 'From' : (t === 'invest' ? 'Account' : 'Payment method');
     document.getElementById('emailRuleTxLabel').innerHTML = t === 'invest'
       ? 'Then asset <span style="font-weight:400;text-transform:none">(optional)</span>'
       : 'Then transaction name <span style="font-weight:400;text-transform:none">(optional)</span>';
@@ -1407,7 +1440,7 @@ const EmailImport = (() => {
     } else if (type !== 'invest' && !cat) { showToast('Pick a category', 'error'); return; }
     const rule = { mode: document.getElementById('emailRuleMode').value, pattern, type,
       tx: type === 'transfer' ? '' : document.getElementById('emailRuleTx').value.trim(),
-      cat: (type === 'invest' || type === 'transfer') ? '' : cat, toPm: type === 'transfer' ? toPm : '' };
+      cat: (type === 'invest' || type === 'transfer') ? '' : cat, toPm: type === 'transfer' ? toPm : '', pm: document.getElementById('emailRulePm').value };
     if (editRuleIdx >= 0) config.rules[editRuleIdx] = rule; else config.rules.push(rule);
     save(); closeRule(); renderPage();
   }
@@ -1466,7 +1499,7 @@ const EmailImport = (() => {
     init, check, onToggle, connect, checkNow, reopenPopup, onPageOpen, renderPage,
     copyUnreadable, copyReport, onCheck, closePopup, skipAll, addSelected, openEdit, closeEdit, saveEdit, onRememberToggle,
     setEditKind, onRuleTypeChange, openSource, closeSource, saveSource, deleteSource, previewSource,
-    setSourceAction, onSourceReaderChange, openPick, closePick, pickEmail, openScan, toggleScan, showMoreScan, addScanned, pickAmountLabel, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
+    setSourceAction, onSourceReaderChange, openPick, closePick, onEditTxInput, pickEmail, openScan, toggleScan, showMoreScan, addScanned, pickAmountLabel, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
     _internals,
   };
 })();

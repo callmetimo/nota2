@@ -1209,7 +1209,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     </div>
     <div class="form-group" id="emailEditTxWrap">
       <label class="form-label" id="emailEditTxLabel">Transaction</label>
-      <input type="text" class="form-input" id="emailEditTx" maxlength="100" autocomplete="off">
+      <input type="text" class="form-input" id="emailEditTx" maxlength="100" autocomplete="off" oninput="EmailImport.onEditTxInput()">
     </div>
     <div class="form-group" id="emailEditCatWrap">
       <label class="form-label">Category</label>
@@ -1355,6 +1355,10 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
     <div class="form-group" id="emailRuleCatWrap">
       <label class="form-label">And category</label>
       <select class="form-input" id="emailRuleCat"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label"><span id="emailRulePmLabel">Payment method</span> <span style="font-weight:400;text-transform:none">(optional)</span></label>
+      <select class="form-input" id="emailRulePm"></select>
     </div>
     <div class="form-group" id="emailRuleToWrap" style="display:none">
       <label class="form-label">To (credit card / account)</label>
@@ -1749,8 +1753,8 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.61';
-const APP_BUILD = '2026-10-27d'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
+const APP_VERSION = 'v4.62';
+const APP_BUILD = '2026-10-28a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
 }

@@ -8,7 +8,7 @@
   const qris = (ref) => `Status\t:\tSuccessful\nTransaction Date\t:\t26 Oct 2026 08:47:01\nTransaction Type\t:\tQRIS Payment\nPayment to\t:\tWARUNG MAKAN SEJAHTERA\nSource of Fund\t:\tTAHAPAN XPRESI - 1234****56\nTotal Payment\t:\tIDR 7,000.00\nReference No.\t:\t${ref}`;
   window.__msgs = {
     m1: mk('m1', qris('REFQRIS1')),
-    m2: mk('m2', `Status\t:\tSuccessful\nTransaction Date\t:\t26 Oct 2026 09:30:56\nTransaction Type\t:\tFlazz Top Up\nSource of Fund\t:\t1234****56\nTop Up Amount\t:\tIDR 63,500.00\nReference No.\t:\tREFFLAZZ1`),
+    m2: mk('m2', `Status\t:\tSuccessful\nTransaction Date\t:\t26 Oct 2026 09:30:56\nTransaction Type\t:\tFlazz Top Up\nFlazz Card Number\t:\t0145000000000001\nSource of Fund\t:\t1234****56\nTop Up Amount\t:\tIDR 63,500.00\nReference No.\t:\tREFFLAZZ1`),
     m3: mk('m3', `Nomor Kartu\t: \t472647XXXX4541\nMerchant / ATM\t: \tDANA Utilities\nJenis Transaksi\t: \tE-COMMERCE\nOtentikasi\t: \t\nTRANSAKSI TANPA OTP\n\nPada Tanggal\t:\t26-10-2026 08:26:09 WIB\nSejumlah\t:\tRp501.755,00`),
     m4: mk('m4', `<html><body><table><tr><td>Status</td><td>:</td><td>Successful</td></tr><tr><td>Transaction Date</td><td>:</td><td>09 Oct 2026 09:34:55</td></tr><tr><td>Transaction Type</td><td>:</td><td>Credit Card &amp; Paylater - BCA</td></tr><tr><td>Total Payment</td><td>:</td><td>IDR 14,382,668.00</td></tr><tr><td>Reference No.</td><td>:</td><td>REFBILL1</td></tr></table></body></html>`, 'text/html'),
     m5: mk('m5', 'Weekly promo from your bank! 20% off.'),

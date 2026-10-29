@@ -1828,15 +1828,34 @@ if (window.visualViewport) {
 // on-screen keyboard hasn't covered, instead of the full layout viewport —
 // otherwise the sheet (and its focused input) ends up hidden below the keyboard.
 function adjustOverlayForVisualViewport() {
-  const ov = document.querySelector('.input-overlay.open');
-  if (!ov) return;
   const vv = window.visualViewport;
-  if (!vv) { ov.style.top = ''; ov.style.height = ''; return; }
-  ov.style.top = vv.offsetTop + 'px';
-  ov.style.height = vv.height + 'px';
+  const ov = document.querySelector('.input-overlay.open');
+  if (ov) {
+    if (!vv) { ov.style.top = ''; ov.style.height = ''; }
+    else { ov.style.top = vv.offsetTop + 'px'; ov.style.height = vv.height + 'px'; }
+  }
+  // Bottom sheets (.modal-overlay: Email Import popup, editors, ...): while the keyboard is up
+  // (the visual viewport is much shorter than the layout viewport) shrink the overlay to the
+  // visible area so the sheet sits above the keyboard and scrolls inside it; otherwise leave the
+  // overlay at its normal full-screen CSS.
+  const keyboardUp = !!vv && (window.innerHeight - vv.height) > 80;
+  document.querySelectorAll('.modal-overlay.open').forEach(m => {
+    m.style.top = keyboardUp ? vv.offsetTop + 'px' : '';
+    m.style.height = keyboardUp ? vv.height + 'px' : '';
+    m.style.bottom = keyboardUp ? 'auto' : '';
+  });
 }
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', adjustOverlayForVisualViewport);
   window.visualViewport.addEventListener('scroll', adjustOverlayForVisualViewport);
 }
+// Tapping a field inside a bottom sheet: once the keyboard has slid up, bring that field into view.
+document.addEventListener('focusin', e => {
+  const el = e.target;
+  if (!el || !el.closest || !/^(INPUT|TEXTAREA)$/.test(el.tagName) || !el.closest('.modal-overlay')) return;
+  setTimeout(() => {
+    adjustOverlayForVisualViewport();
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) { el.scrollIntoView(); }
+  }, 320);
+});
 

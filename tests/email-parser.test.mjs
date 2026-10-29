@@ -54,10 +54,23 @@ Source of Fund	:	1234****56
 Top Up Amount	:	IDR 63,500.00
 Reference No.	:	1B5E1A09-46B3-4851-AC64-2BED20BDA9F7`);
   assert.equal(r.typeId, 'flazz');
+  assert.equal(r.direction, 'transfer');           // bank account -> Flazz card
   assert.equal(r.amount, 63500);
   assert.equal(r.defaultTx, 'Flazz Top Up');
   assert.equal(r.sourceKey, '1234****56');
+  assert.equal(r.targetKey, '0145000000000001');   // tells several Flazz cards apart
   assert.equal(r.ref, '1B5E1A09-46B3-4851-AC64-2BED20BDA9F7');
+});
+
+t('Flazz top up without a card number line still parses (target unknown)', () => {
+  const r = EmailParser.parse(`Status	:	Successful
+Transaction Date	:	26 Oct 2026 09:30:56
+Transaction Type	:	Flazz Top Up
+Source of Fund	:	1234****56
+Top Up Amount	:	IDR 10,000.00`);
+  assert.equal(r.direction, 'transfer');
+  assert.equal(r.targetKey, '');
+  assert.equal(r.amount, 10000);
 });
 
 t('Transfer (source written with lowercase x)', () => {

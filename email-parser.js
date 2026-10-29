@@ -178,7 +178,12 @@ const EmailParser = (() => {
       applyAmount(out, field(text, ['Total Payment', 'Amount']));
       out.defaultTx = titleCase(out.merchant) || 'QRIS payment';
     } else if (typeId === 'flazz') {
+      // Topping up a Flazz card moves money from a bank account to the user's own card balance:
+      // a transfer (source account -> Flazz card), identified by the card number so that several
+      // cards can be told apart.
+      out.direction = 'transfer';
       out.merchant = 'Flazz Top Up';
+      out.targetKey = sourceKey(field(text, ['Flazz Card Number', 'Flazz Card No.', 'Card Number', 'Card No.']));
       applyAmount(out, field(text, ['Top Up Amount', 'Total Payment', 'Amount']));
       out.defaultTx = 'Flazz Top Up';
     } else if (typeId === 'transfer') {

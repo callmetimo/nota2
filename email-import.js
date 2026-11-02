@@ -261,6 +261,10 @@ const EmailImport = (() => {
       else if (data && /^text\/html/i.test(part.mimeType || '')) html += b64urlToText(data) + '\n';
       (part.parts || []).forEach(walk);
     })(msg.payload);
+    // Many senders ship a plain-text copy whose layout differs from the HTML one (labels and values
+    // separated by spaces or line breaks instead of table cells). Give the readers both: they look
+    // labels up anywhere in the text, so whichever copy has a layout they understand is used.
+    if (plain.trim() && html) return plain + '\n' + EmailParser.htmlToText(html);
     return plain.trim().length > 40 && /:/.test(plain) ? plain : (html || plain);
   }
 

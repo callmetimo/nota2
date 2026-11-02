@@ -74,6 +74,12 @@ const EmailParser = (() => {
         if (v && !/:\s|:$/.test(v)) return v;
       }
     }
+    // Last resort, only when no label matched the layouts above: "Label value" on one line with
+    // just spaces between (a plain-text copy of a table).
+    for (const label of labels) {
+      const m = text.match(new RegExp('(?:^|\\n)[ \\t]*' + escapeRe(label) + '[ \\t]+([^\\s:][^\\n]*)', 'i'));
+      if (m && m[1].trim()) return m[1].replace(/\t+/g, ' ').trim();
+    }
     return '';
   }
 

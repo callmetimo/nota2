@@ -456,6 +456,20 @@ t('guessKeyword: names the kind of email, not the direction or purchase category
   assert.equal(EmailParser.senderName('bca@bca.co.id'), 'Bca');
 });
 
+t('BI-FAST (CIMB) is read whatever separates label and value in the plain-text copy', () => {
+  const rows = ['Tanggal Transaksi|31/10/2026', 'Nama Penerima|JOHN DOE', 'No Rekening Penerima|703100000000',
+    'Nominal|Rp. 225.000,00', 'Nama Pengirim|ACME SERVICES', 'Bank Pengirim|PT. BANK CONTOH'];
+  const head = 'Informasi Penerimaan Dana BIFAST\nKepada Yth.\nJOHN DOE\nkami informasikan bahwa telah terjadi penerimaan dana melalui layanan BIFAST dengan detail sebagai berikut:\n\n';
+  for (const sep of ['\t', ' ', ' : ', '\t:\t']) {
+    const r = EmailParser.parse(head + rows.map(x => x.replace('|', sep)).join('\n'), '2026-10-31', '[CONFIDENTIAL]INCOMING BI FAST');
+    assert.ok(r, 'separator ' + JSON.stringify(sep));
+    assert.equal(r.amount, 225000);
+    assert.equal(r.date, '2026-10-31');
+    assert.equal(r.merchant, 'ACME SERVICES');
+    assert.equal(r.sourceKey, '703100000000');
+  }
+});
+
 t('generic: ambiguous when nothing looks like a total', () => {
   const r = EmailParser.parseGeneric('Item A Rp10.000\nItem B Rp20.000', '2026-10-20', { from: 'a@b.com' });
   assert.equal(r.ambiguous, true);

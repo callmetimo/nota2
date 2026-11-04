@@ -1274,7 +1274,8 @@ function getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBa
   activeAccounts.forEach(acct => {
     const balObj = acctBals[acct.name];
     const amt = Number(balObj?.amount) || 0;
-    if (amt <= 0) return;
+    // < 0.5 rounds to Rp0 — hides float-residue balances (e.g. 1e-9 left after a full spend)
+    if (amt < 0.5) return;
 
     // Deduplicate: Skip account if it is already represented by an investment/FX holding
     const isAlreadyInHoldings = holdings.some(h => isFxAccountMatch(acct.name, acct.ccy, h.stock));
@@ -1300,7 +1301,7 @@ function getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBa
   Object.keys(rawAccountBalances).forEach(k => {
     const rawObj = rawAccountBalances[k];
     const amt = Number(rawObj?.amount) || 0;
-    if (amt <= 0) return;
+    if (amt < 0.5) return;
 
     const kSorted = k.toLowerCase().split(/\s+/).sort().join(' ');
 

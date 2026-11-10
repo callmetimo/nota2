@@ -59,7 +59,7 @@ const EmailParser = (() => {
   //   "Label<TAB>Value"            one line, no colon (BI-FAST)
   //   "Label\n: Value"             label and ": value" on separate lines
   //   "Label\n:\nValue"            label, colon and value each on their own line
-  function field(text, labels) {
+  function field(text, labels, loose) {
     for (const label of labels) {
       const lab = '(?:^|\\n)[ \\t]*' + escapeRe(label) + '[ \\t]*';
       // 1) same-line value (cannot run into the next row when a value is blank)
@@ -79,6 +79,14 @@ const EmailParser = (() => {
     for (const label of labels) {
       const m = text.match(new RegExp('(?:^|\\n)[ \\t]*' + escapeRe(label) + '[ \\t]+([^\\s:][^\\n]*)', 'i'));
       if (m && m[1].trim()) return m[1].replace(/\t+/g, ' ').trim();
+    }
+    // Opt-in (`loose`): "Label\nValue" with no colon or tab at all (a flattened table). Only for
+    // templates known to have no blank values, since a blank row would take the next label.
+    if (loose) {
+      for (const label of labels) {
+        const m = text.match(new RegExp('(?:^|\\n)[ \\t]*' + escapeRe(label) + '[ \\t:]*\\n[ \\t]*([^\\s:][^\\n]*)', 'i'));
+        if (m && m[1].trim() && !/:\s*$/.test(m[1])) return m[1].replace(/\t+/g, ' ').trim();
+      }
     }
     return '';
   }
@@ -230,17 +238,17 @@ const EmailParser = (() => {
 
   function parseBifast(text) {
     if (!/penerimaan dana/i.test(text) && !/BI-?FAST/i.test(text)) return null;
-    const sender = cleanMerchant(field(text, ['Nama Pengirim']));
-    if (!sender && !field(text, ['Nominal'])) return null;
+    const sender = cleanMerchant(field(text, ['Nama Pengirim'], true));
+    if (!sender && !field(text, ['Nominal'], true)) return null;
     const out = base('bifast', text);
     Object.assign(out, {
       direction: 'income', merchant: sender, ref: '',
-      date: parseDate(field(text, ['Tanggal Transaksi'])),
-      sourceKey: sourceKey(field(text, ['No Rekening Penerima'])) || String(field(text, ['No Rekening Penerima'])).replace(/\D/g, ''),
+      date: parseDate(field(text, ['Tanggal Transaksi'], true)),
+      sourceKey: sourceKey(field(text, ['No Rekening Penerima'], true)) || String(field(text, ['No Rekening Penerima'], true)).replace(/\D/g, ''),
       rawType: 'BI-FAST', defaultTx: sender ? titleCase(sender) : 'Incoming transfer',
-      senderBank: field(text, ['Bank Pengirim']),
+      senderBank: field(text, ['Bank Pengirim'], true),
     });
-    applyAmount(out, field(text, ['Nominal', 'Jumlah']));
+    applyAmount(out, field(text, ['Nominal', 'Jumlah'], true));
     return out;
   }
 
@@ -469,7 +477,7 @@ const EmailParser = (() => {
 
   // Bump whenever parsing improves: the importer re-reads emails it could not read under an older
   // version instead of treating them as "not a transaction" forever.
-  const VERSION = 5;
+  const VERSION = 6;
 
   return { parse, parseGeneric, receiptScore, subjectPattern, pdfItemsToText, guessKeyword, senderName, parseAmount, parseDate, sourceKey, htmlToText, field, TYPES, VERSION };
 })();

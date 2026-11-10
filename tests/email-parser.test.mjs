@@ -189,6 +189,27 @@ Bank Pengirim	PT. BANK MANDIRI (PERSERO), TBK`);
   assert.equal(r.sourceKey, '703100000000');
 });
 
+t('BI-FAST with labels and values on separate lines (no colon or tab)', () => {
+  const r = EmailParser.parse(`Informasi Penerimaan Dana BIFAST
+Dengan hormat, kami informasikan bahwa telah terjadi penerimaan dana melalui layanan BIFAST:
+Tanggal Transaksi
+09/11/2026
+Nama Penerima
+JOHN DOE
+No Rekening Penerima
+703128277400
+Nominal
+Rp. 50.000,00
+Nama Pengirim
+MORRIGAN SERVICES
+Bank Pengirim
+PT. BANK MANDIRI (PERSERO), TBK`);
+  assert.equal(r.typeId, 'bifast');
+  assert.equal(r.amount, 50000);
+  assert.equal(r.date, '2026-11-09');
+  assert.equal(r.merchant, 'MORRIGAN SERVICES');
+});
+
 t('Label and ": value" on separate lines (credit card bill payment)', () => {
   const r = EmailParser.parse(`Status
 : Successful

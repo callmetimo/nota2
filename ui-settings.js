@@ -966,7 +966,8 @@ function fGoalAmt(n, ccy) {
   else if (ccy === 'EUR') symbol = '€';
   
   if (!n) return symbol + '0';
-  
+  if (document.documentElement.classList.contains('wide')) return symbol + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
   if (n >= 1000000000) return symbol + (n / 1000000000).toFixed(1) + 'B';
   if (n >= 1000000) return symbol + (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000) return symbol + (n / 1000).toFixed(0) + 'K';

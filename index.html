@@ -507,12 +507,128 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .recurring-prompt-tx{font-size:14px;font-weight:600;color:var(--text)}
 .recurring-prompt-meta{font-size:12px;color:var(--text2)}
 .recurring-prompt-amt{font-size:14px;font-weight:700;white-space:nowrap}
+
+/* ══ WIDE LAYOUT (tablet / desktop landscape) ═════════════════════════════
+   Everything below only applies when html.wide is set by applyDeviceLayout()
+   (viewport >= 900px wide AND landscape). Phones keep the layout above. */
+.side-toggle,.side-brand,.side-subs,.fab-lbl,.nav-lbl{display:none}
+html.wide{--bottom-nav-h:0px;--side-w:232px}
+html.wide.side-off{--side-w:0px}
+html.wide body{max-width:none;margin:0;padding-left:var(--side-w);transition:padding-left .25s ease}
+html.wide .header{padding:12px 28px 10px}
+html.wide .side-toggle{display:flex;align-items:center;justify-content:center;width:34px;height:34px;margin-right:8px;border-radius:var(--radius-sm);border:0.5px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;flex-shrink:0}
+html.wide .side-toggle:hover{color:var(--text)}
+html.wide .side-toggle svg{width:18px;height:18px}
+html.wide .header-top{justify-content:flex-start}
+html.wide .header-right{margin-left:auto}
+html.wide .header .app-title{display:none}
+html.wide.side-off .header .app-title{display:flex}
+html.wide .page{padding-left:28px;padding-right:28px}
+
+/* sidebar = the bottom nav, restyled */
+html.wide .bottom-nav{top:0;bottom:0;left:0;right:auto;width:232px;max-width:none;margin:0;height:auto;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:4px;padding:22px 14px;border-top:none;border-right:0.5px solid var(--border);background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none;overflow-y:auto;transition:transform .25s ease,visibility .25s}
+html.wide.side-off .bottom-nav{transform:translateX(-100%);visibility:hidden}
+html.wide .side-brand{display:block;order:-2;font:800 22px var(--font-logo);letter-spacing:-0.5px;color:var(--accent);padding:0 10px 18px}
+html.wide .side-brand .dot{color:rgba(200,240,96,0.4)}
+html.wide .side-brand .app-version{font-size:10px;color:var(--text2);font-weight:400;margin-left:6px;font-family:var(--font-ui,system-ui,sans-serif);letter-spacing:0}
+html.wide .nav-btn{flex:none;flex-direction:row;justify-content:flex-start;gap:12px;height:auto;padding:10px 12px;border-radius:var(--radius-sm);font-size:14px;font-weight:500;font-family:inherit}
+html.wide .nav-btn:hover{color:var(--text)}
+html.wide .nav-btn.active{background:var(--bg3);color:var(--text)}
+html.wide .nav-btn.active svg{color:var(--accent)}
+html.wide .nav-btn svg{width:20px;height:20px}
+html.wide .nav-lbl{display:inline}
+html.wide .nav-fab-wrap{order:-1;flex:none;height:auto;justify-content:stretch;margin-bottom:12px}
+html.wide .nav-fab{width:100%;height:44px;border-radius:22px;font-size:14px;font-weight:600;gap:8px;padding:0 18px;justify-content:flex-start}
+html.wide .nav-fab .fab-plus{font-size:24px;font-weight:400;line-height:1}
+html.wide .fab-lbl{display:inline}
+html.wide #fabQueueBadge{top:6px;right:14px}
+html.wide .side-subs{display:flex;flex-direction:column;gap:2px}
+html.wide .side-sub{background:none;border:none;text-align:left;font-size:13px;font-weight:500;font-family:inherit;color:var(--text3);padding:8px 12px 8px 44px;border-radius:var(--radius-sm);cursor:pointer}
+html.wide .side-sub:hover{color:var(--text)}
+html.wide .side-sub.on{color:var(--accent);background:var(--accent-dim)}
+html.wide .side-toggle:focus-visible,html.wide .nav-btn:focus-visible,html.wide .side-sub:focus-visible,html.wide .nav-fab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Home: calendar left, selected-day panel right */
+html.wide #page-home{padding:0}
+html.wide #page-home.active{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr);grid-template-rows:auto minmax(0,1fr)}
+html.wide #stuckRecoveryBanner{grid-column:1/-1}
+html.wide .cal-scroll{grid-column:1;grid-row:2;flex:none;border-bottom:none;border-right:0.5px solid var(--border);padding:0 12px 24px}
+html.wide .cal-tx-panel{grid-column:2;grid-row:2;flex:none;border-top:none}
+
+/* Other pages: readable width, centred in the available space */
+html.wide #page-insights.active,html.wide #page-networth.active,html.wide #page-goals.active,html.wide #page-recurring.active,html.wide #page-profile.active,html.wide #page-settings.active,html.wide #page-account.active,html.wide #page-emailimport.active{
+  padding-left:max(28px,calc((100% - 1120px)/2));padding-right:max(28px,calc((100% - 1120px)/2))}
+html.wide #page-account.active{padding-left:max(28px,calc((100% - 560px)/2));padding-right:max(28px,calc((100% - 560px)/2))}
+html.wide #page-search #searchResults,html.wide #page-search #searchMonitorContainer,html.wide #page-search .search-page-header,html.wide #page-search #searchResultsCount{padding-left:max(28px,calc((100% - 900px)/2));padding-right:max(28px,calc((100% - 900px)/2))}
+html.wide .acct-bal-section{padding-left:0;padding-right:0}
+html.wide .acct-bal-grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+html.wide .chart-page-section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:16px;align-items:start}
+html.wide .chart-page-section>.insights-sticky,html.wide .chart-page-section>div[style*="height:14px"],html.wide .chart-page-section>[id$="Summary"]{grid-column:1/-1}
+html.wide #goalsListContainer{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;align-items:start}
+html.wide #goalsListContainer>.goal-card{margin-bottom:0}
+html.wide #page-profile .form-section{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+html.wide #page-profile .more-menu-divider{display:none}
+html.wide #page-profile .more-menu-item{flex-direction:column;align-items:flex-start;gap:16px;min-height:130px;padding:20px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);font-size:17px;font-weight:600}
+html.wide #page-profile .more-menu-item:hover{border-color:var(--accent)}
+html.wide #page-profile .more-menu-item svg{width:26px;height:26px;color:var(--accent)}
+
+/* Exact amounts are long: print the bar-chart value labels vertically so neighbours never overlap */
+html.wide .bar-chart{height:230px;padding-top:86px}
+html.wide .bar-amount{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;font-size:10px;line-height:1;margin-bottom:5px;flex-shrink:0}
+html.wide .bar-fill{flex-shrink:0}
+
+/* Bottom sheets and modals become centred dialogs */
+html.wide .input-overlay .input-sheet{left:50%;right:auto;bottom:auto;top:50%;width:min(580px,calc(100% - 32px));max-height:calc(var(--app-vh,100dvh) - 48px);border-radius:20px;border:0.5px solid var(--border2);padding:14px 0 20px;opacity:0;transform:translate(-50%,-46%);transition:transform .25s ease,opacity .25s ease}
+html.wide .input-overlay.open .input-sheet{opacity:1;transform:translate(-50%,-50%)}
+html.wide .input-sheet-handle-wrap{display:none}
+html.wide .modal-overlay{align-items:center;justify-content:center}
+html.wide .modal{width:min(520px,calc(100% - 32px));border-radius:20px;border:0.5px solid var(--border2)}
+html.wide .modal-handle{display:none}
 </style>
+<script>
+/* Device layout: reads the viewport and sets html.wide (tablet/desktop landscape) and
+   html[data-device] = phone | tablet | desktop. Runs in <head> so the class is in place
+   before anything renders (amount formatting reads it). */
+(function(){
+  var root=document.documentElement, KEY='nota.sidebarHidden';
+  function measure(){
+    var w=window.innerWidth,h=window.innerHeight;
+    var wide=w>=900&&w>h;
+    var coarse=window.matchMedia&&window.matchMedia('(pointer:coarse)').matches;
+    var device=!wide?'phone':((w>=1200&&!coarse)?'desktop':'tablet');
+    return {wide:wide,device:device};
+  }
+  window.applyDeviceLayout=function(){
+    var m=measure(), changed=root.classList.contains('wide')!==m.wide;
+    root.classList.toggle('wide',m.wide);
+    root.setAttribute('data-device',m.device);
+    if(changed&&window._layoutReady){
+      if(typeof updateHeaderHeight==='function')updateHeaderHeight();
+      var p=document.querySelector('.page.active'),t=p&&p.id.replace('page-','');
+      if(t&&typeof switchTab==='function')switchTab(t,null); // re-render so amounts re-format
+    }
+  };
+  window.toggleSidebar=function(force){
+    var off=typeof force==='boolean'?force:!root.classList.contains('side-off');
+    root.classList.toggle('side-off',off);
+    try{localStorage.setItem(KEY,off?'1':'0')}catch(e){}
+    var b=document.getElementById('sideToggle');
+    if(b){var l=off?'Show sidebar':'Hide sidebar';b.setAttribute('aria-label',l);b.title=l}
+  };
+  try{if(localStorage.getItem(KEY)==='1')root.classList.add('side-off')}catch(e){}
+  window.applyDeviceLayout();
+  window.addEventListener('resize',function(){window.applyDeviceLayout()});
+  window.addEventListener('orientationchange',function(){setTimeout(window.applyDeviceLayout,200)});
+})();
+</script>
 </head>
 <body>
 
 <div class="header" id="appHeader">
   <div class="header-top">
+    <button class="side-toggle" id="sideToggle" type="button" aria-label="Hide sidebar" title="Hide sidebar" onclick="toggleSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
+    </button>
     <div class="app-title">nota<span class="dot">.</span><span class="app-version" id="appVersionLabel">v4.14</span></div>
     <div class="header-right">
       <div id="toast" class="toast"></div>
@@ -1159,21 +1275,34 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav" id="bottomNav">
-  <button class="nav-btn active" id="nav-home" onclick="switchTab('home',this)">
+  <div class="side-brand">nota<span class="dot">.</span><span class="app-version" id="sideVersionLabel"></span></div>
+  <button class="nav-btn active" id="nav-home"onclick="switchTab('home',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+    <span class="nav-lbl">Home</span>
   </button>
   <button class="nav-btn" id="nav-insights" onclick="switchTab('insights',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+    <span class="nav-lbl">Insights</span>
   </button>
   <div class="nav-fab-wrap">
-    <button class="nav-fab" onclick="openFABAction()">+<span id="fabQueueBadge"></span></button>
+    <button class="nav-fab" onclick="openFABAction()"><span class="fab-plus">+</span><span class="fab-lbl">Add transaction</span><span id="fabQueueBadge"></span></button>
   </div>
   <button class="nav-btn nav-search-btn" id="nav-search" onclick="switchTab('search',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <span class="nav-lbl">Search</span>
   </button>
   <button class="nav-btn nav-more-btn" id="nav-more" onclick="switchTab('profile', this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    <span class="nav-lbl">Profile</span>
   </button>
+  <div class="side-subs" id="sideSubs">
+    <button class="side-sub" data-tab="networth" onclick="switchTabFromMore('networth')">Net Worth</button>
+    <button class="side-sub" data-tab="goals" onclick="switchTabFromMore('goals')">Financial Goals</button>
+    <button class="side-sub" data-tab="recurring" onclick="switchTabFromMore('recurring')">Recurring</button>
+    <button class="side-sub" data-tab="emailimport" onclick="switchTabFromMore('emailimport')">Email Import</button>
+    <button class="side-sub" data-tab="settings" onclick="switchTabFromMore('settings')">Settings</button>
+    <button class="side-sub" data-tab="account" onclick="switchTabFromMore('account')">Account</button>
+  </div>
 </nav>
 
 <!-- Email Import: review popup (mirrors the Recurring Prompt below) -->
@@ -1753,8 +1882,8 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.66';
-const APP_BUILD = '2026-11-10a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
+const APP_VERSION = 'v4.67';
+const APP_BUILD = '2026-11-11a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
 }
@@ -2712,6 +2841,8 @@ function updateAvgPrices() {
 function fRp(n){if(!n&&n!==0)return'';return'Rp'+Number(n).toLocaleString('id-ID')}
 function fRpS(n){
   if(!n)return'Rp0';
+  // Wide layout (tablet/desktop landscape) has room for the exact amount, e.g. Rp14.500.000
+  if(document.documentElement.classList.contains('wide'))return(n<0?'-':'')+'Rp'+Math.abs(Math.round(n)).toLocaleString('id-ID');
   if(n>=1000000000)return'Rp'+(n/1000000000).toFixed(1)+'M';
   if(n>=1000000)return'Rp'+(n/1000000).toFixed(1)+'jt';
   if(n>=1000)return'Rp'+(n/1000).toFixed(0)+'rb';
@@ -5114,5 +5245,26 @@ async function retryPendingQueue() {
 <script src="./email-import.js"></script>
 <script src="./ui-calendar.js"></script>
 <script src="./ui-insights.js"></script>
+<script>
+/* Sidebar helpers: highlight the Profile sub-page that is open, label the version, Esc closes dialogs. */
+(function(){
+  var SUBS=['networth','goals','recurring','emailimport','settings','account'];
+  function syncSideNav(tab){
+    document.querySelectorAll('.side-sub').forEach(function(b){b.classList.toggle('on',b.dataset.tab===tab)});
+    var more=document.getElementById('nav-more');
+    if(more&&SUBS.indexOf(tab)>-1)more.classList.add('active'); // sub-pages live under Profile
+  }
+  var orig=window.switchTab;
+  window.switchTab=function(tab){var r=orig.apply(this,arguments);syncSideNav(tab);return r};
+  var v=document.getElementById('sideVersionLabel');if(v&&typeof APP_VERSION!=='undefined')v.textContent=APP_VERSION;
+  document.addEventListener('keydown',function(e){
+    if(e.key!=='Escape')return;
+    var m=document.querySelector('.modal-overlay.open');
+    if(m){m.click();return}
+    var o=document.querySelector('.input-overlay.open');if(o)o.click();
+  });
+  window._layoutReady=true;
+})();
+</script>
 </body>
 </html>

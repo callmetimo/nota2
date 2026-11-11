@@ -1,0 +1,370 @@
+<title>Nota Landscape Mockup</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout concept: persistent left sidebar + two-pane content (list/grid left, detail right), tokens copied from the mobile app */
+:root{
+  --bg:#000;--bg2:#111;--bg3:#1c1c1e;--bg4:#2c2c2e;
+  --border:rgba(255,255,255,0.1);--border2:rgba(255,255,255,0.18);
+  --text:#f0f0f0;--text2:#8e8e93;--text3:#636366;
+  --accent:#c8f060;--accent-dim:rgba(200,240,96,0.12);
+  --red:#ff6b6b;--red-dim:rgba(255,107,107,0.11);
+  --blue:#60a0f0;--blue-dim:rgba(96,160,240,0.11);
+  --green:#4ade80;--green-dim:rgba(74,222,128,0.11);
+  --violet:#a78bfa;--violet-dim:rgba(167,139,250,0.15);
+  --radius:14px;--radius-sm:8px;
+  --font-logo:'DM Sans',system-ui,sans-serif;
+  --font-ui:-apple-system,'SF Pro Display','Segoe UI',system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:1360px;margin:0 auto}
+.intro{display:flex;flex-wrap:wrap;gap:16px 32px;align-items:flex-end;justify-content:space-between;margin-bottom:16px}
+.intro h1{font-family:var(--font-logo);font-size:26px;font-weight:800;letter-spacing:-.5px;color:var(--accent)}
+.intro p{font-size:13px;color:var(--text2);margin-top:4px;max-width:70ch;line-height:1.5}
+.detect{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:11px;padding:6px 10px;border-radius:var(--radius-sm);border:.5px solid var(--border);background:var(--bg3);color:var(--text2)}
+.chip b{color:var(--text);font-weight:600}
+.chip.on{border-color:var(--accent);background:var(--accent-dim);color:var(--accent)}
+.chip.on b{color:var(--accent)}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:14px}
+.tab{font:500 12px var(--font-ui);padding:8px 12px;border-radius:var(--radius-sm);border:.5px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer}
+.tab:hover{color:var(--text)}
+.tab.active{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.tab:focus-visible,.nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mode{display:flex;gap:6px;margin-bottom:12px}
+.stage{width:100%;position:relative;overflow:hidden;border-radius:18px;border:.5px solid var(--border2)}
+.frame{width:1280px;height:800px;transform-origin:0 0;background:var(--bg);display:flex;position:absolute;top:0;left:0}
+.note{font-size:12px;color:var(--text2);margin-top:12px;line-height:1.5;max-width:90ch}
+
+/* ---- app chrome ---- */
+.side{width:232px;flex-shrink:0;border-right:.5px solid var(--border);padding:22px 14px;display:flex;flex-direction:column;gap:4px;background:var(--bg)}
+.frame.rail .side{width:72px;align-items:center;padding:22px 10px}
+.frame.rail .lbl,.frame.rail .ver,.frame.rail .sub{display:none}
+.frame.rail .add{width:44px;padding:0;justify-content:center}
+.logo{font:800 22px var(--font-logo);letter-spacing:-.5px;color:var(--accent);padding:0 10px 18px}
+.logo i{font-style:normal;color:rgba(200,240,96,.4)}
+.ver{font:400 10px var(--font-ui);color:var(--text2);margin-left:6px;letter-spacing:0}
+.frame.rail .logo{padding:0 0 18px;font-size:20px}
+.add{display:flex;align-items:center;gap:8px;height:44px;border-radius:22px;background:var(--accent);color:#000;font:600 14px var(--font-ui);padding:0 18px;margin:0 0 14px;box-shadow:0 4px 18px rgba(200,240,96,.28)}
+.add svg{width:18px;height:18px}
+.nav a{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:var(--radius-sm);color:var(--text3);font-size:14px;font-weight:500;text-decoration:none;cursor:default}
+.nav a svg{width:20px;height:20px;flex-shrink:0;stroke-width:1.8}
+.nav a.on{color:var(--text);background:var(--bg3)}
+.nav a.on svg{color:var(--accent)}
+.nav a.sub{padding-left:44px;font-size:13px}
+.nav a.sub.on{color:var(--accent);background:var(--accent-dim)}
+.frame.rail .nav a{padding:12px}
+.spacer{flex:1}
+.user{display:flex;align-items:center;gap:10px;padding:10px;border-top:.5px solid var(--border);font-size:12px;color:var(--text2)}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--bg4);display:grid;place-items:center;color:var(--accent);font-weight:700;font-size:12px;flex-shrink:0}
+.frame.rail .user div:last-child{display:none}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{display:flex;align-items:center;justify-content:space-between;padding:20px 28px 14px;border-bottom:.5px solid var(--border)}
+.top h2{font-size:28px;font-weight:700;letter-spacing:-.5px}
+.top .crumb{font-size:12px;color:var(--text2);display:flex;gap:4px;align-items:center;margin-bottom:2px}
+.tgl{width:34px;height:34px;display:grid;place-items:center;border-radius:8px;border:.5px solid var(--border);background:var(--bg3);color:var(--text2)}
+.top .tools{display:flex;gap:8px;align-items:center}
+.status{font-size:11px;color:var(--accent)}
+.body{flex:1;min-height:0;padding:20px 28px;display:grid;gap:20px;overflow:hidden}
+.col{display:flex;flex-direction:column;gap:12px;min-height:0}
+
+/* ---- shared components (same as mobile) ---- */
+.card{background:var(--bg2);border:.5px solid var(--border);border-radius:var(--radius);padding:14px}
+.ct{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.ct a{color:var(--blue);text-transform:none;letter-spacing:0;font-size:12px}
+.toggle-row{display:flex;gap:4px}
+.toggle-btn{flex:1;padding:8px 10px;border-radius:var(--radius-sm);border:.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:12px;font-weight:500;text-align:center;white-space:nowrap}
+.toggle-btn.active{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.toggle-btn.blue.active{border-color:var(--blue);color:var(--blue);background:var(--blue-dim)}
+.sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.sum .card{padding:12px}
+.sum .l{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.sum .v{font-size:19px;font-weight:700;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
+.sum .s{font-size:10px;color:var(--text2);margin-top:2px}
+.g{color:var(--green)}.r{color:var(--red)}.a{color:var(--accent)}.b{color:var(--blue)}.t2{color:var(--text2)}
+.tx{background:var(--bg2);border:.5px solid var(--border);border-radius:var(--radius);padding:11px;display:flex;align-items:center;gap:10px}
+.tx.sel{border-color:var(--accent);background:var(--accent-dim)}
+.ti{width:36px;height:36px;border-radius:8px;display:grid;place-items:center;font-size:15px;flex-shrink:0}
+.ti.e{background:var(--accent-dim)}.ti.i{background:var(--green-dim)}.ti.v{background:var(--blue-dim)}.ti.x{background:var(--violet-dim)}
+.tp{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm{font-size:11px;color:var(--text2);margin-top:2px}
+.tinfo{flex:1;min-width:0}
+.ta{font-size:13px;font-weight:600;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;font-size:10px;padding:1px 6px;border-radius:3px;font-weight:500;margin-left:4px}
+.b-o{background:var(--accent-dim);color:var(--accent)}.b-b{background:var(--blue-dim);color:var(--blue)}.b-r{background:var(--red-dim);color:var(--red)}.b-g{background:var(--green-dim);color:var(--green)}.b-w{background:rgba(255,165,0,.15);color:orange}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;background:var(--bg2);border:.5px solid var(--border);border-radius:var(--radius-sm)}
+.dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;display:inline-block}
+.rn{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500}
+.rm{font-size:11px;color:var(--text2)}
+.bar{height:4px;background:var(--bg4);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:2px}
+.bar i.red{background:var(--red)}.bar i.blue{background:var(--blue)}
+.btn{background:var(--bg3);border:.5px solid var(--border2);color:var(--text);padding:9px 14px;border-radius:var(--radius-sm);font:500 13px var(--font-ui)}
+.btn.p{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+.btn.d{background:var(--red-dim);color:var(--red);border-color:transparent}
+.input{background:var(--bg3);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:14px;color:var(--text)}
+.lab{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.sw{width:44px;height:26px;border-radius:13px;background:var(--bg4);position:relative;flex-shrink:0}
+.sw::before{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;background:#fff;border-radius:50%}
+.sw.on{background:var(--accent)}.sw.on::before{left:21px}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+th{font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text3);text-align:left;padding:0 10px 8px}
+td{padding:11px 10px;border-top:.5px solid var(--border)}
+td.n,th.n{text-align:right}
+
+/* calendar */
+.cal-head{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.cal-head .mn{font-size:20px;font-weight:700;letter-spacing:-.4px;min-width:130px}
+.cal-head .bar{flex:1;height:3px}
+.cal-head .am{text-align:right}.cal-head .am b{font-size:14px;display:block}.cal-head .am span{font-size:10px;color:var(--text2)}
+.wd{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px;text-align:center;font-size:11px;color:var(--text3)}
+.wd span:nth-child(n+6){color:#444}
+.grid7{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.day{height:62px;border:1px solid transparent;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:9px}
+.day .n{font-size:16px;font-weight:500;line-height:1}
+.day .t{font-size:10px;color:var(--text3);line-height:1;font-variant-numeric:tabular-nums}
+.day.we .n{color:#999}.day.oth{opacity:.25}.day.fut{opacity:.6}.day.fut .t{font-style:italic}
+.day.today .n{color:var(--accent);font-weight:700}
+.day.sel{background:var(--accent-dim);border-color:var(--accent)}
+.day.hi{background:var(--bg3)}
+.panel-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.panel-h .d{font-size:18px;font-weight:700;letter-spacing:-.3px}
+.panel-h .t{font-size:14px;font-weight:700}
+
+/* modal */
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(3px);display:grid;place-items:center;z-index:5}
+.dlg{width:560px;background:var(--bg2);border:.5px solid var(--border2);border-radius:20px;padding:22px 24px;box-shadow:0 24px 80px rgba(0,0,0,.6)}
+.dlg h3{font-size:20px;font-weight:700;letter-spacing:-.3px}
+.pill{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--bg);border:.5px solid var(--border);border-radius:12px;padding:4px;margin:14px 0}
+.pill div{padding:8px;text-align:center;font-size:13px;font-weight:500;color:var(--text2);border-radius:9px}
+.pill .on{background:var(--accent-dim);color:var(--accent);box-shadow:inset 0 0 0 .5px var(--accent)}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.submit{width:100%;background:var(--accent);color:#000;border-radius:12px;padding:13px;text-align:center;font-weight:700;font-size:15px;margin-top:6px}
+.legend{display:flex;flex-direction:column;gap:9px;font-size:13px}
+.legend div{display:flex;align-items:center;gap:8px}
+.legend span:last-child{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--text2)}
+</style>
+
+<div class="wrap">
+  <div class="intro">
+    <div>
+      <h1>nota. landscape</h1>
+      <p>Design mockup of every page for desktop and tablet. Same colors, type and components as the mobile app. The sidebar replaces the bottom bar, and wide pages split into a list and a detail pane.</p>
+    </div>
+    <div class="detect" id="detect">
+      <span class="chip" data-d="phone"><b>Phone</b> under 700px · current mobile layout</span>
+      <span class="chip" data-d="tablet"><b>Tablet</b> 700–1199px · icon rail</span>
+      <span class="chip" data-d="desktop"><b>Desktop</b> 1200px+ · full sidebar</span>
+    </div>
+  </div>
+  <div class="mode" id="modeRow">
+    <div class="tab" id="sideBtn" tabindex="0" role="button">Hide sidebar</div>
+    <span class="chip">Desktop and tablet landscape share this layout</span>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div class="stage" id="stage"><div class="frame" id="frame"></div></div>
+  <p class="note" id="note"></p>
+</div>
+
+<script>
+const ic={
+ home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+ ins:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+ search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>',
+ user:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+ plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>'
+};
+const subs=[['networth','Net Worth'],['goals','Financial Goals'],['recurring','Recurring'],['emailimport','Email Import'],['settings','Settings'],['account','Account']];
+const parent={networth:'profile',goals:'profile',recurring:'profile',emailimport:'profile',settings:'profile',account:'profile'};
+const $=(h)=>h;
+const rp=n=>'Rp '+n.toLocaleString('id-ID');
+
+/* ---- screens: [title, crumb, tools, body html, grid-template-columns, note] ---- */
+function calGrid(){
+  const tot={1:0,2:85,3:0,4:132,5:46,6:0,7:0,8:210,9:64,10:0,11:98,12:0,13:35,14:0,15:0,16:120,17:0,18:75,19:0,20:0,21:310,22:0,23:44,24:0,25:0,26:60,27:0,28:0,29:0,30:0};
+  let h='<div class="wd">'+['M','T','W','T','F','S','S'].map(x=>`<span>${x}</span>`).join('')+'</div><div class="grid7">';
+  for(let i=0;i<6;i++)h+=`<div class="day oth"><span class="n">${26+i}</span></div>`;
+  // Nov 2026 starts on Sunday -> 6 filler cells
+  for(let d=1;d<=30;d++){
+    const wd=(d+5)%7; const we=wd>=5;
+    let c='day'+(we?' we':'')+(d===11?' today':'')+(d===11?' sel':'')+(d>11?' fut':'');
+    const t=tot[d];
+    h+=`<div class="${c}"><span class="n">${d}</span>${t?`<span class="t">${t}.000</span>`:''}</div>`;
+  }
+  return h+'</div>';
+}
+function bars(vals,labels,max,h=170,w=640){
+  const bw=w/vals.length,pad=44;let s=`<svg viewBox="0 0 ${w} ${h+26}" width="100%" role="img" aria-label="Spending per month">`;
+  for(let i=0;i<=3;i++){const y=h-(h*i/3);s+=`<line x1="0" x2="${w}" y1="${y}" y2="${y}" stroke="#fff" stroke-opacity=".07"/><text x="0" y="${y-4}" font-size="10" fill="#636366">Rp${Math.round(max*i/3*1e6).toLocaleString('id-ID')}</text>`}
+  vals.forEach((v,i)=>{const bh=h*v/max,x=i*bw+pad/2,ww=bw-pad;
+    s+=`<rect x="${x}" y="${h-bh}" width="${ww}" height="${bh}" rx="5" fill="${i===vals.length-1?'#c8f060':'rgba(200,240,96,.32)'}"/><text x="${x+ww/2}" y="${h+18}" text-anchor="middle" font-size="11" fill="#8e8e93">${labels[i]}</text>`;
+    if(i===vals.length-1)s+=`<text x="${x+ww/2}" y="${h-bh-6}" text-anchor="middle" font-size="10" font-weight="600" fill="#c8f060">Rp${Math.round(v*1e6).toLocaleString('id-ID')}</text>`});
+  return s+'</svg>';
+}
+function donut(parts,size=150){
+  const r=size/2-14,c=2*Math.PI*r;let off=0,s=`<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="Category split"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#2c2c2e" stroke-width="18"/>`;
+  parts.forEach(p=>{const l=c*p[1]/100;s+=`<circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${p[2]}" stroke-width="18" stroke-dasharray="${l-2} ${c-l+2}" stroke-dashoffset="${-off}" transform="rotate(-90 ${size/2} ${size/2})"/>`;off+=l});
+  return s+'</svg>';
+}
+const cats=[['Food & Dining',34,'#c8f060','4.200.000'],['Transport',18,'#60a0f0','2.200.000'],['Groceries',16,'#4ade80','2.000.000'],['Shopping',14,'#a78bfa','1.700.000'],['Bills',12,'#ff6b6b','1.500.000'],['Other',6,'#8e8e93','700.000']];
+const legend=cats.map(c=>`<div><span class="dot" style="background:${c[2]}"></span><span>${c[0]}</span><span>${c[3]} · ${c[1]}%</span></div>`).join('');
+
+const txs=[
+ ['e','☕','Kopi Kenangan','Food & Dining · IDR BCA','−Rp 38.000','Today'],
+ ['e','🛵','Gojek','Transport · GoPay','−Rp 27.000','Today'],
+ ['i','💼','Salary — PT Maju Jaya','Salary · IDR BCA','+Rp 18.500.000','Nov 10'],
+ ['x','↔','Top up Flazz','Transfer · IDR BCA → Flazz','Rp 100.000','Nov 9'],
+ ['e','🛒','Indomaret','Groceries · IDR CIMB','−Rp 84.500','Nov 9'],
+ ['v','📈','QQQ · Buy 2 units','Invest · Stockbit','−Rp 3.250.000','Nov 7'],
+ ['e','💡','PLN Token','Bills · IDR BCA','−Rp 200.000','Nov 6'],
+ ['e','🍜','Mie Gacoan','Food & Dining · IDR CIMB','−Rp 64.000','Nov 6']
+];
+const txHtml=(arr,selIdx=-1)=>arr.map((t,i)=>`<div class="tx${i===selIdx?' sel':''}"><div class="ti ${t[0]}">${t[1]}</div><div class="tinfo"><div class="tp">${t[2]}</div><div class="tm">${t[3]}</div></div><div style="text-align:right"><div class="ta ${t[0]==='i'?'g':''}">${t[4]}</div><div class="tm">${t[5]}</div></div></div>`).join('');
+
+const screens={
+home:{t:'Home',crumb:'November 2026',cols:'1.35fr 1fr',tools:'<span class="status">Synced just now</span>',
+ note:'Calendar and the selected day sit side by side, so tapping a day never covers the month. On mobile the day list is a bottom panel.',
+ body:()=>`<div class="col" style="overflow:hidden"><div class="cal-head"><div class="mn">November</div><div class="bar"><i style="width:62%"></i></div><div class="am"><b>Rp 4.120.000</b><span>avg Rp374.000 / day</span></div></div>${calGrid()}
+ <div class="card" style="display:flex;justify-content:space-between;margin-top:4px"><div><div class="tm">Month income</div><div class="g" style="font-weight:700;font-size:16px">Rp 18.500.000</div></div><div><div class="tm">Month expense</div><div style="font-weight:700;font-size:16px">Rp 4.120.000</div></div><div><div class="tm">Invested</div><div class="b" style="font-weight:700;font-size:16px">Rp 3.250.000</div></div></div></div>
+ <div class="col"><div class="panel-h"><div class="d">Wed, 11 Nov</div><div class="t">−Rp 98.000</div></div>
+ ${txHtml(txs.slice(0,2))}
+ <div class="card" style="border-style:dashed;text-align:center;color:var(--text2);font-size:13px;padding:12px">+ Add transaction for this day</div>
+ <div class="ct" style="margin:10px 0 0">Coming up</div>
+ ${[['🔁','Netflix','Recurring · Nov 14','−Rp 186.000'],['🔁','Apartment rent','Recurring · Nov 25','−Rp 3.500.000']].map(r=>`<div class="tx" style="opacity:.75"><div class="ti e">${r[0]}</div><div class="tinfo"><div class="tp">${r[1]}</div><div class="tm">${r[2]}</div></div><div class="ta">${r[3]}</div></div>`).join('')}</div>`},
+
+add:{t:'Home',crumb:'November 2026',cols:'1.35fr 1fr',tools:'',scrimDlg:true,
+ note:'The slide-up sheet becomes a centered dialog. Same fields, same order, same Expense / Income / Invest / Transfer toggle. Keyboard: Enter saves, Esc closes.',
+ body:()=>`<div class="col" style="opacity:.5">${calGrid()}</div><div class="col" style="opacity:.5">${txHtml(txs.slice(0,3))}</div>`},
+
+accounts:{t:'Insights',crumb:'Accounts',cols:'1fr',tools:'',
+ note:'Account cards use a 4-column grid instead of 2. Total balance moves to a summary strip on top.',
+ body:()=>{
+  const a=[['IDR BCA','Rp 24.380.000','+Rp1.200.000 this month',1],['IDR CIMB','Rp 6.915.500','−Rp640.000 this month',0],['GoPay','Rp 412.000','',0],['Flazz','Rp 150.000','Top up Nov 9',0],['OVO','Rp 88.000','',0],['Cash','Rp 750.000','',0],['CC BCA','−Rp 2.140.000','Due Nov 20',0],['CC CIMB Niaga','−Rp 960.000','Due Nov 25',0]];
+  return `<div class="col"><div class="toggle-row" style="max-width:320px"><div class="toggle-btn active">Accounts</div><div class="toggle-btn">Insights</div></div>
+  <div class="sum"><div class="card"><div class="l">Total balance</div><div class="v">Rp 28.595.500</div><div class="s">8 accounts</div></div><div class="card"><div class="l">Cash &amp; bank</div><div class="v g">Rp 32.695.500</div><div class="s">6 accounts</div></div><div class="card"><div class="l">Credit cards owed</div><div class="v r">Rp 3.100.000</div><div class="s">2 cards</div></div></div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">${a.map(x=>`<div class="card" style="padding:14px"><div class="tm" style="margin-bottom:6px">${x[0]}</div><div style="font-size:19px;font-weight:700;letter-spacing:-.5px;font-variant-numeric:tabular-nums" class="${x[1].startsWith('−')?'r':''}">${x[1]}</div><div class="tm" style="margin-top:6px">${x[2]||'&nbsp;'}</div></div>`).join('')}</div></div>`}},
+
+insights:{t:'Insights',crumb:'Expense · Monthly',cols:'250px 1fr',tools:'',
+ note:'Filters move into a left column that stays visible while scrolling. Charts get room to sit next to each other.',
+ body:()=>`<div class="col"><div class="card"><div class="lab">Account filter</div><div class="input" style="font-size:13px">All accounts ▾</div></div>
+  <div class="card"><div class="lab">Type</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px"><div class="toggle-btn active">Expense</div><div class="toggle-btn">Income</div><div class="toggle-btn">Invest</div><div class="toggle-btn">Category</div></div></div>
+  <div class="card"><div class="lab">Period</div><div class="toggle-row"><div class="toggle-btn">Weekly</div><div class="toggle-btn active">Monthly</div><div class="toggle-btn">Yearly</div></div></div>
+  <div class="card"><div class="lab">Range</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px"><div class="toggle-btn">3 Mo</div><div class="toggle-btn active">6 Mo</div><div class="toggle-btn">12 Mo</div><div class="toggle-btn">YTD</div></div></div></div>
+  <div class="col"><div class="sum" style="grid-template-columns:repeat(4,1fr)"><div class="card"><div class="l">Total</div><div class="v">Rp26.400.000</div><div class="s">last 6 months</div></div><div class="card"><div class="l">Average</div><div class="v">Rp4.400.000</div><div class="s">per month</div></div><div class="card"><div class="l">Highest</div><div class="v r">Rp5.600.000</div><div class="s">September</div></div><div class="card"><div class="l">vs last month</div><div class="v g">−8%</div><div class="s">Rp360.000 lower</div></div></div>
+  <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:12px"><div class="card"><div class="ct">Expense per month</div>${bars([4.1,5.2,4.6,5.6,4.5,4.1],['Jun','Jul','Aug','Sep','Oct','Nov'],6)}</div>
+  <div class="card"><div class="ct">By category · Nov</div><div style="display:flex;gap:16px;align-items:center">${donut(cats)}<div class="legend" style="flex:1;font-size:12px">${cats.slice(0,4).map(c=>`<div><span class="dot" style="background:${c[2]}"></span><span>${c[0]}</span><span>${c[1]}%</span></div>`).join('')}</div></div></div></div>
+  <div class="card"><div class="ct">Top payees</div><table><tr><th>Payee</th><th>Category</th><th class="n">Count</th><th class="n">Total</th></tr>
+  <tr><td>Kopi Kenangan</td><td class="t2">Food &amp; Dining</td><td class="n">14</td><td class="n">Rp 532.000</td></tr><tr><td>Gojek</td><td class="t2">Transport</td><td class="n">11</td><td class="n">Rp 297.000</td></tr><tr><td>Indomaret</td><td class="t2">Groceries</td><td class="n">9</td><td class="n">Rp 760.500</td></tr></table></div></div>`},
+
+search:{t:'Search',crumb:'',cols:'1fr 1fr',tools:'',
+ note:'Results list on the left, full detail of the selected transaction on the right. Edit without leaving the list.',
+ body:()=>`<div class="col" style="grid-column:1"><div class="input" style="display:flex;gap:8px;align-items:center;border-radius:12px;padding:11px 14px"><span class="t2">${ic.search.replace('<svg','<svg width="17" height="17"')}</span><span>kopi</span><span style="margin-left:auto" class="t2">✕</span></div>
+  <div class="tm" style="padding:0 2px">18 results · Rp 684.000</div>${txHtml([['e','☕','Kopi Kenangan','Food & Dining · IDR BCA','−Rp 38.000','Nov 11'],['e','☕','Kopi Kenangan','Food & Dining · GoPay','−Rp 42.000','Nov 8'],['e','☕','Kopi Tuku','Food & Dining · IDR CIMB','−Rp 36.000','Nov 3'],['e','🫘','Biji kopi 1 kg','Groceries · IDR BCA','−Rp 185.000','Oct 28'],['e','☕','Kopi Kenangan','Food & Dining · IDR BCA','−Rp 38.000','Oct 25']],0)}</div>
+  <div class="col"><div class="card" style="padding:20px"><div style="display:flex;gap:12px;align-items:center;margin-bottom:16px"><div class="ti e" style="width:48px;height:48px;font-size:20px">☕</div><div><div style="font-size:20px;font-weight:700;letter-spacing:-.3px">Kopi Kenangan</div><div class="tm">Wednesday, 11 Nov 2026</div></div><div class="ta" style="margin-left:auto;font-size:22px">−Rp 38.000</div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px"><div><div class="lab">Category</div><div>Food &amp; Dining</div></div><div><div class="lab">Payment method</div><div>IDR BCA</div></div><div><div class="lab">Type</div><div>Expense</div></div><div><div class="lab">Recurring</div><div class="t2">No</div></div></div>
+  <div class="lab">Notes</div><div style="font-size:13px;border-top:.5px solid var(--border);padding-top:8px;margin-bottom:18px">Morning <span class="a" style="font-weight:500">kopi</span> before standup</div>
+  <div style="display:flex;gap:8px"><div class="btn p" style="flex:1;text-align:center">Edit</div><div class="btn d">Delete</div></div></div></div>`},
+
+profile:{t:'Profile',crumb:'',cols:'1fr',tools:'',
+ note:'The single-column menu becomes a grid of destination cards. The sidebar also lists these as sub-items so any page is one click away.',
+ body:()=>{
+  const it=[['Net Worth','Holdings and overview · Rp412.350.000',ic.ins],['Financial Goals','3 active goals',ic.home],['Recurring Transactions','7 active · 2 due this week',ic.home],['Email Import','4 senders · 2 to review',ic.search],['Settings','Categories, payment methods, assets',ic.home],['Account','Signed in · Google',ic.user]];
+  return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-content:start">${it.map(x=>`<div class="card" style="padding:20px;display:flex;flex-direction:column;gap:14px;min-height:150px"><div class="ti e" style="width:42px;height:42px;color:var(--accent)"><span style="width:22px;height:22px;display:block">${x[2]}</span></div><div><div style="font-size:17px;font-weight:600">${x[0]}</div><div class="tm" style="margin-top:4px;font-size:12px">${x[1]}</div></div></div>`).join('')}</div>`}},
+
+networth:{t:'Net Worth',crumb:'‹ Profile',cols:'1.5fr 1fr',tools:'<div class="toggle-row" style="width:240px"><div class="toggle-btn blue active">Holdings</div><div class="toggle-btn">Overview</div></div>',
+ note:'Holdings table replaces stacked cards, so more assets are readable at once. Allocation chart sits beside it.',
+ body:()=>`<div class="col"><div class="card" style="display:flex;justify-content:space-between;padding:10px 14px;font-size:11px"><span class="t2">Prices updated 2 min ago</span><span class="b">Refresh</span></div>
+  <div class="card"><table><tr><th>Asset</th><th>Type</th><th class="n">Units</th><th class="n">Avg price</th><th class="n">Value</th><th class="n">P/L</th></tr>
+  <tr><td>QQQ</td><td class="t2">Stock</td><td class="n">12</td><td class="n">Rp 7.050.000</td><td class="n">Rp 90.600.000</td><td class="n g">+7,1%</td></tr>
+  <tr><td>BBCA</td><td class="t2">Stock</td><td class="n">80 lot</td><td class="n">Rp 9.400</td><td class="n">Rp 78.400.000</td><td class="n g">+4,2%</td></tr>
+  <tr><td>Bibit Pasar Uang</td><td class="t2">Reksa Dana</td><td class="n">—</td><td class="n">—</td><td class="n">Rp 52.100.000</td><td class="n g">+3,0%</td></tr>
+  <tr><td>USD Cash</td><td class="t2">Forex</td><td class="n">$ 1.800</td><td class="n">Rp 15.900</td><td class="n">Rp 29.250.000</td><td class="n r">+2,1%</td></tr>
+  <tr><td>Emas</td><td class="t2">Gold</td><td class="n">25 g</td><td class="n">Rp 1.380.000</td><td class="n">Rp 36.250.000</td><td class="n g">+5,0%</td></tr></table></div></div>
+  <div class="col"><div class="card" style="text-align:center;padding:20px"><div class="lab">Total net worth</div><div style="font-size:30px;font-weight:800;letter-spacing:-1px;margin-top:2px">Rp 412.350.000</div><div class="g" style="font-size:12px;margin-top:4px">+Rp9.400.000 this month</div></div>
+  <div class="card"><div class="ct">Allocation</div><div style="display:flex;gap:18px;align-items:center">${donut([['Stocks',41,'#c8f060'],['Reksa Dana',25,'#60a0f0'],['Cash',17,'#4ade80'],['Gold',9,'#a78bfa'],['Forex',8,'#ff6b6b']],140)}<div class="legend" style="flex:1;font-size:12px">${[['Stocks',41,'#c8f060'],['Reksa Dana',25,'#60a0f0'],['Cash',17,'#4ade80'],['Gold',9,'#a78bfa'],['Forex',8,'#ff6b6b']].map(c=>`<div><span class="dot" style="background:${c[2]}"></span><span>${c[0]}</span><span>${c[1]}%</span></div>`).join('')}</div></div></div></div>`},
+
+goals:{t:'Financial Goals',crumb:'‹ Profile',cols:'1fr',tools:'<div class="btn p">+ New goal</div>',
+ note:'Goal cards flow into three columns. Same progress bars and colors as mobile.',
+ body:()=>{
+  const g=[['Emergency fund','Rp 54.000.000','Rp 72.000.000',75,'Target Mar 2027','a'],['Japan trip','Rp 18.400.000','Rp 40.000.000',46,'Target Oct 2027','blue'],['New laptop','Rp 21.800.000','Rp 22.000.000',99,'Almost there','a'],['Down payment','Rp 96.000.000','Rp 400.000.000',24,'Target Dec 2030','blue'],['Wedding gift','Rp 2.500.000','Rp 10.000.000',25,'Target Feb 2027','a'],['Car service','Rp 3.100.000','Rp 3.000.000',100,'Completed','a']];
+  return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-content:start">${g.map(x=>`<div class="card" style="padding:18px"><div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:16px;font-weight:600">${x[0]}</div><div class="${x[5]==='blue'?'b':'a'}" style="font-weight:700">${x[3]}%</div></div><div class="tm" style="margin:2px 0 14px">${x[4]}</div><div class="bar" style="height:6px"><i class="${x[5]==='blue'?'blue':''}" style="width:${x[3]}%"></i></div><div style="display:flex;justify-content:space-between;margin-top:10px;font-size:12px"><span style="font-weight:600">${x[1]}</span><span class="t2">of ${x[2]}</span></div></div>`).join('')}</div>`}},
+
+recurring:{t:'Recurring Transactions',crumb:'‹ Profile',cols:'1.4fr 1fr',tools:'<div class="btn p">+ New recurring</div>',
+ note:'Active rules on the left. The "due" prompt that appears as a popup on mobile becomes a standing panel on the right.',
+ body:()=>{
+  const r=[['Netflix','Entertainment · IDR BCA','Monthly · day 14','−Rp 186.000','r'],['Apartment rent','Housing · IDR BCA','Monthly · day 25','−Rp 3.500.000','r'],['Salary — PT Maju Jaya','Salary · IDR BCA','Monthly · day 25','+Rp 18.500.000','g'],['Gym membership','Health · CC BCA','Monthly · day 1','−Rp 450.000','r'],['Spotify','Entertainment · GoPay','Monthly · day 3','−Rp 59.000','r'],['Bibit auto-invest','Invest · IDR CIMB','Weekly · Mon','−Rp 250.000','v']];
+  return `<div class="col">${r.map(x=>`<div class="recurring tx" style="background:var(--bg3)"><span class="dot" style="width:10px;height:10px;background:${x[4]==='g'?'var(--green)':x[4]==='v'?'var(--blue)':'var(--red)'}"></span><div class="tinfo"><div class="tp" style="font-size:15px;font-weight:600">${x[0]}</div><div class="tm">${x[1]}</div><div class="tm" style="color:var(--text3)">${x[2]}</div></div><div class="ta ${x[4]==='g'?'g':''}" style="font-size:15px">${x[3]}</div></div>`).join('')}</div>
+  <div class="col"><div class="card" style="padding:18px"><div class="ct">Due this week</div>${[['Netflix','Nov 14','−Rp 186.000'],['Bibit auto-invest','Nov 16','−Rp 250.000']].map(x=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:.5px solid var(--border)"><span style="width:20px;height:20px;border-radius:5px;background:var(--accent);color:#000;display:grid;place-items:center;font-size:13px;font-weight:700">✓</span><div style="flex:1"><div style="font-weight:600;font-size:14px">${x[0]}</div><div class="tm">${x[1]}</div></div><div style="font-weight:700;font-size:14px">${x[2]}</div></div>`).join('')}<div class="btn p" style="margin-top:14px;text-align:center">Add 2 selected</div></div>
+  <div class="card"><div class="ct">Monthly commitment</div><div style="font-size:24px;font-weight:700;letter-spacing:-.5px">Rp 5.195.000</div><div class="tm" style="margin-top:4px">Fixed expenses, excluding income</div></div></div>`}},
+
+emailimport:{t:'Email Import',crumb:'‹ Profile',cols:'1fr 1.2fr',tools:'<div class="btn">Scan mailbox</div><div class="btn p">+ Add sender</div>',
+ note:'Senders and rules on the left, the review queue on the right, so you can approve receipts while checking the rule that produced them.',
+ body:()=>`<div class="col"><div class="ct" style="margin:0">Email types</div>
+  ${[['Grab receipts','grab@…','Food &amp; Dining · GoPay',1],['Tokopedia orders','no-reply@tokopedia…','Shopping · IDR BCA',1],['PLN bills','info@pln…','Bills · IDR BCA',1],['Traveloka bookings','cs@traveloka…','Travel · CC BCA',0]].map(x=>`<div class="row"><div><div class="rn">${x[0]}</div><div class="rm" style="margin-top:3px">${x[1]} · ${x[2]}</div></div><div class="sw ${x[3]?'on':''}"></div></div>`).join('')}</div>
+  <div class="col"><div class="ct" style="margin:0">Ready to review · 3</div>
+  ${[['Grab — GrabFood','Nov 11 · Food &amp; Dining · GoPay','−Rp 72.500'],['Tokopedia — Phone case','Nov 10 · Shopping · IDR BCA','−Rp 149.000'],['PLN — Token listrik','Nov 9 · Bills · IDR BCA','−Rp 200.000']].map(x=>`<div class="card" style="display:flex;align-items:center;gap:12px"><div class="ti e">✉</div><div class="tinfo"><div class="tp">${x[0]}</div><div class="tm">${x[1]}</div></div><div class="ta" style="margin-right:6px">${x[2]}</div><div class="btn">Skip</div><div class="btn p">Add</div></div>`).join('')}
+  <div class="card" style="display:flex;gap:10px;align-items:center;padding:10px 14px"><span class="badge b-w" style="margin:0">Unpaid</span><span class="tm">1 Traveloka booking is hidden until it is paid.</span></div></div>`},
+
+settings:{t:'Settings',crumb:'‹ Profile',cols:'1fr 1fr 1fr',tools:'',
+ note:'Categories, payment methods and assets are shown side by side instead of behind a two-tab toggle.',
+ body:()=>{
+  const list=(title,items)=>`<div class="col"><div class="config-section-header" style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:13px;font-weight:700">${title}</div><span class="a" style="font-size:13px;font-weight:600">+ Add</span></div>${items.map(x=>`<div class="row"><div class="rn"><span class="dot" style="background:${x[1]}"></span>${x[0]}</div><span class="rm">${x[2]}</span></div>`).join('')}<div class="rm" style="text-decoration:underline">Show archived (2)</div></div>`;
+  return list('Categories',[['Food &amp; Dining','#c8f060','Expense'],['Transport','#60a0f0','Expense'],['Groceries','#4ade80','Expense'],['Shopping','#a78bfa','Expense'],['Bills','#ff6b6b','Expense'],['Salary','#4ade80','Income']])+list('Payment methods',[['IDR BCA','#60a0f0','Bank'],['IDR CIMB','#ff6b6b','Bank'],['GoPay','#4ade80','E-wallet'],['Flazz','#a78bfa','Card'],['CC BCA','#60a0f0','Credit'],['Cash','#8e8e93','Cash']])+list('Assets',[['QQQ','#c8f060','Stock'],['BBCA','#60a0f0','Stock'],['Bibit Pasar Uang','#4ade80','Reksa Dana'],['USD Cash','#a78bfa','Forex'],['Emas','#ffb454','Gold']])}},
+
+account:{t:'Account',crumb:'‹ Profile',cols:'480px 1fr',tools:'',
+ note:'Account is a narrow settings card. Destructive actions stay separated and keep the two-step confirmation.',
+ body:()=>`<div class="col"><div class="card" style="padding:6px 16px">${[['Status','Signed in'],['Sheet size','1,2 MB'],['Last modified','Today, 09:41'],['Transactions','2.184'],['Investments','96'],['Build','v4.63']].map(x=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:11px 0;border-bottom:.5px solid var(--border)"><span class="t2">${x[0]}</span><span>${x[1]}</span></div>`).join('')}</div>
+  <div class="btn" style="text-align:center;padding:13px">Sign Out</div><div class="btn d" style="text-align:center;padding:13px">Delete Account &amp; Data</div></div>
+  <div class="col"><div class="card" style="padding:18px"><div class="ct">Your data</div><div style="font-size:13px;color:var(--text2);line-height:1.6">Everything lives in the "Nota Data" Google Sheet in your Drive. Deleting your account moves that sheet to Trash and signs you out. You can recover it for about 30 days.</div></div></div>`}
+};
+const order=['home','add','accounts','insights','search','profile','networth','goals','recurring','emailimport','settings','account'];
+const tabNames={home:'Calendar',add:'Add transaction',accounts:'Accounts',insights:'Insights',search:'Search',profile:'Profile',networth:'Net Worth',goals:'Goals',recurring:'Recurring',emailimport:'Email Import',settings:'Settings',account:'Account'};
+const navActive=k=>({home:'home',add:'home',accounts:'insights',insights:'insights',search:'search',profile:'profile'}[k]||k);
+
+let cur='home',sideOff=false;
+function sidebar(k){
+  const on=navActive(k);const subOn=(parent[k]||'')==='profile'||k==='profile';
+  const item=(id,label,icon)=>`<a class="${on===id?'on':''}" tabindex="-1">${icon}<span class="lbl">${label}</span></a>`;
+  return `<aside class="side"><div class="logo">nota<i>.</i><span class="ver">v4.63</span></div>
+  <div class="add">${ic.plus}<span class="lbl">Add transaction</span></div>
+  <nav class="nav">${item('home','Home',ic.home)}${item('insights','Insights',ic.ins)}${item('search','Search',ic.search)}${item('profile','Profile',ic.user)}
+  ${subs.map(s=>`<a class="sub ${on===s[0]?'on':''}" tabindex="-1"><span>${s[1]}</span></a>`).join('')}</nav>
+  <div class="spacer"></div><div class="user"><div class="avatar">T</div><div>Signed in<br><span style="color:var(--text3)">Nota Data sheet</span></div></div></aside>`;
+}
+function dlg(){return `<div class="scrim"><div class="dlg"><div style="display:flex;justify-content:space-between;align-items:center"><h3>New transaction</h3><span class="t2">✕</span></div>
+ <div class="pill"><div class="on">Expense</div><div>Income</div><div>Invest</div><div>Transfer</div></div>
+ <div class="f2"><div><div class="lab">Date</div><div class="input">Wed, 11 Nov 2026</div></div><div><div class="lab">Amount</div><div class="input" style="display:flex;gap:8px"><span class="t2">Rp</span><span>38.000</span></div></div></div>
+ <div class="f2"><div><div class="lab">Transaction</div><div class="input">Kopi Kenangan</div></div><div><div class="lab">Category</div><div class="input">Food &amp; Dining</div></div></div>
+ <div class="f2"><div><div class="lab">Payment method</div><div class="input">IDR BCA</div></div><div><div class="lab">Notes</div><div class="input t2">Add a note…</div></div></div>
+ <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 12px;font-size:13px;color:var(--text2)"><span>🔁 Set as recurring</span><div class="sw"></div></div>
+ <div class="submit">Save Transaction</div></div></div>`}
+function render(){
+  const s=screens[cur];const f=document.getElementById('frame');
+  f.className='frame';
+  const W=1280,H=800;f.style.width=W+'px';f.style.height=H+'px';
+  f.innerHTML=(sideOff?'':sidebar(cur))+`<main class="main"><div class="top"><div style="display:flex;align-items:center;gap:12px"><div class="tgl">${'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>'}</div><div>${sideOff?'<div class="logo" style="padding:0">nota<i>.</i></div>':''}<div class="crumb">${s.crumb}</div><h2>${s.t}</h2></div></div><div class="tools">${s.tools}</div></div><div class="body" style="grid-template-columns:${s.cols}">${s.body()}</div></main>${s.scrimDlg?dlg():''}`;
+  document.getElementById('note').textContent=s.note;
+  fit();
+  document.querySelectorAll('#tabs .tab').forEach(t=>t.classList.toggle('active',t.dataset.k===cur));
+  document.getElementById('sideBtn').textContent=sideOff?'Show sidebar':'Hide sidebar';document.getElementById('sideBtn').classList.toggle('active',sideOff);
+}
+function fit(){
+  const st=document.getElementById('stage'),f=document.getElementById('frame');
+  const W=parseInt(f.style.width),H=parseInt(f.style.height);const sc=Math.min(1,st.clientWidth/W);
+  f.style.transform=`scale(${sc})`;st.style.height=(H*sc)+'px';
+}
+const tabs=document.getElementById('tabs');
+order.forEach(k=>{const b=document.createElement('div');b.className='tab';b.dataset.k=k;b.tabIndex=0;b.setAttribute('role','button');b.textContent=tabNames[k];
+  const go=()=>{cur=k;try{history.replaceState(null,'','#'+k)}catch(e){}render()};b.onclick=go;b.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}};tabs.appendChild(b)});
+{const b=document.getElementById('sideBtn');const go=()=>{sideOff=!sideOff;render()};b.onclick=go;b.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}}}
+function detect(){
+  const w=window.innerWidth,land=w>window.innerHeight;
+  const d=w<700?'phone':(w<1200?'tablet':'desktop');
+  document.querySelectorAll('#detect .chip').forEach(c=>c.classList.toggle('on',c.dataset.d===d));
+}
+window.addEventListener('resize',()=>{fit();detect()});
+const h=location.hash.slice(1);if(screens[h])cur=h;
+detect();render();
+</script>

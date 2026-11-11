@@ -200,6 +200,7 @@ function calMakeTxByDayResolver(homeYear, homeMonth, homeTxByDay) {
 
 function calFormatAmount(n) {
   if (!n) return '';
+  if (document.documentElement.classList.contains('wide')) return Math.round(n).toLocaleString('id-ID');
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000)    return Math.round(n / 1000) + 'K';
   return String(n);

@@ -856,10 +856,13 @@ function buildDonut(data,size){
     paths+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="13" stroke-dasharray="${dash} ${circ-dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
     offset+=dash;
   });
+  // Exact amounts (wide layout) are longer than the old "1.2jt" form: shrink the centre text to fit the hole
+  const centerLbl=fRpS(total), holeW=2*(r-7)-6;
+  const centerFs=Math.max(6,Math.min(10,+(holeW/(centerLbl.length*0.6)).toFixed(1)));
   return`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="13"/>
     ${paths}
-    <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" fill="var(--text)" font-size="10" font-weight="700">${fRpS(total)}</text>
+    <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" fill="var(--text)" font-size="${centerFs}" font-weight="700">${centerLbl}</text>
   </svg>`;
 }
 
@@ -1768,7 +1771,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
             callbacks: {
               label: ctx => {
                 const pct = Math.round((ctx.parsed / total) * 100);
-                const amt = ctx.parsed >= 1e6
+                const amt = (ctx.parsed >= 1e6 && !document.documentElement.classList.contains('wide'))
                   ? 'Rp' + (ctx.parsed/1e6).toFixed(1) + 'jt'
                   : 'Rp' + Math.round(ctx.parsed).toLocaleString('id-ID');
                 return ` ${amt} · ${pct}%`;

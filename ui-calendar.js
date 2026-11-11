@@ -21,6 +21,8 @@ let calExpandedMonths = {};     // tracks which collapsed month rows are expande
 let calExpandedYears  = {};     // tracks which year pills are expanded
 let calOlderCollapsed = {};
 let calFutureCollapsed = {};
+let calFutureDefaulted = false;
+let calPastDefaulted = false;   // desktop: past months start expanded, applied once (user toggles then persist)
 let calCurrentMonthCollapsed = false;
 let calExpandedYearMonths = {}; // tracks which year-month rows are expanded
 
@@ -588,6 +590,13 @@ function initCalendar() {
   // Build all prior months (Jan → curMonth−1) as collapsed rows
   const priorMonths = [];
   for (let m = 1; m < month; m++) priorMonths.push({ y: year, m });
+  // Desktop/tablet landscape: every month starts expanded (phones keep them collapsed)
+  if (document.documentElement.classList.contains('wide') && !calPastDefaulted) {
+    calPastDefaulted = true;
+    priorMonths.forEach(({ y, m }) => { calExpandedMonths[`${y}-${m}`] = true; });
+  } else if (!document.documentElement.classList.contains('wide') && calPastDefaulted) {
+    calPastDefaulted = false; calExpandedMonths = {};   // back on a phone: collapsed again
+  }
   const colEl = document.getElementById('calCollapsedMonths');
   if (priorMonths.length > 0) {
     colEl.style.display = 'block';
@@ -1184,19 +1193,25 @@ function calRefreshOpenDayPanel() {
 const CAL_FUTURE_MONTHS = 12;
 function calPopulateFutureMonths() {
   const today = new Date();
+  const wide = document.documentElement.classList.contains('wide');
   let html = '';
   for (let i = 1; i <= CAL_FUTURE_MONTHS; i++) {
     const d = new Date(today.getFullYear(), today.getMonth() + i, 1);   // Date handles the year rollover
     const y = d.getFullYear(), m = d.getMonth() + 1;
     const key = `${y}-${m}`;
-    const btn = `<button class="cal-month-collapse-btn" onclick="calToggleFutureMonth('${key}')">›</button>`;
-    calFutureCollapsed[key] = true;
+    // Desktop/tablet landscape: expanded by default (a user's own toggle survives a re-render); phones: collapsed
+    if (!wide) calFutureCollapsed[key] = true;
+    else if (!calFutureDefaulted) calFutureCollapsed[key] = false;
+    const btn = `<button class="cal-month-collapse-btn${calFutureCollapsed[key] ? '' : ' open'}" onclick="calToggleFutureMonth('${key}')">›</button>`;
     html += `<div class="cal-month-divider"></div><div class="cal-future-month" data-key="${key}">${calBuildMonthHTML(y, m, today, btn)}</div>`;
   }
+  calFutureDefaulted = wide;   // after the first wide build, a user's own toggles survive re-renders
   const el = document.getElementById('calFutureMonths');
   el.innerHTML = html;
-  // Hide the week rows of every future month (collapsed by default)
-  el.querySelectorAll('.cal-future-month .cal-week-section').forEach(sec => sec.style.display = 'none');
+  // Hide the week rows of every collapsed future month
+  el.querySelectorAll('.cal-future-month').forEach(c => {
+    if (calFutureCollapsed[c.dataset.key]) c.querySelectorAll('.cal-week-section').forEach(sec => sec.style.display = 'none');
+  });
 }
 
 function calReinit() {
@@ -1210,6 +1225,8 @@ function calReinit() {
   calExpandedYearMonths = {};
   calOlderCollapsed = {};
   calFutureCollapsed = {};
+  calPastDefaulted = false;
+  calFutureDefaulted = false;
   calCurrentMonthCollapsed = false;
   calSelectedCell = null;
   document.getElementById('calOlderMonths').innerHTML = '';

@@ -102,7 +102,7 @@ const Auth = (() => {
       // would be confusing/wrong for them, so show reconnect-appropriate text.
       const returning = !!localStorage.getItem('notaPublic_spreadsheetId');
       const intro = returning
-        ? `<p>Reconnecting to Google — tap below to finish signing in and pick
+        ? `<p>Reconnecting to Google — ${notaTap()} below to finish signing in and pick
              up right where you left off.</p>`
         : `<p>Sign in with Google to create your own private Nota spreadsheet.
              Your data stays in a Google Sheet in your own Drive — this app

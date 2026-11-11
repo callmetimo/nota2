@@ -564,7 +564,7 @@ function renderWeekly(){
     });
   }).join('');
   const barEl=document.getElementById('weeklyBarCard');
-  if(barEl)barEl.innerHTML=`<div class="chart-card"><div class="chart-card-title">Weekly Total — tap week for breakdown</div><div class="bar-chart-wrap"><div class="bar-chart">${barCols}</div></div></div>`;
+  if(barEl)barEl.innerHTML=`<div class="chart-card"><div class="chart-card-title">Weekly Total — ${notaTap()} week for breakdown</div><div class="bar-chart-wrap"><div class="bar-chart">${barCols}</div></div></div>`;
 
   const catData=catMap[selKey]||{},total=Object.values(catData).reduce((a,b)=>a+b,0),selRows=rawRows[selKey]||{};
   const sorted=Object.entries(catData).sort((a,b)=>b[1]-a[1]);
@@ -580,7 +580,7 @@ function renderWeekly(){
         detailHTML=detailSectionHTML(`${esc(wSelCat)} · ${fRp(catData[wSelCat])}`,color,txList,r=>`${r.d} ${MO[r.m]}`);
       }
       donutEl.innerHTML=`<div class="chart-card">
-        <div class="chart-card-title">Breakdown ${selKey} — tap category for transactions</div>
+        <div class="chart-card-title">Breakdown ${selKey} — ${notaTap()} category for transactions</div>
         <div class="donut-wrap"><div>${buildDonut(catData,donutSize())}</div><div class="donut-legend">${legendHTML}</div></div>
         ${detailHTML}</div>`;
     } else {
@@ -690,7 +690,7 @@ function renderMonthly(){
       onclick:`selectMonth('${escJsAttr(k)}')`
     });
   }).join('');
-  document.getElementById('monthlyBarCard').innerHTML=`<div class="chart-card"><div class="chart-card-title">Monthly Total — tap month for breakdown</div><div class="bar-chart-wrap"><div class="bar-chart">${barCols}</div></div></div>`;
+  document.getElementById('monthlyBarCard').innerHTML=`<div class="chart-card"><div class="chart-card-title">Monthly Total — ${notaTap()} month for breakdown</div><div class="bar-chart-wrap"><div class="bar-chart">${barCols}</div></div></div>`;
 
   const catData=catMap[selKey]||{},total=Object.values(catData).reduce((a,b)=>a+b,0),selRows=rawRows[selKey]||{};
   const sorted=Object.entries(catData).sort((a,b)=>b[1]-a[1]);
@@ -704,7 +704,7 @@ function renderMonthly(){
       detailHTML=detailSectionHTML(`${esc(mSelCat)} · ${fRp(catData[mSelCat])}`,color,txList,r=>`${r.d} ${MO[r.m]}`);
     }
     document.getElementById('monthlyDonutCard').innerHTML=`<div class="chart-card">
-      <div class="chart-card-title">Breakdown ${selKey} — tap category for transactions</div>
+      <div class="chart-card-title">Breakdown ${selKey} — ${notaTap()} category for transactions</div>
       <div class="donut-wrap"><div>${buildDonut(catData,donutSize())}</div><div class="donut-legend">${legendHTML}</div></div>
       ${detailHTML}</div>`;
   } else {
@@ -750,7 +750,7 @@ function renderYearly(){
       onclick:`selectYear(${y})`
     });
   }).join('');
-  document.getElementById('yearlyBarCard').innerHTML=`<div class="chart-card"><div class="chart-card-title">Yearly Total — tap year for detail</div><div class="bar-chart-wrap"><div class="bar-chart">${barCols}</div></div></div>`;
+  document.getElementById('yearlyBarCard').innerHTML=`<div class="chart-card"><div class="chart-card-title">Yearly Total — ${notaTap()} year for detail</div><div class="bar-chart-wrap"><div class="bar-chart">${barCols}</div></div></div>`;
 
   const mbData=monthBreak[selY]||{},mbKeys=MO.map(m=>`${m} ${selY}`);
   const mbMax=Math.max(...mbKeys.map(k=>mbData[k]||0),1);
@@ -777,7 +777,7 @@ function renderYearly(){
       detailHTML=detailSectionHTML(`${esc(ySelCat)} ${selY} · ${fRp(catData[ySelCat])}`,color,txList,r=>esc(r.mk));
     }
     document.getElementById('yearlyDonutCard').innerHTML=`<div class="chart-card">
-      <div class="chart-card-title">Category Breakdown ${selY} — tap for transactions</div>
+      <div class="chart-card-title">Category Breakdown ${selY} — ${notaTap()} for transactions</div>
       <div class="donut-wrap"><div>${buildDonut(catData,donutSize())}</div><div class="donut-legend">${legendHTML}</div></div>
       ${detailHTML}</div>`;
   } else document.getElementById('yearlyDonutCard').innerHTML='';

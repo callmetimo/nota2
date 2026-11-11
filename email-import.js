@@ -564,7 +564,7 @@ const EmailImport = (() => {
   function renderPopup() {
     const n = pending.length;
     document.getElementById('emailImportSubtitle').textContent =
-      `${n} new transaction${n !== 1 ? 's' : ''} found in your bank emails. Tap one to edit.`;
+      `${n} new transaction${n !== 1 ? 's' : ''} found in your bank emails. ${notaTap(1)} one to edit.`;
     // Same day + amount in two emails (e.g. a card ride: the bank notice and the Gojek receipt).
     const dupCount = {};
     pending.forEach(it => { const k = `${it.date}|${it.amount}`; dupCount[k] = (dupCount[k] || 0) + 1; });
@@ -972,9 +972,9 @@ const EmailImport = (() => {
           <span class="smart-pill ${s.action === 'ask' ? 'selected' : ''}" onclick="EmailImport.setSourceAction(${i},'ask')">Ask me</span>
           <span class="smart-pill ${s.action === 'ignore' ? 'selected' : ''}" onclick="EmailImport.setSourceAction(${i},'ignore')">Ignore</span>
         </div></div>`;
-    }).join('') : `<p style="font-size:12px;color:var(--text2);padding:4px 4px 0;line-height:1.5">No email types yet, so nothing is read. Tap <b>+ Add</b> and pick an email you received (for example a bank notice or a receipt): Nota fills in the sender and reads it for you.</p>`;
+    }).join('') : `<p style="font-size:12px;color:var(--text2);padding:4px 4px 0;line-height:1.5">No email types yet, so nothing is read. ${notaTap(1)} <b>+ Add</b> and pick an email you received (for example a bank notice or a receipt): Nota fills in the sender and reads it for you.</p>`;
     h += gm ? `<button class="config-add-btn" style="padding:8px 4px 0;color:var(--accent)" onclick="EmailImport.openScan()">Scan my mailbox for email types</button>` : '';
-    h += `<p style="font-size:11px;color:var(--text2);margin:4px 4px 0;line-height:1.4">Tap a type to change it. The first type that matches an email is used, so put specific types above general ones. Credit card bill payments are recorded as a transfer from your account to the card, so they are not counted as spending twice.</p>`;
+    h += `<p style="font-size:11px;color:var(--text2);margin:4px 4px 0;line-height:1.4">${notaTap(1)} a type to change it. The first type that matches an email is used, so put specific types above general ones. Credit card bill payments are recorded as a transfer from your account to the card, so they are not counted as spending twice.</p>`;
 
     // Accounts
     h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 8px"><span class="form-label" style="margin:0">Account &amp; card → payment method</span><button class="config-add-btn" onclick="EmailImport.openAcct(-1)">+ Add</button></div>`;
@@ -1286,7 +1286,7 @@ const EmailImport = (() => {
       await Promise.all([worker(), worker(), worker(), worker()]);
       pickRows.sort((a, b) => b.t - a.t);
       const body = pickRows.length
-        ? `<p style="font-size:12px;color:var(--text2);margin-bottom:8px">Tap an email that is the kind you want Nota to record.</p>` + pickRows.map((r, i) => {
+        ? `<p style="font-size:12px;color:var(--text2);margin-bottom:8px">${notaTap(1)} an email that is the kind you want Nota to record.</p>` + pickRows.map((r, i) => {
           const cov = sourceFor(r.from, r.subject, '');
           return `<div class="config-row" onclick="EmailImport.pickEmail(${i})">
             <div style="min-width:0"><div class="config-row-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(brandOf(r.from))} · ${esc(maskDigits(r.subject) || '(no subject)')}</div>

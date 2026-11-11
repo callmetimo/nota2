@@ -680,10 +680,14 @@ html.wide .modal-handle{display:none}
     var device=!wide?'phone':((w>=1200&&!coarse)?'desktop':'tablet');
     return {wide:wide,device:device};
   }
+  // "Tap" on touch devices, "Click" on desktop. notaTap(true) = capitalised.
+  window.notaTap=function(cap){var d=root.getAttribute('data-device')==='desktop';return d?(cap?'Click':'click'):(cap?'Tap':'tap')};
+  window.notaTapText=function(){var n=document.querySelectorAll('[data-tap]');for(var i=0;i<n.length;i++)n[i].textContent=window.notaTap(n[i].getAttribute('data-tap')==='1')};
   window.applyDeviceLayout=function(){
     var m=measure(), changed=root.classList.contains('wide')!==m.wide;
     root.classList.toggle('wide',m.wide);
     root.setAttribute('data-device',m.device);
+    window.notaTapText();
     if(changed&&window._layoutReady){
       if(typeof updateHeaderHeight==='function')updateHeaderHeight();
       var p=document.querySelector('.page.active'),t=p&&p.id.replace('page-','');
@@ -752,7 +756,7 @@ html.wide .modal-handle{display:none}
     <div class="cal-tx-list" id="calTxList">
       <div class="cal-tx-empty">
         <div class="cal-tx-empty-icon">📅</div>
-        <div class="cal-tx-empty-text">Tap a day to see transactions</div>
+        <div class="cal-tx-empty-text"><span data-tap="1">Tap</span> a day to see transactions</div>
       </div>
     </div>
   </div>
@@ -1395,7 +1399,7 @@ html.wide .modal-handle{display:none}
     <div class="modal-title">✉️ New from bank emails</div>
     <p id="emailImportSubtitle" style="color:var(--text2);font-size:13px;margin:2px 0 14px"></p>
     <div id="emailImportList"></div>
-    <p style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.4">Orange rows need a category or payment method first — tap them to fill in.</p>
+    <p style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.4">Orange rows need a category or payment method first — <span data-tap="0">tap</span> them to fill in.</p>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="submit-btn" style="flex:1;background:var(--bg3);color:var(--text);margin-top:0" onclick="EmailImport.skipAll()">Skip all</button>
       <button class="submit-btn expense" style="flex:2;margin-top:0" id="emailImportAddBtn" onclick="EmailImport.addSelected()">Add</button>
@@ -1871,7 +1875,7 @@ html.wide .modal-handle{display:none}
   let tappedYet = false;
   setTimeout(() => {
     if (tappedYet || Auth.hasValidToken()) return;
-    showHint(document.documentElement.dataset.device === 'desktop' ? 'Click anywhere to sync' : 'Tap anywhere to sync');
+    showHint(notaTap(1) + ' anywhere to sync');
   }, 1500);
 
   // Pure visual feedback that the app is responsive, independent of whether
@@ -1926,7 +1930,7 @@ html.wide .modal-handle{display:none}
       clearToast();
       if (silentRetriesUsed < MAX_SILENT_RETRIES) {
         _armNextTapRetry(); // still within budget — try again on the next tap
-        showHint('Tap again to finish syncing');
+        showHint(notaTap(1) + ' again to finish syncing');
       } else {
         // Quiet retries exhausted — fall back to the existing, UNCHANGED
         // stuck-recovery banner (index.html's own IIFE already listens for
@@ -1951,7 +1955,7 @@ html.wide .modal-handle{display:none}
       _onSyncSuccess();
     } else {
       _armNextTapRetry();
-      showHint('Tap again to finish syncing');
+      showHint(notaTap(1) + ' again to finish syncing');
     }
   }
   document.addEventListener('click', _onFirstTap, { capture: true });
@@ -1965,7 +1969,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.72';
+const APP_VERSION = 'v4.73';
 const APP_BUILD = '2026-11-11a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -5367,6 +5371,7 @@ async function retryPendingQueue() {
       set(cur()+(e.key==='ArrowLeft'?24:-24),true);
     });
   })();
+  window.notaTapText();
   window._layoutReady=true;
 })();
 </script>

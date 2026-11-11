@@ -1106,7 +1106,7 @@ function calSelectDay(cell, dateStr, totalStr, noScroll) {
     document.getElementById('calTxList').innerHTML = `
       <div class="cal-tx-empty">
         <div class="cal-tx-empty-icon">📭</div>
-        <div class="cal-tx-empty-text">No transactions this day.<br>Tap + to add one.</div>
+        <div class="cal-tx-empty-text">No transactions this day.<br>${notaTap(1)} + to add one.</div>
       </div>`;
     calSetPanelH(0);
   } else {
@@ -1127,7 +1127,7 @@ function calSelectDay(cell, dateStr, totalStr, noScroll) {
         <div class="cal-tx-dot ${tx.type||''}${tx.synced===false?' unsynced':''}"></div>
         <div class="cal-tx-info">
           <div class="cal-tx-tx">${esc(tx.tx)}${tx.projected ? '<span class="proj-badge">Projected</span>' : ''}${isTrulyFuture ? '<span class="future-badge">Future</span>' : ''}</div>
-          <div class="cal-tx-meta">${isTransfer ? 'Transfer' : esc(tx.cat) + ' - ' + esc(tx.pm)}${canSyncProjected ? ' · Tap for options' : ''}${canTransferEdit ? ' · Tap to edit' : ''}</div>
+          <div class="cal-tx-meta">${isTransfer ? 'Transfer' : esc(tx.cat) + ' - ' + esc(tx.pm)}${canSyncProjected ? ` · ${notaTap(1)} for options` : ''}${canTransferEdit ? ` · ${notaTap(1)} to edit` : ''}</div>
         </div>
         <div class="cal-tx-amt ${tx.type||''}">${fRp(tx.amt)}</div>
         ${canEdit || canSyncProjected || canTransferEdit ? '<div class="cal-tx-edit-chevron">›</div>' : ''}

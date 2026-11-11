@@ -1074,7 +1074,7 @@ function renderGoals() {
   const container = document.getElementById('goalsListContainer');
   if (!container) return;
   if (!GOALS.length) {
-    container.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--text2);font-size:14px;line-height:1.6">No goals yet.<br>Tap <strong style="color:var(--accent)">+</strong> to add your first goal.</div>';
+    container.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--text2);font-size:14px;line-height:1.6">No goals yet.<br>' + notaTap(1) + ' <strong style="color:var(--accent)">+</strong> to add your first goal.</div>';
     return;
   }
   const active = GOALS.filter(g => !g.completed);
@@ -1929,7 +1929,7 @@ function renderRecurringList() {
   const rules = loadRecurring();
   const container = document.getElementById('recurringListContainer');
   if (!rules.length) {
-    container.innerHTML = '<p style="color:var(--text2);text-align:center;padding:48px 0 24px;font-size:14px">No recurring transactions yet.<br>Tap + to add one.</p>';
+    container.innerHTML = '<p style="color:var(--text2);text-align:center;padding:48px 0 24px;font-size:14px">No recurring transactions yet.<br>' + notaTap(1) + ' + to add one.</p>';
     return;
   }
   const expenses = rules.filter(r => r.type === 'expense');

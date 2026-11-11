@@ -581,7 +581,7 @@ function renderWeekly(){
       }
       donutEl.innerHTML=`<div class="chart-card">
         <div class="chart-card-title">Breakdown ${selKey} — tap category for transactions</div>
-        <div class="donut-wrap"><div>${buildDonut(catData,100)}</div><div class="donut-legend">${legendHTML}</div></div>
+        <div class="donut-wrap"><div>${buildDonut(catData,donutSize())}</div><div class="donut-legend">${legendHTML}</div></div>
         ${detailHTML}</div>`;
     } else {
       donutEl.innerHTML=`<div class="chart-card"><div class="chart-card-title">Breakdown ${selKey}</div><div class="empty-state" style="padding:20px">No data</div></div>`;
@@ -705,7 +705,7 @@ function renderMonthly(){
     }
     document.getElementById('monthlyDonutCard').innerHTML=`<div class="chart-card">
       <div class="chart-card-title">Breakdown ${selKey} — tap category for transactions</div>
-      <div class="donut-wrap"><div>${buildDonut(catData,100)}</div><div class="donut-legend">${legendHTML}</div></div>
+      <div class="donut-wrap"><div>${buildDonut(catData,donutSize())}</div><div class="donut-legend">${legendHTML}</div></div>
       ${detailHTML}</div>`;
   } else {
     document.getElementById('monthlyDonutCard').innerHTML=`<div class="chart-card"><div class="chart-card-title">Breakdown ${selKey}</div><div class="empty-state" style="padding:20px">No data</div></div>`;
@@ -778,7 +778,7 @@ function renderYearly(){
     }
     document.getElementById('yearlyDonutCard').innerHTML=`<div class="chart-card">
       <div class="chart-card-title">Category Breakdown ${selY} — tap for transactions</div>
-      <div class="donut-wrap"><div>${buildDonut(catData,100)}</div><div class="donut-legend">${legendHTML}</div></div>
+      <div class="donut-wrap"><div>${buildDonut(catData,donutSize())}</div><div class="donut-legend">${legendHTML}</div></div>
       ${detailHTML}</div>`;
   } else document.getElementById('yearlyDonutCard').innerHTML='';
 }
@@ -845,22 +845,24 @@ function renderCategory(){
 }
 function selectCat(cat){cSelCat=cat;renderCategory()}
 
+// Donut diameter: bigger on the wide layout so the breakdown is easy to read
+function donutSize(){return document.documentElement.classList.contains('wide')?260:100}
 function buildDonut(data,size){
   const total=Object.values(data).reduce((a,b)=>a+b,0);
   if(!total)return'';
   const sorted=Object.entries(data).sort((a,b)=>b[1]-a[1]);
-  const r=size/2-10,cx=size/2,cy=size/2,circ=2*Math.PI*r;
+  const sw=size*0.13,r=size/2-sw/2-3.5,cx=size/2,cy=size/2,circ=2*Math.PI*r;
   let offset=0,paths='';
   sorted.forEach(([cat,val])=>{
     const pct=val/total,dash=pct*circ,color=CAT_COLORS[cat]||getTypeColor(cat)||CAT_COLORS['Other'];
-    paths+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="13" stroke-dasharray="${dash} ${circ-dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
+    paths+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash} ${circ-dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
     offset+=dash;
   });
   // Exact amounts (wide layout) are longer than the old "1.2jt" form: shrink the centre text to fit the hole
-  const centerLbl=fRpS(total), holeW=2*(r-7)-6;
-  const centerFs=Math.max(6,Math.min(10,+(holeW/(centerLbl.length*0.6)).toFixed(1)));
+  const centerLbl=fRpS(total), holeW=2*(r-sw/2)-6;
+  const centerFs=Math.max(6,Math.min(size/10,+(holeW/(centerLbl.length*0.6)).toFixed(1)));
   return`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="13"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="${sw}"/>
     ${paths}
     <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" fill="var(--text)" font-size="${centerFs}" font-weight="700">${centerLbl}</text>
   </svg>`;

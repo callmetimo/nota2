@@ -649,6 +649,10 @@ function calScrollToCurrentMonth() {
     });
   }
   requestAnimationFrame(attempt);
+  // Wide layout: data/fonts/panel layout can settle after the first pin, so pin once more
+  if (document.documentElement.classList.contains('wide')) {
+    setTimeout(() => { if (myToken === calScrollToken) attempt(); }, 600);
+  }
 }
 
 function calOnScroll() { /* all months pre-rendered on init */ }

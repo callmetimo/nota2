@@ -511,7 +511,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 /* ══ WIDE LAYOUT (tablet / desktop landscape) ═════════════════════════════
    Everything below only applies when html.wide is set by applyDeviceLayout()
    (viewport >= 900px wide AND landscape). Phones keep the layout above. */
-.side-toggle,.side-brand,.side-subs,.fab-lbl,.nav-lbl{display:none}
+.side-toggle,.side-brand,.side-subs,.fab-lbl,.nav-lbl,.cal-resizer{display:none}
 html.wide{--bottom-nav-h:0px;--side-w:232px}
 html.wide.side-off{--side-w:0px}
 html.wide body{max-width:none;margin:0;padding-left:var(--side-w);transition:padding-left .25s ease}
@@ -550,10 +550,28 @@ html.wide .side-toggle:focus-visible,html.wide .nav-btn:focus-visible,html.wide 
 
 /* Home: calendar left, selected-day panel right */
 html.wide #page-home{padding:0}
-html.wide #page-home.active{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr);grid-template-rows:auto minmax(0,1fr)}
+html.wide{--tx-pane-w:300px;color-scheme:dark}
+html.wide #page-home.active{display:grid;grid-template-columns:minmax(0,1fr) 10px clamp(240px,var(--tx-pane-w),70vw);grid-template-rows:auto minmax(0,1fr)}
 html.wide #stuckRecoveryBanner{grid-column:1/-1}
-html.wide .cal-scroll{grid-column:1;grid-row:2;flex:none;border-bottom:none;border-right:0.5px solid var(--border);padding:0 12px 24px}
-html.wide .cal-tx-panel{grid-column:2;grid-row:2;flex:none;border-top:none}
+html.wide .cal-scroll{grid-column:1;grid-row:2;flex:none;border-bottom:none;padding:0 16px 60vh}
+html.wide .cal-resizer{display:block;grid-column:2;grid-row:2;cursor:col-resize;position:relative;touch-action:none;outline:none}
+html.wide .cal-resizer::before{content:'';position:absolute;top:0;bottom:0;left:4px;width:1px;background:var(--border);transition:background .15s,width .15s,left .15s}
+html.wide .cal-resizer:hover::before,html.wide .cal-resizer.drag::before,html.wide .cal-resizer:focus-visible::before{background:var(--accent);width:2px;left:4px}
+html.wide .cal-resizer::after{content:'';position:absolute;top:50%;left:2px;width:6px;height:36px;margin-top:-18px;border-radius:3px;background:var(--bg4);opacity:0;transition:opacity .15s}
+html.wide .cal-resizer:hover::after,html.wide .cal-resizer.drag::after{opacity:1}
+html.wide.pane-drag,html.wide.pane-drag *{cursor:col-resize!important;user-select:none!important}
+/* Calendar type is larger on wide screens */
+html.wide .cal-week-section{padding:6px 4px 2px}
+html.wide .cal-wday-row{gap:6px;padding-bottom:6px}html.wide .cal-wday{font-size:13px}
+html.wide .cal-week-row{gap:6px;margin-bottom:6px;grid-auto-rows:84px}
+html.wide .cal-day{height:84px;padding:10px 2px 6px;gap:6px;border-radius:10px}
+html.wide .cal-day-num{font-size:22px}
+html.wide .cal-day-total{font-size:14px;font-weight:600}
+html.wide .cal-month-label{padding:14px 8px 10px}
+html.wide .cal-month-name{font-size:26px;min-width:170px}
+html.wide .cal-progress-amount{font-size:20px}html.wide .cal-progress-avg{font-size:13px}html.wide .cal-progress-right{min-width:150px}
+html.wide .cal-month-collapsed .cal-month-name{font-size:17px;min-width:130px}html.wide .cal-month-collapsed .cal-progress-amount{font-size:16px}
+html.wide .cal-tx-panel{grid-column:3;grid-row:2;flex:none;border-top:none}
 
 /* Other pages: readable width, centred in the available space */
 html.wide #page-insights.active,html.wide #page-networth.active,html.wide #page-goals.active,html.wide #page-recurring.active,html.wide #page-profile.active,html.wide #page-settings.active,html.wide #page-account.active,html.wide #page-emailimport.active{
@@ -562,7 +580,7 @@ html.wide #page-account.active{padding-left:max(28px,calc((100% - 560px)/2));pad
 html.wide #page-search #searchResults,html.wide #page-search #searchMonitorContainer,html.wide #page-search .search-page-header,html.wide #page-search #searchResultsCount{padding-left:max(28px,calc((100% - 900px)/2));padding-right:max(28px,calc((100% - 900px)/2))}
 html.wide .acct-bal-section{padding-left:0;padding-right:0}
 html.wide .acct-bal-grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
-html.wide .chart-page-section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:16px;align-items:start}
+html.wide .chart-page-section{display:block}
 html.wide .chart-page-section>.insights-sticky,html.wide .chart-page-section>div[style*="height:14px"],html.wide .chart-page-section>[id$="Summary"]{grid-column:1/-1}
 html.wide #goalsListContainer{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;align-items:start}
 html.wide #goalsListContainer>.goal-card{margin-bottom:0}
@@ -590,9 +608,14 @@ html.wide #searchResults:not([style*="display: none"]):not([style*="display:none
 html.wide #searchResults>.search-loading,html.wide #searchResults>.empty-state{grid-column:1/-1}
 html.wide #page-search #searchResults,html.wide #page-search #searchMonitorContainer,html.wide #page-search .search-page-header,html.wide #page-search #searchResultsCount{padding-left:max(28px,calc((100% - 1240px)/2));padding-right:max(28px,calc((100% - 1240px)/2))}
 
-/* Exact amounts are long: print the bar-chart value labels vertically so neighbours never overlap */
-html.wide .bar-chart{height:230px;padding-top:86px}
-html.wide .bar-amount{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;font-size:10px;line-height:1;margin-bottom:5px;flex-shrink:0}
+/* Insights charts: full-width bar chart with horizontal value labels, breakdown (bigger donut) underneath */
+html.wide .bar-chart{height:340px;padding-top:30px;padding-bottom:26px;gap:8px}
+html.wide .bar-col{min-width:92px}
+html.wide .bar-amount{white-space:nowrap;font-size:12px;line-height:1.2;margin-bottom:5px;flex-shrink:0;font-variant-numeric:tabular-nums}
+html.wide .bar-label{font-size:12px}
+html.wide .donut-wrap{gap:32px;justify-content:center}
+html.wide .donut-legend{max-width:460px;gap:8px}
+html.wide .legend-row{font-size:14px;padding:5px 8px}html.wide .legend-amt{font-size:13px}
 html.wide .bar-fill{flex-shrink:0}
 
 /* Bottom sheets and modals become centred dialogs */
@@ -679,6 +702,7 @@ html.wide .modal-handle{display:none}
     <div id="calFutureMonths"></div>
     <div style="height:8px"></div>
   </div>
+  <div class="cal-resizer" id="calResizer" role="separator" aria-orientation="vertical" aria-label="Resize day details" tabindex="0"></div>
   <div class="cal-tx-panel" id="calTxPanel">
     <div class="cal-tx-header">
       <div class="cal-tx-date" id="calTxDate">—</div>
@@ -1900,7 +1924,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.68';
+const APP_VERSION = 'v4.69';
 const APP_BUILD = '2026-11-11a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -5281,6 +5305,27 @@ async function retryPendingQueue() {
     if(m){m.click();return}
     var o=document.querySelector('.input-overlay.open');if(o)o.click();
   });
+  // Day-details pane: drag (or arrow keys) to resize; width remembered
+  (function(){
+    var r=document.getElementById('calResizer'),root=document.documentElement,KEY='nota.txPaneW',MIN=240;
+    if(!r)return;
+    function max(){return Math.round(window.innerWidth*0.7)}
+    function set(px,save){px=Math.max(MIN,Math.min(max(),Math.round(px)));root.style.setProperty('--tx-pane-w',px+'px');r.setAttribute('aria-valuenow',px);if(save){try{localStorage.setItem(KEY,String(px))}catch(e){}}}
+    try{var v=parseInt(localStorage.getItem(KEY),10);if(v)set(v,false)}catch(e){}
+    function cur(){return document.getElementById('calTxPanel').getBoundingClientRect().width}
+    r.addEventListener('pointerdown',function(e){
+      e.preventDefault();r.setPointerCapture(e.pointerId);r.classList.add('drag');root.classList.add('pane-drag');
+      var startX=e.clientX,startW=cur();
+      function move(ev){set(startW+(startX-ev.clientX),false)}
+      function up(){r.classList.remove('drag');root.classList.remove('pane-drag');r.removeEventListener('pointermove',move);r.removeEventListener('pointerup',up);r.removeEventListener('pointercancel',up);set(cur(),true)}
+      r.addEventListener('pointermove',move);r.addEventListener('pointerup',up);r.addEventListener('pointercancel',up);
+    });
+    r.addEventListener('dblclick',function(){root.style.removeProperty('--tx-pane-w');try{localStorage.removeItem(KEY)}catch(e){}});
+    r.addEventListener('keydown',function(e){
+      if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;e.preventDefault();
+      set(cur()+(e.key==='ArrowLeft'?24:-24),true);
+    });
+  })();
   window._layoutReady=true;
 })();
 </script>

@@ -1173,28 +1173,24 @@ function calRefreshOpenDayPanel() {
   calSelectDay(cell, calCurrentDateStr, cell.dataset.total || '', true);
 }
 
+// Future months: a rolling window of the next CAL_FUTURE_MONTHS months (crosses into next year),
+// all collapsed. Each month is built once; projected recurring items are computed per month.
+const CAL_FUTURE_MONTHS = 12;
 function calPopulateFutureMonths() {
   const today = new Date();
-  const curYear = today.getFullYear();
-  const curMonth = today.getMonth() + 1;
   let html = '';
-  for (let m = curMonth + 1; m <= 12; m++) {
-    const futureKey = `${curYear}-${m}`;
-    const futureBtn = `<button class="cal-month-collapse-btn open" onclick="calToggleFutureMonth('${futureKey}')">›</button>`;
-    html += `<div class="cal-month-divider"></div><div class="cal-future-month" data-key="${futureKey}">${calBuildMonthHTML(curYear, m, today, futureBtn)}</div>`;
-  }
-  document.getElementById('calFutureMonths').innerHTML = html;
-  // Explicitly collapse all future months (avoid double-toggle on re-render)
-  for (let m = curMonth + 1; m <= 12; m++) {
-    const key = `${curYear}-${m}`;
+  for (let i = 1; i <= CAL_FUTURE_MONTHS; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth() + i, 1);   // Date handles the year rollover
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    const key = `${y}-${m}`;
+    const btn = `<button class="cal-month-collapse-btn" onclick="calToggleFutureMonth('${key}')">›</button>`;
     calFutureCollapsed[key] = true;
-    const container = document.querySelector(`#calFutureMonths .cal-future-month[data-key="${key}"]`);
-    if (container) {
-      container.querySelectorAll('.cal-week-section').forEach(s => s.style.display = 'none');
-      const btn = container.querySelector('.cal-month-collapse-btn');
-      if (btn) btn.classList.remove('open');
-    }
+    html += `<div class="cal-month-divider"></div><div class="cal-future-month" data-key="${key}">${calBuildMonthHTML(y, m, today, btn)}</div>`;
   }
+  const el = document.getElementById('calFutureMonths');
+  el.innerHTML = html;
+  // Hide the week rows of every future month (collapsed by default)
+  el.querySelectorAll('.cal-future-month .cal-week-section').forEach(sec => sec.style.display = 'none');
 }
 
 function calReinit() {

@@ -860,7 +860,7 @@ function buildDonut(data,size){
   });
   // Exact amounts (wide layout) are longer than the old "1.2jt" form: shrink the centre text to fit the hole
   const centerLbl=fRpS(total), holeW=2*(r-sw/2)-6;
-  const centerFs=Math.max(6,Math.min(size/10,+(holeW/(centerLbl.length*0.6)).toFixed(1)));
+  const centerFs=Math.max(6,Math.min(size/9,+(holeW/(centerLbl.length*0.55)).toFixed(1)));
   return`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="${sw}"/>
     ${paths}
@@ -1784,8 +1784,9 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
             bodyColor: 'rgba(255,255,255,0.55)',
             borderColor: 'rgba(255,255,255,0.08)',
             borderWidth: 0.5,
-            padding: 10,
+            padding: document.documentElement.classList.contains('wide') ? 14 : 10,
             cornerRadius: 8,
+            ...(document.documentElement.classList.contains('wide') ? { titleFont: { size: 16, weight: '600' }, bodyFont: { size: 15 } } : {}),
           }
         }
       }

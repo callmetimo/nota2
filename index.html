@@ -618,6 +618,24 @@ html.wide .donut-legend{max-width:460px;gap:8px}
 html.wide .legend-row{font-size:14px;padding:5px 8px}html.wide .legend-amt{font-size:13px}
 html.wide .bar-fill{flex-shrink:0}
 
+/* Type scale: matches Home (smallest text 13px, body 16px+). Home calendar sizes are set above. */
+html.wide .ac-hint,html.wide .badge,html.wide .cat-pill-amt,html.wide .config-archived-badge,html.wide .form-label,html.wide .future-badge,html.wide .holding-badge,html.wide .nw-card-label,html.wide .nw-card-sub,html.wide .proj-badge,html.wide .recurring-section-label,html.wide .smart-label,html.wide .toggle-btn,html.wide .app-title .app-version,html.wide .side-brand .app-version{font-size:13px}
+html.wide .acct-bal-label,html.wide .acct-bal-name,html.wide .bar-amount,html.wide .bar-label,html.wide .cat-pill-name,html.wide .cat-trend-header,html.wide .chart-card-title,html.wide .config-archived-toggle,html.wide .config-row-meta,html.wide .detail-date,html.wide .detail-title,html.wide .filter-select,html.wide .holding-details,html.wide .legend-amt,html.wide .legend-name,html.wide .legend-pct,html.wide .nw-update-btn,html.wide .nw-update-label,html.wide .pnl-dual,html.wide .recurring-card-day,html.wide .s-label,html.wide .s-sub,html.wide .search-item-note,html.wide .section-title,html.wide .tx-meta,html.wide .toast,html.wide .side-sub{font-size:14px}
+html.wide #searchResultsCount,html.wide .acct-bal-total-label,html.wide .acct-filter-btn,html.wide .holding-pnl,html.wide .nw-mode-btn,html.wide .pill-toggle-btn,html.wide .recurring-card-meta,html.wide .recurring-prompt-meta,html.wide .search-loading,html.wide .settings-tab-btn,html.wide .smart-pill,html.wide .val-idr-sm,html.wide .val-usd-sm,html.wide .nav-btn,html.wide .nav-fab{font-size:15px}
+html.wide .account-info-row,html.wide .acct-bal-empty,html.wide .acct-bal-link,html.wide .acct-filter-row span,html.wide .action-btn,html.wide .btn-delete,html.wide .btn-save,html.wide .chart-loading,html.wide .config-add-btn,html.wide .config-section-title,html.wide .detail-amt,html.wide .detail-name,html.wide .empty-state,html.wide .tx-amount,html.wide .form-input,html.wide .date-display,html.wide #searchInput{font-size:16px}
+html.wide .autocomplete-item,html.wide .config-row-name,html.wide .holding-name,html.wide .profile-back-btn,html.wide .recurring-card-btn,html.wide .recurring-prompt-amt,html.wide .recurring-prompt-tx,html.wide .star-nav-input,html.wide .tx-payee,html.wide .val-idr,html.wide .val-usd,html.wide .goal-card-name,html.wide .more-menu-item{font-size:17px}
+html.wide .acct-bal-total-val,html.wide .amount-prefix,html.wide .delete-btn,html.wide .goal-complete-btn,html.wide .modal-title,html.wide .recurring-card-amt,html.wide .recurring-card-tx,html.wide .submit-btn,html.wide .acct-bal-amount{font-size:18px}
+html.wide [style*="font-size:9px"],html.wide [style*="font-size: 9px"]{font-size:13px!important}
+html.wide [style*="font-size:10px"],html.wide [style*="font-size: 10px"]{font-size:13px!important}
+html.wide [style*="font-size:11px"],html.wide [style*="font-size: 11px"]{font-size:14px!important}
+html.wide [style*="font-size:12px"],html.wide [style*="font-size: 12px"]{font-size:15px!important}
+html.wide [style*="font-size:13px"],html.wide [style*="font-size: 13px"]{font-size:16px!important}
+html.wide [style*="font-size:14px"],html.wide [style*="font-size: 14px"]{font-size:17px!important}
+html.wide [style*="font-size:15px"],html.wide [style*="font-size: 15px"]{font-size:18px!important}
+html.wide [style*="font-size:16px"],html.wide [style*="font-size: 16px"]{font-size:18px!important}
+html.wide .nav-fab .fab-plus{font-size:24px}
+html.wide .cal-scroll-hint{font-size:13px}
+
 /* Bottom sheets and modals become centred dialogs */
 html.wide .input-overlay .input-sheet{left:50%;right:auto;bottom:auto;top:50%;width:min(580px,calc(100% - 32px));max-height:calc(var(--app-vh,100dvh) - 48px);border-radius:20px;border:0.5px solid var(--border2);padding:14px 0 20px;opacity:0;transform:translate(-50%,-46%);transition:transform .25s ease,opacity .25s ease}
 html.wide .input-overlay.open .input-sheet{opacity:1;transform:translate(-50%,-50%)}
@@ -1924,7 +1942,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.69';
+const APP_VERSION = 'v4.70';
 const APP_BUILD = '2026-11-11a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));

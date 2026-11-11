@@ -572,6 +572,24 @@ html.wide #page-profile .more-menu-item{flex-direction:column;align-items:flex-s
 html.wide #page-profile .more-menu-item:hover{border-color:var(--accent)}
 html.wide #page-profile .more-menu-item svg{width:26px;height:26px;color:var(--accent)}
 
+/* Remaining pages */
+html.wide .settings-wide-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:8px 24px;align-items:start;margin-top:12px}
+html.wide .settings-wide-col{min-width:0}
+html.wide #page-settings.active,html.wide #page-networth.active,html.wide #page-recurring.active,html.wide #page-emailimport.active{padding-left:max(28px,calc((100% - 1240px)/2));padding-right:max(28px,calc((100% - 1240px)/2))}
+html.wide #recurringListContainer{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:14px;align-items:start}
+html.wide #recurringListContainer>.recurring-section-label,html.wide #recurringListContainer>p{grid-column:1/-1}
+html.wide #page-recurring>.submit-btn{max-width:360px}
+html.wide .ei-wide{display:grid;grid-template-columns:minmax(300px,1fr) minmax(0,1.3fr);gap:24px;align-items:start}
+html.wide .ei-col{min-width:0}
+html.wide #nwContent{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:14px;align-items:start}
+html.wide #nwContent>*{grid-column:span 1;min-width:0}
+html.wide #nwContent>.toggle-row,html.wide #nwContent>.chart-card-title,html.wide #nwContent>.holding-item:first-child,html.wide #nwContent>.holding-item:last-child,html.wide #nwContent>.chart-card,html.wide #nwContent>div[style*="repeat(3"],html.wide #nwContent>.empty-state,html.wide #nwContent>.chart-loading{grid-column:1/-1}
+html.wide #nwContent div[style*="aspect-ratio"]{width:min(100%,300px)!important}
+html.wide #nwPricesStatus{max-width:100%}
+html.wide #searchResults:not([style*="display: none"]):not([style*="display:none"]){display:grid!important;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));column-gap:12px;align-content:start}
+html.wide #searchResults>.search-loading,html.wide #searchResults>.empty-state{grid-column:1/-1}
+html.wide #page-search #searchResults,html.wide #page-search #searchMonitorContainer,html.wide #page-search .search-page-header,html.wide #page-search #searchResultsCount{padding-left:max(28px,calc((100% - 1240px)/2));padding-right:max(28px,calc((100% - 1240px)/2))}
+
 /* Exact amounts are long: print the bar-chart value labels vertically so neighbours never overlap */
 html.wide .bar-chart{height:230px;padding-top:86px}
 html.wide .bar-amount{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;font-size:10px;line-height:1;margin-bottom:5px;flex-shrink:0}
@@ -1882,7 +1900,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.67';
+const APP_VERSION = 'v4.68';
 const APP_BUILD = '2026-11-11a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));

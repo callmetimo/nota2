@@ -956,6 +956,9 @@ const EmailImport = (() => {
     <p style="font-size:12px;color:var(--text2);line-height:1.5;margin:-6px 4px 14px">Nota only reads <b>${esc(localStorage.getItem(LS_ACCOUNT) || 'the Google account you signed in with')}</b>. Bank emails that arrive in a different Gmail address are not seen until you auto-forward them here (in that Gmail: Settings → Forwarding and POP/IMAP, then Filters).</p>
     ${gm ? `<button class="config-add-btn" style="padding:0 4px 14px;color:var(--text2)" onclick="EmailImport.check({force:true, days:30})">Look back 30 days for older emails</button>` : ''}`;
 
+    // Wide layout: status card(s) in the left column, email types / accounts / rules in the right
+    const hStatus = h; h = '';
+
     // Email types
     h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><span class="form-label" style="margin:0">Email types</span><button class="config-add-btn" onclick="EmailImport.openPick()">+ Add</button></div>`;
     h += config.sources.length ? config.sources.map((s, i) => {
@@ -985,7 +988,9 @@ const EmailImport = (() => {
       <div><div class="config-row-name">${esc(r.pattern)}</div><div class="config-row-meta">${esc(MODE_LABEL[r.mode])}${r.tx ? ' → ' + esc(r.tx) : ''} · ${esc(ruleSummary(r))}</div></div><span class="config-row-meta">›</span></div>`).join('')
       : `<p style="font-size:12px;color:var(--text3);padding:4px 4px 0">None yet. Fix a transaction in the popup with "Remember" on and it appears here.</p>`;
     h += `<div style="height:24px"></div>`;
-    el.innerHTML = h;
+    el.innerHTML = document.documentElement.classList.contains('wide')
+      ? `<div class="ei-wide"><div class="ei-col">${hStatus}</div><div class="ei-col">${h}</div></div>`
+      : hStatus + h;
   }
 
   // ── email types (sources): list actions + editor ──────────

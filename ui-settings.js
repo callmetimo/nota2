@@ -501,7 +501,7 @@ function renderSettingsLists() {
     </div>
   `;
 
-  const kind = currentSettingsTab;
+  const buildKind = (kind) => {
   const items = CONFIG_ITEMS.filter(i => i.kind === kind).sort((a,b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
   const active = items.filter(i => !i.archived);
   const archived = items.filter(i => i.archived);
@@ -566,7 +566,15 @@ function renderSettingsLists() {
     ${kind === 'stock' ? `<button class="submit-btn" style="background:var(--bg3);color:var(--text);margin-top:20px;font-size:13px" onclick="installLivePrices()">Enable live stock prices (GOOGLEFINANCE)</button>` : ''}
   `;
 
-  container.innerHTML = toggleHtml + listHtml;
+  return listHtml;
+  };
+
+  // Wide layout (tablet/desktop landscape): all four lists side by side, no tab toggle
+  if (document.documentElement.classList.contains('wide')) {
+    container.innerHTML = `<div class="settings-wide-grid">${kinds.map(k => `<div class="settings-wide-col">${buildKind(k)}</div>`).join('')}</div>`;
+  } else {
+    container.innerHTML = toggleHtml + buildKind(currentSettingsTab);
+  }
 }
 
 async function togglePMCreditCard(pmName, checked) {

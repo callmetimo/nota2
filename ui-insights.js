@@ -1413,6 +1413,10 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
 
     html += `<div class="chart-card-title" style="margin-top:14px;margin-bottom:8px;color:${theme.color};font-size:14px;font-weight:700">${esc(type)}</div>`;
 
+    // Wide layout (tablet/desktop landscape): holdings are a table instead of cards
+    const wideTbl = document.documentElement.classList.contains('wide');
+    let tblRows = '';
+    const tdNum = v => `<td class="n">${v}</td>`;
     items.forEach(item => {
       if (item.itemKind === 'account') {
         const acct = item.acct;
@@ -1423,6 +1427,10 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
           subText = `<div style="font-size:10px;color:var(--text2);margin-top:2px">${ccy} ${item.balObj.nativeAmount.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2})}</div>`;
         }
 
+        if (wideTbl) {
+          tblRows += `<tr><td><div class="holding-name">${esc(acct.name)}</div><div class="nw-t-sub">${esc(type)} · ${ccy}</div></td>${tdNum('<span class="nw-t-dash">—</span>')}${tdNum(subText ? subText.replace(/ style="[^"]*"/,'') : '<span class="nw-t-dash">—</span>')}${tdNum(dualValSmFull(bal, usdRate))}${tdNum('<span class="nw-t-dash">—</span>')}</tr>`;
+          return;
+        }
         html += `<div class="holding-item">
           <div class="holding-header">
             <div class="holding-name">${esc(acct.name)}</div>
@@ -1440,6 +1448,10 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
           </div>
         </div>`;
       } else if (item.itemKind === 'raw') {
+        if (wideTbl) {
+          tblRows += `<tr><td><div class="holding-name">${esc(item.name)}</div><div class="nw-t-sub">${esc(type)}</div></td>${tdNum('<span class="nw-t-dash">—</span>')}${tdNum('<span class="nw-t-dash">—</span>')}${tdNum(dualValSmFull(item.bal, usdRate))}${tdNum('<span class="nw-t-dash">—</span>')}</tr>`;
+          return;
+        }
         html += `<div class="holding-item">
           <div class="holding-header">
             <div class="holding-name">${esc(item.name)}</div>
@@ -1500,6 +1512,10 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
           }
         }
 
+        if (wideTbl) {
+          tblRows += `<tr><td><div class="holding-name" style="color:${theme.color}">${esc(h.stock)}</div><div class="nw-t-sub">${lotStr}</div></td>${tdNum(dualValSm(h.costBasis, usdRate))}${tdNum(`<div>${avgStr}</div>${mktStr ? `<div class="nw-t-mkt">${mktStr}</div>` : ''}`)}${tdNum(hasValue ? dualVal(h.currentValue, usdRate) : '<span class="nw-t-dash">Loading…</span>')}${tdNum(pnl !== null ? pnlDual(pnl, pnlPct, usdRate, pnl >= 0 ? 'var(--green)' : 'var(--red)') : '<span class="nw-t-dash">—</span>')}</tr>`;
+          return;
+        }
         html += `<div class="holding-item">
           <div class="holding-header">
             <div class="holding-name" style="color:${theme.color}">${esc(h.stock)}</div>
@@ -1530,6 +1546,11 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
 
     const gPnl = (groupValue > 0 && groupValue !== groupCost) ? groupValue - groupCost : null;
     const gPnlPct = gPnl !== null && groupCost > 0 ? (gPnl / groupCost * 100) : null;
+    if (wideTbl) {
+      html += `<div class="holding-table-wrap"><table class="nw-table"><thead><tr><th>${esc(type)}</th><th class="n">Cost basis</th><th class="n">Avg / market price</th><th class="n">Value</th><th class="n">Profit / loss</th></tr></thead><tbody>${tblRows}</tbody>
+        <tfoot><tr style="background:${theme.bg};color:${theme.color}"><td>Total ${esc(type)}</td>${tdNum(`${fUSD(groupCost, usdRate)}<div class="nw-t-sub">${fRpS(Math.round(groupCost))}</div>`)}<td></td>${tdNum(`${fUSD(groupValue, usdRate)}<div class="nw-t-sub">${fRpS(Math.round(groupValue))}</div>`)}${tdNum(gPnl !== null ? pnlDual(gPnl, gPnlPct, usdRate, gPnl >= 0 ? 'var(--green)' : 'var(--red)') : '')}</tr></tfoot></table></div>`;
+      return;
+    }
     html += `<div class="holding-item" style="border-color:${theme.color};background:${theme.bg};margin-bottom:12px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
@@ -1692,7 +1713,10 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
           const arcSpan = Math.abs(arc.endAngle - arc.startAngle);
           if (arcSpan > 0.12 && ringWidth > 10) {
             ctx.save();
-            ctx.font = `bold ${Math.max(8, Math.min(11, ringWidth * 0.28))}px -apple-system, sans-serif`;
+            const _wide = document.documentElement.classList.contains('wide');
+            ctx.font = _wide
+              ? `bold ${Math.max(14, Math.min(24, ringWidth * 0.42))}px -apple-system, sans-serif`
+              : `bold ${Math.max(8, Math.min(11, ringWidth * 0.28))}px -apple-system, sans-serif`;
             ctx.fillStyle = 'rgba(0,0,0,0.85)';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -1702,7 +1726,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
 
           // Curved label outside ring — draw label for every slice
           const labelR = arc.outerRadius + 11;
-          const fontSize = 9;
+          const fontSize = document.documentElement.classList.contains('wide') ? 13 : 9;
           const charWidth = fontSize * 0.58;
 
           // isBottom: verified against actual segment midAngles with real data
@@ -1766,7 +1790,7 @@ function renderOverview(holdings, usdRate, chfRate, cashBalance, acctBals){
         responsive: true,
         maintainAspectRatio: true,
         cutout: '38%',
-        layout: { padding: 28 },
+        layout: { padding: document.documentElement.classList.contains('wide') ? 40 : 28 },
         plugins: {
           legend: { display: false },
           tooltip: {

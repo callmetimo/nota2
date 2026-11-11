@@ -637,6 +637,28 @@ html.wide [style*="font-size:16px"],html.wide [style*="font-size: 16px"]{font-si
 html.wide .nav-fab .fab-plus{font-size:24px}
 html.wide .cal-scroll-hint{font-size:13px}
 
+/* Status toast (loading / sync hints): top-left, directly under the nota. logo */
+html.wide #toast{position:fixed;z-index:300;left:24px;top:54px;height:18px;max-width:196px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+html.wide.side-off #toast{left:70px;top:42px;max-width:320px}
+html.wide .side-brand{padding-bottom:30px}
+html.wide .toast.loading{color:var(--text2)}
+html.wide .header{z-index:250} /* header's stacking context holds the fixed toast: keep it above the sidebar (z 200) */
+
+/* Net Worth holdings table */
+html.wide #nwContent>.holding-table-wrap{grid-column:1/-1}
+.holding-table-wrap{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);overflow-x:auto;margin-bottom:16px}
+.nw-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.nw-table th{font-size:13px;font-weight:600;letter-spacing:0.6px;text-transform:uppercase;color:var(--text3);text-align:left;padding:14px 16px 10px;white-space:nowrap}
+.nw-table td{padding:12px 16px;border-top:0.5px solid var(--border);vertical-align:top;font-size:16px}
+.nw-table th.n,.nw-table td.n{text-align:right}
+.nw-table tbody tr:hover{background:var(--bg3)}
+.nw-table tfoot td{font-weight:600;border-top:0.5px solid var(--border2)}
+.nw-table .holding-name{font-size:17px;font-weight:600}
+.nw-t-sub{font-size:13px;color:var(--text2);margin-top:2px;font-weight:400}
+.nw-t-mkt{color:var(--blue);font-weight:500;margin-top:2px}
+.nw-t-dash{color:var(--text3)}
+.nw-table .pnl-dual{text-align:right}
+
 /* Bottom sheets and modals become centred dialogs */
 html.wide .input-overlay .input-sheet{left:50%;right:auto;bottom:auto;top:50%;width:min(580px,calc(100% - 32px));max-height:calc(var(--app-vh,100dvh) - 48px);border-radius:20px;border:0.5px solid var(--border2);padding:14px 0 20px;opacity:0;transform:translate(-50%,-46%);transition:transform .25s ease,opacity .25s ease}
 html.wide .input-overlay.open .input-sheet{opacity:1;transform:translate(-50%,-50%)}
@@ -1849,7 +1871,7 @@ html.wide .modal-handle{display:none}
   let tappedYet = false;
   setTimeout(() => {
     if (tappedYet || Auth.hasValidToken()) return;
-    showHint('Tap anywhere to sync');
+    showHint(document.documentElement.dataset.device === 'desktop' ? 'Click anywhere to sync' : 'Tap anywhere to sync');
   }, 1500);
 
   // Pure visual feedback that the app is responsive, independent of whether
@@ -1943,7 +1965,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.71';
+const APP_VERSION = 'v4.72';
 const APP_BUILD = '2026-11-11a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));

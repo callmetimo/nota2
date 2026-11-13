@@ -325,6 +325,7 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
       weekCells += `<div class="${cls}" ${clickAttr} data-date="${dateStr}" data-total="${totalStr}" data-txns='${txJson}'>
         <div class="cal-day-num">${cell.day}</div>
         ${totalLabel ? `<div class="cal-day-total">${totalLabel}</div>` : ''}
+        ${calDotsHTML(txs, isFuture)}
       </div>`;
     }
     weeksHTML += `<div class="cal-week-row">${weekCells}</div>`;
@@ -343,6 +344,14 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
       </div>
       ${weeksHTML}
     </div>`;
+}
+
+function calDotsHTML(txs, isFuture) {
+  if (!isFuture) return '';
+  const n = txs.filter(r => r.future || r.projected).length;
+  if (!n) return '';
+  const w = 5 + (Math.min(n, 5) - 1) * 4;
+  return `<div class="cal-day-dots" style="width:${w}px"></div>`;
 }
 
 function calGetRemainingWeeksHTML(year, month, today) {
@@ -397,7 +406,7 @@ function calGetRemainingWeeksHTML(year, month, today) {
       const clickAttr = `onclick="calSelectDay(this,'${dateStr}','${totalStr}')"` ;
       const totalLabel = dayTotal ? calFormatAmount(dayTotal) : '';
 
-      cells += `<div class="${cls}" ${clickAttr} data-date="${dateStr}" data-total="${totalStr}" data-txns='${txJson}'><div class="cal-day-num">${dd}</div>${totalLabel ? `<div class="cal-day-total">${totalLabel}</div>` : ''}</div>`;
+      cells += `<div class="${cls}" ${clickAttr} data-date="${dateStr}" data-total="${totalStr}" data-txns='${txJson}'><div class="cal-day-num">${dd}</div>${totalLabel ? `<div class="cal-day-total">${totalLabel}</div>` : ''}${isCur ? calDotsHTML(txs, isFuture) : ''}</div>`;
     }
     weeksHTML += `<div class="cal-week-row">${cells}</div>`;
     cur.setDate(cur.getDate() + 7);
@@ -460,6 +469,7 @@ function calGetCurrentWeekHTML(year, month, today) {
     cells += `<div class="${cls}" ${clickAttr} data-date="${dateStr}" data-total="${totalStr}" data-txns='${txJson}'>
       <div class="cal-day-num">${dd}</div>
       ${totalLabel ? `<div class="cal-day-total">${totalLabel}</div>` : ''}
+      ${isCur ? calDotsHTML(txs, isFuture) : ''}
     </div>`;
   }
   return `<div class="cal-week-row" id="calCurWeekRow">${cells}</div>`;

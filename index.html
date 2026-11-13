@@ -369,7 +369,7 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .cal-week-row{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px;grid-auto-rows:44px}
 
 /* Flat iOS-style day cells — no card bg, just number + dot */
-.cal-day{background:none;border:1px solid transparent;border-radius:8px;padding:6px 2px 5px;text-align:center;height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;user-select:none;cursor:default;transition:background 0.12s,transform 0.12s,border-color 0.12s;-webkit-tap-highlight-color:transparent}
+.cal-day{position:relative;background:none;border:1px solid transparent;border-radius:8px;padding:6px 2px 5px;text-align:center;height:48px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;user-select:none;cursor:default;transition:background 0.12s,transform 0.12s,border-color 0.12s;-webkit-tap-highlight-color:transparent}
 .cal-day.has-data{cursor:pointer}
 .cal-day.has-data:active{background:var(--bg3);transform:scale(0.92)}
 .cal-day.selected{background:var(--accent-dim);border-color:var(--accent)}
@@ -384,6 +384,8 @@ select.form-input{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://
 .proj-badge{display:inline-block;font-size:10px;opacity:0.6;border:1px dashed currentColor;border-radius:3px;padding:0 3px;margin-left:5px;vertical-align:middle;line-height:1.4}
 .future-badge{display:inline-block;font-size:10px;opacity:0.6;border:1px dashed currentColor;border-radius:3px;padding:0 3px;margin-left:5px;vertical-align:middle;line-height:1.4}
 .cal-wday-row .cal-wday:nth-child(6),.cal-wday-row .cal-wday:nth-child(7){color:#444}
+.cal-day-dots{position:absolute;left:50%;bottom:3px;transform:translateX(-50%);height:5px;border-radius:3px;background:var(--text3)}
+html.wide .cal-day-dots{bottom:6px;height:6px;border-radius:3px;background:var(--text3)}
 .cal-day-total{font-size:10px;font-weight:500;color:var(--text3);line-height:1}
 .cal-day.skeleton{background:var(--bg3);border-radius:8px;pointer-events:none}
 .cal-day.skeleton .cal-day-num{color:var(--text3);font-size:16px}
@@ -1969,7 +1971,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.75';
+const APP_VERSION = 'v4.76';
 const APP_BUILD = '2026-11-11a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));

@@ -148,6 +148,24 @@ const Auth = (() => {
     return tokenClient;
   }
 
+  // Remember which Google account signed in (per browser) so later token requests can pass it
+  // as `hint`. Without it, browsers that restrict Google's cookies (e.g. Brave) show the account
+  // picker on every launch. Best-effort only: any failure just leaves the old behaviour.
+  const LS_ACCOUNT_HINT = 'notaPublic_accountHint';
+  function getAccountHint() {
+    try { return localStorage.getItem(LS_ACCOUNT_HINT) || ''; } catch (e) { return ''; }
+  }
+  async function rememberAccountHint(token) {
+    if (getAccountHint()) return;
+    try {
+      const r = await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)',
+        { headers: { Authorization: 'Bearer ' + token } });
+      if (!r.ok) return;
+      const email = (await r.json())?.user?.emailAddress;
+      if (email) localStorage.setItem(LS_ACCOUNT_HINT, email);
+    } catch (e) {}
+  }
+
   // The GIS <script> tag loads async, so it can still be mid-download when
   // DOMContentLoaded fires and Auth.start()/signIn() first touch `google.*`,
   // especially on a slow cold-launch connection. Poll until it's attached
@@ -192,8 +210,12 @@ const Auth = (() => {
         grantedScope = String(resp.scope || '');
         resolve(accessToken);
         try { window.dispatchEvent(new CustomEvent('notaTokenObtained')); } catch (e) {}
+        rememberAccountHint(accessToken);
       };
-      client.requestAccessToken({ prompt: promptMode });
+      const opts = { prompt: promptMode };
+      const hint = getAccountHint();
+      if (hint) opts.hint = hint; // tells Google which account: skips the account picker
+      client.requestAccessToken(opts);
     });
   }
 
@@ -433,6 +455,7 @@ const Auth = (() => {
     localStorage.removeItem('notaPublic_spreadsheetId');
     localStorage.removeItem('notaPublic_opexSheetId');
     localStorage.removeItem('notaPublic_investSheetId');
+    localStorage.removeItem(LS_ACCOUNT_HINT); // next sign-in may be a different account
     localStorage.removeItem('notaPublic_splitMigratedV1'); // migration flag — reset so it re-runs if the user signs into a different account
     // Email Import is per Google account: don't carry the flag (or its cached rules) over to whoever signs in next.
     Object.keys(localStorage).filter(k => k.startsWith('notapub_email_import')).forEach(k => localStorage.removeItem(k));

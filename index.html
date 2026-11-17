@@ -1972,7 +1972,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.81';
+const APP_VERSION = 'v4.82';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -5363,6 +5363,8 @@ async function _retryPendingQueue() {
 </script>
 <!-- async: a stalled/blocked CDN request must never gate DOMContentLoaded, or Auth.markAppReady() (which only runs in that handler) never fires and the sign-in overlay hangs forever even after a successful sign-in. ui-insights.js already guards every Chart.js call site with `typeof Chart === 'undefined'`. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" integrity="sha384-dug+JxfBvklEQdJ4AYuBBAIScUz0bVN73xpy273gcAwHjb3qI0fXmuYNaNfdyYJG" crossorigin="anonymous" async></script>
+<!-- Net-worth and asset-classification math, shared by ui-settings.js, ui-insights.js and the inline script above. Loaded first of this group so the definitions exist before anything that calls them, though every caller does so from inside a function rather than at load time. -->
+<script src="./data-networth.js"></script>
 <script src="./ui-settings.js"></script>
 <script src="./email-parser.js"></script>
 <script src="./email-import.js"></script>

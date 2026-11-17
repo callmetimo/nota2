@@ -1,4 +1,23 @@
-const SHELL_CACHE = 'notapub-shell-v5';
+// Build id, substituted by .github/workflows/pages.yml at deploy time (the same sed step
+// that injects the OAuth client id). Served straight from a checkout it keeps its
+// placeholder value, which is fine: index.html carries the same placeholder, and all the
+// consistency below depends on is that the two agree.
+//
+// Note for anyone editing this comment: that sed is a blunt global replace, so the
+// placeholder token is deliberately written only once in this file, on the line below.
+//
+// Why it exists: index.html names its scripts with ?v=<BUILD>, so a given page can only
+// ever load the scripts it shipped with. Before this, every file was fetched network-first
+// and independently, so a load where index.html succeeded and one script did not would
+// serve a fresh page running stale logic — new markup against old sync code, on an app
+// that writes to a spreadsheet. The cache also drifted away from any single build over
+// time, since each successful fetch overwrote only its own entry.
+//
+// Because the build id is in this file too, every deploy changes these bytes, the browser
+// installs a new worker, and install() pre-caches that build's files as one atomic set.
+const BUILD = '__BUILD__';
+
+const SHELL_CACHE = 'notapub-shell-' + BUILD;
 const DATA_CACHE  = 'notapub-data-v1';
 const CDN_CACHE   = 'notapub-cdn-v1';
 
@@ -15,9 +34,16 @@ const CDN_CACHE   = 'notapub-cdn-v1';
 //
 // Keep this list in step with the <script src="./..."> tags in index.html: addAll() is
 // atomic, so one 404 here fails the whole install and the service worker never activates.
-const SHELL_FILES = [
-  './index.html',
-  './icon.png',
+//
+// The ?v= suffixes must match index.html's exactly — these are cache keys, and a request
+// for './auth.js?v=abc' does not match a cached './auth.js'. A query string changes
+// nothing about which file the server returns, so there is only ever one auth.js on disk.
+//
+// index.html itself is deliberately NOT versioned. It is the entry point and the thing
+// that decides which build's scripts to ask for, so it has to be reachable under a fixed
+// name. It stays network-first; install() re-caches it with each build, so the copy in
+// this cache always matches the scripts alongside it.
+const SCRIPTS = [
   './config.js',
   './sheets-client.js',
   './data-store.js',
@@ -35,6 +61,7 @@ const SHELL_FILES = [
   './ui-calendar.js',
   './ui-insights.js',
 ];
+const SHELL_FILES = ['./index.html', './icon.png', ...SCRIPTS.map(s => s + '?v=' + BUILD)];
 
 // These are live API calls — never intercept them. Critically, this must include every
 // host DataStore/SheetsClient talk to (sheets.googleapis.com, www.googleapis.com) —

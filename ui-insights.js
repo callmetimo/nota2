@@ -155,101 +155,13 @@ function renderCCMonitor() {
   const container = document.getElementById('searchMonitorContainer');
   if (!container) return;
 
-  const curY = ccMonitorDate.getFullYear();
-  const curM = ccMonitorDate.getMonth() + 1; // 1-12
+  const {
+    curY, curM, pmList, activeBillingDate, activeCreditLimit,
+    currentTxns, prevTotal, prevIncomeTotal,
+    currentTotalExpenses, currentTotalIncome, txCount, creditUsage,
+  } = computeCCMonitor(ccMonitorDate, ccMonitorPmFilter);
+
   const monthNameStr = new Date(curY, curM - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
-
-  // 1. Get all available payment methods (from settings/history config)
-  const pmList = Array.from(new Set(allPMs || []));
-
-  const targetPms = (!ccMonitorPmFilter || ccMonitorPmFilter.length === 0)
-    ? pmList.map(p => p.toLowerCase())
-    : ccMonitorPmFilter.map(p => p.toLowerCase());
-
-  function isMatchPM(pmVal) {
-    if (!pmVal) return false;
-    const low = String(pmVal).toLowerCase().trim();
-    return targetPms.some(t => low.includes(t) || t.includes(low));
-  }
-
-  // Billing date/credit limit lookups only make sense for exactly one selected account
-  const singlePmFilter    = (ccMonitorPmFilter && ccMonitorPmFilter.length === 1) ? ccMonitorPmFilter[0] : null;
-  const activeBillingDate  = singlePmFilter ? getCCBillingDate(singlePmFilter)  : 0;
-  const activeCreditLimit  = singlePmFilter ? getCCCreditLimit(singlePmFilter)  : 0;
-
-  function getEffectiveBillingMonth(txDay, txY, txM0) {
-    if (!activeBillingDate || !txDay || txDay <= activeBillingDate) return { y: txY, m: txM0 };
-    let nm = txM0 + 1, ny = txY;
-    if (nm > 11) { nm = 0; ny++; }
-    return { y: ny, m: nm };
-  }
-
-  // 2. Fetch current month opex transactions (both expenses and incomes)
-  const currentTxns = [];
-  (HIST.opex || []).forEach((r, i) => {
-    if (!isMatchPM(r.pm)) return;
-    const bm = getEffectiveBillingMonth(r.d, r.y, r.m);
-    if (bm.y === curY && bm.m === (curM - 1)) {
-      const isInc = (r.inc || 0) > 0;
-      currentTxns.push({
-        source: 'hist-opex',
-        idx: i,
-        day: r.d,
-        desc: r.tx || r.notes || (isInc ? 'Income' : 'Expense'),
-        category: r.cat || (isInc ? 'Income' : 'Other'),
-        pm: r.pm || '',
-        amount: Number(isInc ? r.inc : r.exp) || 0,
-        type: isInc ? 'income' : 'expense',
-        row: r
-      });
-    }
-  });
-
-  const isCurrentCalMonth = (curY === new Date().getFullYear() && curM === (new Date().getMonth() + 1));
-  (txHistory || []).forEach((r, i) => {
-    if (r.synced) return;
-    if (!r.date) return;
-    const parts = r.date.split('-');
-    if (!isMatchPM(r.pm)) return;
-    
-    const txDay = parseInt(parts[2], 10);
-    const bm = getEffectiveBillingMonth(txDay, +parts[0], +parts[1] - 1);
-    
-    if (bm.y === curY && bm.m === (curM - 1)) {
-      const isInc = r.type === 'income';
-      currentTxns.push({
-        source: 'local-opex',
-        idx: i,
-        day: txDay,
-        desc: r.tx || r.notes || (isInc ? 'Income' : 'Expense'),
-        category: r.category || (isInc ? 'Income' : 'Other'),
-        pm: r.pm || '',
-        amount: Number(r.amount) || 0,
-        type: r.type,
-        row: r
-      });
-    }
-  });
-
-  // Previous month opex expenses and income total for comparison
-  let prevY = curY;
-  let prevM = curM - 1;
-  if (prevM < 1) { prevM = 12; prevY--; }
-  let prevTotal = 0;
-  let prevIncomeTotal = 0;
-  (HIST.opex || []).forEach(r => {
-    if (!isMatchPM(r.pm)) return;
-    const bm = getEffectiveBillingMonth(r.d, r.y, r.m);
-    if (bm.y === prevY && bm.m === (prevM - 1)) {
-      if ((r.exp || 0) > 0) prevTotal += Number(r.exp) || 0;
-      if ((r.inc || 0) > 0) prevIncomeTotal += Number(r.inc) || 0;
-    }
-  });
-
-  currentTxns.sort((a, b) => b.day - a.day || b.amount - a.amount);
-  const currentTotalExpenses = currentTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-  const currentTotalIncome = currentTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-  const txCount = currentTxns.length;
 
   let compDiffHtml = '';
   if (prevTotal > 0) {
@@ -284,38 +196,6 @@ function renderCCMonitor() {
 
   let creditBarHtml = '';
   if (activeCreditLimit > 0) {
-    let creditUsage = 0;
-    const INSTALLMENT_RE = /\(\d+\/\d+\)$/;
-
-    currentTxns.forEach(t => {
-      if (t.type === 'expense' && !INSTALLMENT_RE.test(t.desc)) {
-        creditUsage += t.amount;
-      }
-    });
-
-    const rules = loadRecurring();
-    rules.forEach(rule => {
-      if (!rule.installmentTotal || !rule.installmentStart) return;
-      if (!isMatchPM(rule.pm)) return;
-
-      // installmentStart is dateToMonthKey()'s "YYYY-MM" numeric format, not a month-name string.
-      const [startYStr, startMonStr] = rule.installmentStart.split('-');
-      const startY = parseInt(startYStr, 10);
-      const startM0 = parseInt(startMonStr, 10) - 1; // 0-based, matches getEffectiveBillingMonth's convention
-      if (isNaN(startY) || isNaN(startM0) || startM0 < 0 || startM0 > 11) return;
-
-      const startDay = rule.dayOfMonth || 1;
-      const startBM  = getEffectiveBillingMonth(startDay, startY, startM0);
-
-      const monthsElapsed = (curY - startBM.y) * 12 + ((curM - 1) - startBM.m);
-      if (monthsElapsed < 0) return;
-
-      const remainingMonths = rule.installmentTotal - monthsElapsed;
-      if (remainingMonths <= 0) return;
-
-      creditUsage += rule.amount * remainingMonths;
-    });
-
     const usagePct  = Math.min(Math.round((creditUsage / activeCreditLimit) * 100), 100);
     const isOver    = creditUsage > activeCreditLimit;
     const barColor  = usagePct >= 90 ? 'var(--red)' : usagePct >= 70 ? 'var(--orange, #f97316)' : 'var(--accent)';

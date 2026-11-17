@@ -299,3 +299,169 @@ function getNetWorthAllocations(holdings, activeAccounts, acctBals, rawAccountBa
 
   return groups;
 }
+
+// ── CREDIT-CARD MONITOR ───────────────────────────────────────
+// Everything the CC monitor needs worked out before any of it is drawn: which payment
+// methods are in scope, which billing cycle each transaction falls into, this cycle's
+// totals, the previous cycle's totals to compare against, and how much of the credit
+// limit is already committed once outstanding installments are counted.
+//
+// Lifted out of renderCCMonitor() unchanged. That function had reached 273 lines with
+// these sums computed inline between the HTML strings displaying them, so the billing-
+// cycle rule — the part most likely to be wrong and the hardest to confirm by reading —
+// could only be exercised by rendering the whole page.
+//
+// Two behaviours preserved deliberately rather than fixed here, because changing either
+// changes which transactions the monitor reports:
+//   - isMatchPM matches substrings in BOTH directions, so filtering on "BCA" also picks
+//     up "CC BCA" and "IDR BCA", and an account whose name contains another account's
+//     name is attributed both ways.
+//   - installments whose start month is still ahead of the displayed cycle are skipped
+//     (monthsElapsed < 0), so future commitments do not count against the limit.
+//
+// Globals read: allPMs, HIST, txHistory. Functions: getCCBillingDate, getCCCreditLimit
+// and loadRecurring, all defined in ui-settings.js and called long after load.
+function computeCCMonitor(ccDate, pmFilter) {
+  const curY = ccDate.getFullYear();
+  const curM = ccDate.getMonth() + 1; // 1-12
+  // The month's display name is formatting, so it stays in renderCCMonitor and is
+  // rebuilt there from curY/curM rather than returned from here.
+
+  // 1. Get all available payment methods (from settings/history config)
+  const pmList = Array.from(new Set(allPMs || []));
+
+  const targetPms = (!pmFilter || pmFilter.length === 0)
+    ? pmList.map(p => p.toLowerCase())
+    : pmFilter.map(p => p.toLowerCase());
+
+  function isMatchPM(pmVal) {
+    if (!pmVal) return false;
+    const low = String(pmVal).toLowerCase().trim();
+    return targetPms.some(t => low.includes(t) || t.includes(low));
+  }
+
+  // Billing date/credit limit lookups only make sense for exactly one selected account
+  const singlePmFilter    = (pmFilter && pmFilter.length === 1) ? pmFilter[0] : null;
+  const activeBillingDate  = singlePmFilter ? getCCBillingDate(singlePmFilter)  : 0;
+  const activeCreditLimit  = singlePmFilter ? getCCCreditLimit(singlePmFilter)  : 0;
+
+  function getEffectiveBillingMonth(txDay, txY, txM0) {
+    if (!activeBillingDate || !txDay || txDay <= activeBillingDate) return { y: txY, m: txM0 };
+    let nm = txM0 + 1, ny = txY;
+    if (nm > 11) { nm = 0; ny++; }
+    return { y: ny, m: nm };
+  }
+
+  // 2. Fetch current month opex transactions (both expenses and incomes)
+  const currentTxns = [];
+  (HIST.opex || []).forEach((r, i) => {
+    if (!isMatchPM(r.pm)) return;
+    const bm = getEffectiveBillingMonth(r.d, r.y, r.m);
+    if (bm.y === curY && bm.m === (curM - 1)) {
+      const isInc = (r.inc || 0) > 0;
+      currentTxns.push({
+        source: 'hist-opex',
+        idx: i,
+        day: r.d,
+        desc: r.tx || r.notes || (isInc ? 'Income' : 'Expense'),
+        category: r.cat || (isInc ? 'Income' : 'Other'),
+        pm: r.pm || '',
+        amount: Number(isInc ? r.inc : r.exp) || 0,
+        type: isInc ? 'income' : 'expense',
+        row: r
+      });
+    }
+  });
+
+  (txHistory || []).forEach((r, i) => {
+    if (r.synced) return;
+    if (!r.date) return;
+    const parts = r.date.split('-');
+    if (!isMatchPM(r.pm)) return;
+    
+    const txDay = parseInt(parts[2], 10);
+    const bm = getEffectiveBillingMonth(txDay, +parts[0], +parts[1] - 1);
+    
+    if (bm.y === curY && bm.m === (curM - 1)) {
+      const isInc = r.type === 'income';
+      currentTxns.push({
+        source: 'local-opex',
+        idx: i,
+        day: txDay,
+        desc: r.tx || r.notes || (isInc ? 'Income' : 'Expense'),
+        category: r.category || (isInc ? 'Income' : 'Other'),
+        pm: r.pm || '',
+        amount: Number(r.amount) || 0,
+        type: r.type,
+        row: r
+      });
+    }
+  });
+
+  // Previous month opex expenses and income total for comparison
+  let prevY = curY;
+  let prevM = curM - 1;
+  if (prevM < 1) { prevM = 12; prevY--; }
+  let prevTotal = 0;
+  let prevIncomeTotal = 0;
+  (HIST.opex || []).forEach(r => {
+    if (!isMatchPM(r.pm)) return;
+    const bm = getEffectiveBillingMonth(r.d, r.y, r.m);
+    if (bm.y === prevY && bm.m === (prevM - 1)) {
+      if ((r.exp || 0) > 0) prevTotal += Number(r.exp) || 0;
+      if ((r.inc || 0) > 0) prevIncomeTotal += Number(r.inc) || 0;
+    }
+  });
+
+  currentTxns.sort((a, b) => b.day - a.day || b.amount - a.amount);
+  const currentTotalExpenses = currentTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  const currentTotalIncome = currentTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const txCount = currentTxns.length;
+
+  // Only computed when a single account with a configured limit is selected, matching
+  // what renderCCMonitor used to do inline — loadRecurring() is a localStorage read and
+  // there is nothing to show it in without a limit. null means "no bar to draw".
+  let creditUsage = null;
+  if (activeCreditLimit > 0) {
+    creditUsage = 0;
+    const INSTALLMENT_RE = /\(\d+\/\d+\)$/;
+
+    currentTxns.forEach(t => {
+      if (t.type === 'expense' && !INSTALLMENT_RE.test(t.desc)) {
+        creditUsage += t.amount;
+      }
+    });
+
+    const rules = loadRecurring();
+    rules.forEach(rule => {
+      if (!rule.installmentTotal || !rule.installmentStart) return;
+      if (!isMatchPM(rule.pm)) return;
+
+      // installmentStart is dateToMonthKey()'s "YYYY-MM" numeric format, not a month-name string.
+      const [startYStr, startMonStr] = rule.installmentStart.split('-');
+      const startY = parseInt(startYStr, 10);
+      const startM0 = parseInt(startMonStr, 10) - 1; // 0-based, matches getEffectiveBillingMonth's convention
+      if (isNaN(startY) || isNaN(startM0) || startM0 < 0 || startM0 > 11) return;
+
+      const startDay = rule.dayOfMonth || 1;
+      const startBM  = getEffectiveBillingMonth(startDay, startY, startM0);
+
+      const monthsElapsed = (curY - startBM.y) * 12 + ((curM - 1) - startBM.m);
+      if (monthsElapsed < 0) return;
+
+      const remainingMonths = rule.installmentTotal - monthsElapsed;
+      if (remainingMonths <= 0) return;
+
+      creditUsage += rule.amount * remainingMonths;
+    });
+
+  }
+
+  return {
+    curY, curM, pmList,
+    activeBillingDate, activeCreditLimit,
+    currentTxns, prevTotal, prevIncomeTotal,
+    currentTotalExpenses, currentTotalIncome, txCount,
+    creditUsage,
+  };
+}

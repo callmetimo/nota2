@@ -1972,8 +1972,8 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.78';
-const APP_BUILD = '2026-11-11a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
+const APP_VERSION = 'v4.79';
+const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
 }
@@ -5205,8 +5205,18 @@ window.addEventListener('DOMContentLoaded', async () => {
   navigator.storage?.persist?.();
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !_suppressVisRefresh && !isSyncing) fetchCurrentMonth(true);
+    if (document.visibilityState === 'visible' && !_suppressVisRefresh && !isSyncing) {
+      fetchCurrentMonth(true);
+      // Queued writes used to sit until a full reload: retryPendingQueue() ran at boot
+      // and nowhere else, despite the comments at submitTransfer/updateTransaction
+      // promising a retry "on next load/focus". Re-entry is guarded inside the function.
+      retryPendingQueue();
+    }
   });
+
+  // Connection restored — flush anything that failed while offline without waiting for
+  // the user to background and re-foreground the app.
+  window.addEventListener('online', () => { if (!isSyncing) retryPendingQueue(); });
 
   // ── INACTIVITY TIMEOUT (30 min) ──────────────────────────────
   // Clears local cache and reloads after 30 minutes of no interaction.
@@ -5279,20 +5289,39 @@ function patchCurMonthCache() {
   }
 }
 
+// In-flight guard. retryPendingQueue() now runs from three places (boot, `online`,
+// visibilitychange), and two overlapping loops would POST every queued item twice.
+// data-store.js has NO clientId idempotency cache — that lived in the Apps Script
+// backend and died with it — so a double-POST writes a duplicate sheet row with
+// nothing server-side to catch it. The HIST.opex signature check below is now the
+// only dedup there is, and it can't see an in-flight request.
+let _retryQueueInFlight = false;
 async function retryPendingQueue() {
+  if (_retryQueueInFlight) return;
+  _retryQueueInFlight = true;
+  try { await _retryPendingQueue(); }
+  finally { _retryQueueInFlight = false; }
+}
+
+async function _retryPendingQueue() {
   if (!queue.length) return;
   const pending = [...queue];
   let synced = 0;
-  for (const r of pending) {
+  for (const r0 of pending) {
+    // Re-resolve against the live queue instead of trusting the snapshot: an edit made
+    // while this loop is running patches the queued entry in place (updateTransaction /
+    // updateInvestTransaction / the transfer edit path), and a delete removes it entirely.
+    // Sending the snapshot would resurrect a deleted transaction or write stale values.
+    const r = queue.find(q => q.id === r0.id || String(q.id) === String(r0.id));
+    if (!r) continue;
     const isInvest = r.type === 'invest' || r.action === 'invest';
     const isTransfer = r.type === 'transfer';
-    // Belt-and-suspenders on top of the Apps Script clientId idempotency cache (6h TTL):
-    // an earlier fetchCurrentMonth/fetchCurrentMonthFresh in this same boot already
-    // populated HIST.opex, so check in-memory first — no extra network call — before
-    // blindly re-POSTing an item whose original request may have succeeded server-side
-    // despite a client-side timeout (see syncOpex/fetchWithTimeout). Transfers don't land
-    // in HIST.opex so this dedup check doesn't apply — they rely solely on the server-side
-    // clientId idempotency cache in syncTransfer's payload.
+    // Belt-and-suspenders dedup: an earlier fetchCurrentMonth/fetchCurrentMonthFresh in
+    // this same boot already populated HIST.opex, so check in-memory first — no extra
+    // network call — before blindly re-POSTing an item whose original request may have
+    // succeeded server-side despite a client-side timeout (see syncOpex/fetchWithTimeout).
+    // Transfers don't land in HIST.opex so this check doesn't apply to them; with the
+    // Apps Script idempotency cache gone they have no dedup at all.
     if (!isInvest && !isTransfer && r.date) {
       const d = parseInt(r.date.split('-')[2], 10);
       const sig = sigOfTxHistory(r);
@@ -5308,7 +5337,11 @@ async function retryPendingQueue() {
     const ok = isInvest ? await syncInvest(r) : isTransfer ? await syncTransfer(r) : await syncOpex(r);
     if (ok) {
       queue = queue.filter(q => q.id !== r.id);
-      txHistory = txHistory.map(h => h.id === r.id ? {...h, synced:true} : h);
+      // Invest rows live in investHistory, not txHistory (see submitInvest). Mapping only
+      // txHistory left every retried investment stuck at synced:false forever — it kept
+      // rendering as "pending" in Search and stayed in the unsynced list at line ~2521.
+      if (isInvest) investHistory = investHistory.map(h => h.id === r.id ? {...h, synced:true} : h);
+      else txHistory = txHistory.map(h => h.id === r.id ? {...h, synced:true} : h);
       synced++;
     }
   }

@@ -930,7 +930,9 @@ async function deleteAccountAndData() {
   } catch (e) {
     console.error('[account] trash failed', e);
   }
-  Auth.signOut();
+  // The spreadsheet is already in the trash and the user typed DELETE to get here, so
+  // skip signOut's unsynced-transactions warning — there is no sheet left to sync to.
+  Auth.signOut({ skipPendingWarning: true });
 }
 
 

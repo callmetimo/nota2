@@ -444,7 +444,39 @@ const Auth = (() => {
     ready.then(() => overlay.hide());
   }
 
-  function signOut() {
+  // Everything this app stores in localStorage belongs to one Google account: the
+  // spreadsheet id, the cached Opex rows, the unsynced write queue, recurring rules,
+  // account balances, even the autocomplete memory. Sign-out used to clear six keys
+  // and leave roughly twenty, so the next account to sign in on the same browser
+  // inherited the previous one's data — at best stale balance cards and someone
+  // else's payees in autocomplete, at worst retryPendingQueue() pushing account A's
+  // pending transactions straight into account B's sheet. The migration flags did
+  // the quieter version of the same damage: a second account skipped the Opex L:M
+  // and date-format migrations entirely, silently, because the flag said "done".
+  //
+  // So clear the whole namespace rather than naming keys one at a time, which is how
+  // it fell behind in the first place. Only the device-level debug toggle survives;
+  // sign-out reloads below, so nothing in this session depends on any of the rest.
+  const SIGN_OUT_KEEP = new Set(['notapub_debug']);
+
+  // `skipPendingWarning` is for the delete-account flow, which has already had the user
+  // type DELETE and has trashed the spreadsheet — warning that transactions never
+  // reached a sheet that no longer exists would be noise on top of a decided action.
+  function signOut({ skipPendingWarning = false } = {}) {
+    // The queue holds transactions that never reached the sheet. They belong to the
+    // account signing out and can't be handed to whoever signs in next, so they're
+    // about to be deleted — say so first, while it's still reversible.
+    if (!skipPendingWarning) {
+      try {
+        const pending = JSON.parse(localStorage.getItem('notapub_queue_v2') || '[]');
+        const n = Array.isArray(pending) ? pending.length : 0;
+        if (n > 0 && !confirm(
+          `${n} transaction${n > 1 ? 's have' : ' has'} not reached your sheet yet. ` +
+          `Signing out deletes ${n > 1 ? 'them' : 'it'}. Sign out anyway?`
+        )) return;
+      } catch (err) { /* unreadable queue — nothing meaningful to warn about */ }
+    }
+
     try {
       if (accessToken && google.accounts?.oauth2?.revoke) {
         google.accounts.oauth2.revoke(accessToken, () => {});
@@ -452,13 +484,10 @@ const Auth = (() => {
     } catch (err) { console.warn('[auth] revoke failed', err); }
     accessToken = null;
     tokenExpiresAt = 0;
-    localStorage.removeItem('notaPublic_spreadsheetId');
-    localStorage.removeItem('notaPublic_opexSheetId');
-    localStorage.removeItem('notaPublic_investSheetId');
-    localStorage.removeItem(LS_ACCOUNT_HINT); // next sign-in may be a different account
-    localStorage.removeItem('notaPublic_splitMigratedV1'); // migration flag — reset so it re-runs if the user signs into a different account
-    // Email Import is per Google account: don't carry the flag (or its cached rules) over to whoever signs in next.
-    Object.keys(localStorage).filter(k => k.startsWith('notapub_email_import')).forEach(k => localStorage.removeItem(k));
+    // Covers every prefix in use: notaPublic_, notapub_ and nota_.
+    Object.keys(localStorage)
+      .filter(k => k.toLowerCase().startsWith('nota') && !SIGN_OUT_KEEP.has(k))
+      .forEach(k => localStorage.removeItem(k));
     location.reload();
   }
 

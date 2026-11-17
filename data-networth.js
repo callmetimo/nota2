@@ -363,6 +363,13 @@ function computeCCMonitor(ccDate, pmFilter) {
         source: 'hist-opex',
         idx: i,
         day: r.d,
+        // The date the transaction actually happened, which is NOT the cycle it is
+        // listed under: with a statement date set, a purchase made after it appears on
+        // the following month's bill. The list used to label every row with the cycle's
+        // month and the transaction's own day, so an October 25th purchase on the
+        // November bill read "November 25" — a date it was never made on.
+        txY: r.y,
+        txM0: r.m,
         desc: r.tx || r.notes || (isInc ? 'Income' : 'Expense'),
         category: r.cat || (isInc ? 'Income' : 'Other'),
         pm: r.pm || '',
@@ -388,6 +395,8 @@ function computeCCMonitor(ccDate, pmFilter) {
         source: 'local-opex',
         idx: i,
         day: txDay,
+        txY: +parts[0],
+        txM0: +parts[1] - 1,
         desc: r.tx || r.notes || (isInc ? 'Income' : 'Expense'),
         category: r.category || (isInc ? 'Income' : 'Other'),
         pm: r.pm || '',

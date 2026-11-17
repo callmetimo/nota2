@@ -263,7 +263,14 @@ function renderCCMonitor() {
             const catColor = CAT_COLORS[t.cat || t.category] || 'var(--text2)';
             const amountStr = (isInc ? '+' : '-') + fRp(item.amount);
             const amountColor = isInc ? 'var(--green)' : 'var(--text)';
-            const dispDate = monthNameStr.split(' ')[0] + ' ' + item.day;
+            // Label each row with the date the transaction was actually made, not the
+            // cycle it is billed in. The year is appended only when it differs from the
+            // cycle's, which happens on a December purchase billed in January.
+            const dispMonth = (item.txM0 == null)
+              ? monthNameStr.split(' ')[0]
+              : new Date(item.txY, item.txM0, 1).toLocaleString('en-US', { month: 'long' });
+            const dispYear = (item.txY != null && item.txY !== curY) ? ' ' + item.txY : '';
+            const dispDate = dispMonth + ' ' + item.day + dispYear;
             const tapAttrs = `data-idx="${item.idx}" data-source="${item.source}" data-type="opex" style="cursor:pointer"`;
             return `
               <div class="detail-item" style="padding:10px 0" ${tapAttrs}>

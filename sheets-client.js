@@ -61,6 +61,18 @@ const SheetsClient = (() => {
     );
   }
 
+  // Several ranges written in a single request. Used by the edit paths in data-store.js,
+  // where splitting one logical edit across sequential updateValues calls meant a failure
+  // between them left the row half-updated (e.g. new amount, stale native amount), and
+  // gave another device that many more chances to shift the rows underneath us.
+  function batchUpdateValues(spreadsheetId, data, valueInputOption = 'USER_ENTERED') {
+    return authedFetch(`${SHEETS_BASE}/${spreadsheetId}/values:batchUpdate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ valueInputOption, data }),
+    });
+  }
+
   function appendValues(spreadsheetId, range, values, valueInputOption = 'USER_ENTERED') {
     return authedFetch(
       `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}:append` +
@@ -97,7 +109,7 @@ const SheetsClient = (() => {
   }
 
   return {
-    create, batchUpdate, getValues, updateValues, appendValues, clearValues,
+    create, batchUpdate, getValues, updateValues, batchUpdateValues, appendValues, clearValues,
     getSpreadsheetMeta, trashFile, getFileMeta, findFiles,
   };
 })();

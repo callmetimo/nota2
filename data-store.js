@@ -637,6 +637,32 @@ const DataStore = (() => {
     return `${parsed.year}-${String(parsed.month).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}`;
   }
 
+  // ── ROW-INDEX SAFETY ──────────────────────────────────────────
+  // A row index is only valid for as long as the sheet keeps its current shape. Between
+  // the lookup that produced it and the write that uses it, another device — or the user
+  // editing the spreadsheet directly in Google Sheets — can insert or delete a row and
+  // shift everything below it by one. The pending write then lands on an unrelated
+  // transaction, or the pending delete removes one, silently and with nothing afterwards
+  // to show it happened. Drive version history is the only recovery.
+  //
+  // Two defences, because neither is enough on its own:
+  //   1. Each multi-range edit goes out as ONE values:batchUpdate request, so there is a
+  //      single moment to guard instead of two to four, and no half-applied edits.
+  //   2. The ID cell at the target row is re-read immediately before that request, and the
+  //      operation aborts if it no longer holds the ID we looked up. This narrows the race
+  //      to one round trip. It cannot close it: the Sheets API has no conditional write.
+  const ROW_MOVED_MSG = 'Sheet changed while saving — reload and try again';
+
+  async function rowStillHasId(sheet, col, rowIndex, expectedId) {
+    const res = await SheetsClient.getValues(spreadsheetId, `${sheet}!${col}${rowIndex}`);
+    const actual = String((res.values && res.values[0] && res.values[0][0]) || '').trim();
+    return actual === String(expectedId).trim();
+  }
+
+  // Opex keeps its TxID in column K, Invest in column I.
+  const opexRowIntact = (rowIndex, id) => rowStillHasId('Opex', 'K', rowIndex, id);
+  const investRowIntact = (rowIndex, id) => rowStillHasId('Invest', 'I', rowIndex, id);
+
   // ── OPEX ──────────────────────────────────────────────────────
   async function findOpexRowById(id) {
     if (!id) return null;
@@ -667,18 +693,26 @@ const DataStore = (() => {
       if (!rowIndex) return { status: 'error', message: 'Row not found' };
       const income = isIncome ? Number(amount) : '';
       const expense = isIncome ? '' : Number(amount);
-      await SheetsClient.updateValues(spreadsheetId, `Opex!A${rowIndex}:J${rowIndex}`, [[
-        formatDateStr(date), month, cat, tx, pm, income, expense, notes || '', '', future ? 1 : 0,
-      ]]);
-      // Separate call so it never touches K (TxID), which must stay exactly as-is.
-      await SheetsClient.updateValues(spreadsheetId, `Opex!L${rowIndex}:M${rowIndex}`, [[
-        nativeAmount || '', ccy || '',
-      ]]);
+      if (!(await opexRowIntact(rowIndex, data.id))) return { status: 'error', message: ROW_MOVED_MSG };
+      // Two ranges, one request: K (TxID) is skipped so it stays exactly as-is, and the
+      // row can no longer end up with a new amount beside a stale native amount/currency
+      // because the second of two sequential writes failed.
+      await SheetsClient.batchUpdateValues(spreadsheetId, [
+        {
+          range: `Opex!A${rowIndex}:J${rowIndex}`,
+          values: [[formatDateStr(date), month, cat, tx, pm, income, expense, notes || '', '', future ? 1 : 0]],
+        },
+        {
+          range: `Opex!L${rowIndex}:M${rowIndex}`,
+          values: [[nativeAmount || '', ccy || '']],
+        },
+      ]);
       return { status: 'ok' };
     }
     if (action === 'delete') {
       const rowIndex = await findOpexRowById(data.id);
       if (!rowIndex) return { status: 'error', message: 'Row not found' };
+      if (!(await opexRowIntact(rowIndex, data.id))) return { status: 'error', message: ROW_MOVED_MSG };
       await SheetsClient.batchUpdate(spreadsheetId, [{
         deleteDimension: {
           range: { sheetId: opexGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex },
@@ -707,16 +741,27 @@ const DataStore = (() => {
       if (rowIndices.length < 2) return { status: 'error', message: 'Transfer rows not found' };
       const { date, month, fromPm, toPm, amount, notes, nativeAmount, ccy } = data;
       const [rowA, rowB] = [...rowIndices].sort((a, b) => a - b);
-      await SheetsClient.updateValues(spreadsheetId, `Opex!A${rowA}:J${rowA}`, [[
-        formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0,
-      ]]);
-      await SheetsClient.updateValues(spreadsheetId, `Opex!A${rowB}:J${rowB}`, [[
-        formatDateStr(date), month, 'Transfer', 'Transfer', toPm, amount, '', notes || '', '', 0,
-      ]]);
-      // Both legs of a same-currency transfer share the same native amount/ccy —
-      // separate call, same reason as handleOpex's edit path: never touch K (TxID).
-      await SheetsClient.updateValues(spreadsheetId, `Opex!L${rowA}:M${rowA}`, [[nativeAmount || '', ccy || '']]);
-      await SheetsClient.updateValues(spreadsheetId, `Opex!L${rowB}:M${rowB}`, [[nativeAmount || '', ccy || '']]);
+      // Both legs carry the same txId, so each row is checked against it. A transfer
+      // spans two rows and used to take four sequential writes off one lookup, which
+      // made it the most exposed path here: a shift partway through could rewrite one
+      // leg of this transfer and one row belonging to something else entirely.
+      if (!(await opexRowIntact(rowA, data.id)) || !(await opexRowIntact(rowB, data.id))) {
+        return { status: 'error', message: ROW_MOVED_MSG };
+      }
+      // All four ranges in one request. Both legs of a same-currency transfer share the
+      // same native amount/ccy; K (TxID) is skipped, same reason as handleOpex's edit.
+      await SheetsClient.batchUpdateValues(spreadsheetId, [
+        {
+          range: `Opex!A${rowA}:J${rowA}`,
+          values: [[formatDateStr(date), month, 'Transfer', 'Transfer', fromPm, '', amount, notes || '', '', 0]],
+        },
+        {
+          range: `Opex!A${rowB}:J${rowB}`,
+          values: [[formatDateStr(date), month, 'Transfer', 'Transfer', toPm, amount, '', notes || '', '', 0]],
+        },
+        { range: `Opex!L${rowA}:M${rowA}`, values: [[nativeAmount || '', ccy || '']] },
+        { range: `Opex!L${rowB}:M${rowB}`, values: [[nativeAmount || '', ccy || '']] },
+      ]);
       return { status: 'ok' };
     }
     if (data.action === 'delete') {
@@ -726,6 +771,9 @@ const DataStore = (() => {
       // first shifts subsequent row numbers, invalidating the remaining indices.
       // All deletes are sent in a single batchUpdate to save one API call per extra row.
       const sorted = [...rowIndices].sort((a, b) => b - a);
+      for (const rowIndex of sorted) {
+        if (!(await opexRowIntact(rowIndex, data.id))) return { status: 'error', message: ROW_MOVED_MSG };
+      }
       await SheetsClient.batchUpdate(spreadsheetId, sorted.map(rowIndex => ({
         deleteDimension: {
           range: { sheetId: opexGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex },
@@ -877,6 +925,9 @@ const DataStore = (() => {
   async function deleteOpexRowById(opexId) {
     const rowIndex = await findOpexRowById(opexId);
     if (!rowIndex) return;
+    // Reached from the Invest delete path, several round trips after that lookup —
+    // deleting the wrong row here would take out an unrelated transaction.
+    if (!(await opexRowIntact(rowIndex, opexId))) throw new Error(ROW_MOVED_MSG);
     await SheetsClient.batchUpdate(spreadsheetId, [{
       deleteDimension: {
         range: { sheetId: opexGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex },
@@ -896,6 +947,7 @@ const DataStore = (() => {
       const linkRes = await SheetsClient.getValues(spreadsheetId, `Invest!J${rowIndex}`);
       const existingOpexId = String((linkRes.values && linkRes.values[0] && linkRes.values[0][0]) || '').trim();
 
+      if (!(await investRowIntact(rowIndex, data.id))) return { status: 'error', message: ROW_MOVED_MSG };
       await SheetsClient.updateValues(spreadsheetId, `Invest!A${rowIndex}:H${rowIndex}`, [[
         formatDateStr(date), stock, stockType, action, account || '', lot, price, totalIdr,
       ]]);
@@ -912,6 +964,7 @@ const DataStore = (() => {
         if (opexRow) {
           const income = isSell ? Number(totalIdr) : '';
           const expense = isSell ? '' : Number(totalIdr);
+          if (!(await opexRowIntact(opexRow, existingOpexId))) return { status: 'error', message: ROW_MOVED_MSG };
           await SheetsClient.updateValues(spreadsheetId, `Opex!A${opexRow}:J${opexRow}`, [[
             formatDateStr(date), monthKey, 'Investment', stock, payMethod, income, expense, '', '', 0,
           ]]);
@@ -920,6 +973,9 @@ const DataStore = (() => {
         newOpexId = await writeToOpex(date, monthKey, 'Investment', stock, payMethod, isSell ? 'income' : 'expense', totalIdr, '');
       }
       if (newOpexId !== existingOpexId) {
+        // Several round trips have passed since rowIndex was last checked, and writing
+        // this link into the wrong row would point another investment at this Opex row.
+        if (!(await investRowIntact(rowIndex, data.id))) return { status: 'error', message: ROW_MOVED_MSG };
         await SheetsClient.updateValues(spreadsheetId, `Invest!J${rowIndex}`, [[newOpexId]]);
       }
       return { status: 'ok' };
@@ -930,7 +986,15 @@ const DataStore = (() => {
       if (!rowIndex) return { status: 'error', message: 'Row not found' };
       const linkRes = await SheetsClient.getValues(spreadsheetId, `Invest!J${rowIndex}`);
       const existingOpexId = String((linkRes.values && linkRes.values[0] && linkRes.values[0][0]) || '').trim();
+      // Checked twice, for two different reasons. First, before anything is removed, so
+      // an Invest row that has already moved doesn't cost us its linked Opex row on the
+      // way to deleting the wrong thing. Then again immediately before the delete itself,
+      // because the round trips in between are their own window — Opex and Invest are
+      // separate sheets, so the first delete doesn't shift this index, but another device
+      // still can. deleteOpexRowById throws on its own mismatch rather than returning.
+      if (!(await investRowIntact(rowIndex, data.id))) return { status: 'error', message: ROW_MOVED_MSG };
       if (existingOpexId) await deleteOpexRowById(existingOpexId);
+      if (!(await investRowIntact(rowIndex, data.id))) return { status: 'error', message: ROW_MOVED_MSG };
       await SheetsClient.batchUpdate(spreadsheetId, [{
         deleteDimension: {
           range: { sheetId: investGid, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex },

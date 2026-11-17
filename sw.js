@@ -1,9 +1,40 @@
-const SHELL_CACHE = 'notapub-shell-v4';
+const SHELL_CACHE = 'notapub-shell-v5';
 const DATA_CACHE  = 'notapub-data-v1';
 const CDN_CACHE   = 'notapub-cdn-v1';
 
-// Core app files cached on install
-const SHELL_FILES = ['./index.html', './icon.png'];
+// Core app files cached on install.
+//
+// The scripts were added when the app's core moved out of index.html into app-core.js.
+// Before that, index.html carried ~3,400 lines of inline logic, so pre-caching the one
+// file guaranteed a usable app offline. Now index.html on its own is an empty shell, and
+// a cold start with no network would render markup that does nothing.
+//
+// These were already cached in practice — networkFirst() stores every successful
+// response in this same cache — but only after a first successful online load. Listing
+// them makes an offline cold start work on install instead of by luck.
+//
+// Keep this list in step with the <script src="./..."> tags in index.html: addAll() is
+// atomic, so one 404 here fails the whole install and the service worker never activates.
+const SHELL_FILES = [
+  './index.html',
+  './icon.png',
+  './config.js',
+  './sheets-client.js',
+  './data-store.js',
+  './auth.js',
+  './app-core.js',
+  './data-networth.js',
+  './config-settings.js',
+  './accounts.js',
+  './goals.js',
+  './recurring.js',
+  './ui-settings.js',
+  './email-parser.js',
+  './gmail-client.js',
+  './email-import.js',
+  './ui-calendar.js',
+  './ui-insights.js',
+];
 
 // These are live API calls — never intercept them. Critically, this must include every
 // host DataStore/SheetsClient talk to (sheets.googleapis.com, www.googleapis.com) —

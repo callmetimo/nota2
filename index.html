@@ -1972,7 +1972,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.85';
+const APP_VERSION = 'v4.86';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -5372,6 +5372,8 @@ async function _retryPendingQueue() {
 <script src="./recurring.js"></script>
 <script src="./ui-settings.js"></script>
 <script src="./email-parser.js"></script>
+<!-- Must precede email-import.js: that IIFE destructures GmailClient as it runs. -->
+<script src="./gmail-client.js"></script>
 <script src="./email-import.js"></script>
 <script src="./ui-calendar.js"></script>
 <script src="./ui-insights.js"></script>

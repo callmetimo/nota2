@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.97';
+const APP_VERSION = 'v4.98';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -54,10 +54,48 @@ window.fetch = function(url, opts) {
 // itself queue retries. Kept as a named helper so all ~15 call sites share the
 // same deadline logic without inline duplication.
 function fetchWithTimeout(url, opts, ms = 8000) {
+  // Was Promise.race([fetch(url,opts), a bare setTimeout]) with neither side cleaned up:
+  //   - the timer kept running for the full `ms` even after a fast fetch already won the
+  //     race. Harmless on its own (calling an already-settled promise's reject again is a
+  //     no-op), but with ~20+ call sites now sharing this helper, every quick request left
+  //     a dangling timer ticking in the background for up to 8s for no reason.
+  //   - when the TIMEOUT won instead, the real HTTP request kept running with nothing to
+  //     cancel it. The connection stayed open and, if it eventually succeeded, the
+  //     response was fetched and then silently discarded — wasted bandwidth and a kept-
+  //     open connection on exactly the slow/flaky connections where this matters most.
+  //
+  // First attempt here replaced Promise.race with relying on fetch() to reject once
+  // AbortController fires. That's weaker, not just different: it makes the timeout
+  // depend on fetch() actually honoring the abort signal promptly, when the entire
+  // point of this helper is to bound the wait NO MATTER what the underlying request
+  // does. Caught by testing against a mock fetch that ignores its signal (not a real
+  // browser gap, but the dependency it would create is real) — reverted to keeping
+  // Promise.race as the thing that unconditionally settles at `ms`, with
+  // AbortController layered on as a best-effort cancellation of the loser, not a
+  // replacement for the guarantee.
+  const controller = new AbortController();
+  const fetchOpts = (opts && opts.signal) ? opts : { ...(opts || {}), signal: controller.signal };
+  const fetchPromise = fetch(url, fetchOpts);
+  // Promise.race discards whatever the losing side eventually does — if the timeout
+  // wins, the abort below makes fetchPromise reject moments later with nothing left
+  // to catch it, which is an unhandled-rejection warning without this.
+  fetchPromise.catch(() => {});
+  let timer;
   return Promise.race([
-    fetch(url, opts),
-    new Promise((_, r) => setTimeout(() => r(new Error('timeout')), ms))
-  ]);
+    fetchPromise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error('timeout')); }, ms);
+    }),
+  ])
+    // controller.abort() above fires its 'abort' listeners synchronously, so when the
+    // underlying fetch honors the signal (as a real browser fetch does), its own
+    // AbortError can win the race ahead of the explicit reject(new Error('timeout'))
+    // on the very next line — an AbortError here can only mean this helper's own
+    // timeout fired (nothing else holds this controller), so normalize it rather than
+    // let callers see two different error shapes for the same condition depending on
+    // this timing coincidence.
+    .catch(e => { throw (e && e.name === 'AbortError') ? new Error('timeout') : e; })
+    .finally(() => clearTimeout(timer));
 }
 // Escape HTML special chars — use when injecting user text into innerHTML
 function esc(str) {

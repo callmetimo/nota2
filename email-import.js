@@ -399,10 +399,24 @@ const EmailImport = (() => {
       catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; }
       const parsed = EmailParser.parse(messageBody(msg), localISO(Number(msg.internalDate) || Date.now()), headerOf(msg, 'subject'));
       if (!parsed) continue;
-      // Card bill payments were silently ignored (and their reference marked handled) before they
-      // became transfers, and could not have been added by the user — always release those.
-      const handled = parsed.typeId !== 'ccbill' && ((parsed.ref && seenSet.has('r:' + parsed.ref))
-        || (parsed.typeId === 'bifast' && seenSet.has(`s:${parsed.date}|${parsed.amount}|${parsed.sourceKey}|${parsed.direction}`)));
+      let handled;
+      if (parsed.typeId === 'ccbill') {
+        // Card bill payments were silently ignored (and their reference marked handled) before
+        // they became transfers, and could not have been added by the user — always release those.
+        handled = false;
+      } else if (parsed.typeId === 'cc' || parsed.typeId === 'ccrefund' || parsed.typeId === 'custom') {
+        // These three types (regular card-purchase notices, their reversal/void variant, and
+        // generic/user-defined receipts) always parse with ref:'' — EmailParser never gives them
+        // one. The check below needs a ref (or bifast's own signature) to re-confirm something is
+        // still handled; with neither available, it fell through to "not handled" every time,
+        // releasing EVERY email of these types back into `seen` on every EmailParser.VERSION bump
+        // — including ones the user had already reviewed and added. Only the Gmail message id
+        // dedupes them, and that id is already in `seen`, so leave them there instead of releasing.
+        handled = true;
+      } else {
+        handled = (parsed.ref && seenSet.has('r:' + parsed.ref))
+          || (parsed.typeId === 'bifast' && seenSet.has(`s:${parsed.date}|${parsed.amount}|${parsed.sourceKey}|${parsed.direction}`));
+      }
       if (!handled) { release.push('g:' + id); if (parsed.typeId === 'ccbill' && parsed.ref) release.push('r:' + parsed.ref); }
     }
     if (release.length) {

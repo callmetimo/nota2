@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.93';
+const APP_VERSION = 'v4.94';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -1865,9 +1865,17 @@ function _applyLocalEdit(isoDate, txName, amount, newDate, newTx, newAmount, new
       dupDebugLog('_applyLocalEdit:strippedStaleOldDayPlaceholder', { isoDate, txName, amount, newDate });
     }
   }
-  // txHistory
+  // txHistory — edit only the FIRST matching row, not every row sharing this signature.
+  // Content-match (date+tx+amount) can't tell two genuinely-identical transactions apart
+  // (e.g. two KRL 4k rides on the same day), so a plain .map over every match used to
+  // overwrite BOTH with the same new values: editing one of two duplicates edited both,
+  // silently collapsing the pair into two copies of the edited one. _applyLocalDelete
+  // already solved the equivalent problem for deletes by counting; here the fix is simpler
+  // because an edit only ever needs to touch one occurrence, so a first-match flag suffices.
+  let txEdited = false;
   txHistory = txHistory.map(h => {
-    if (h.date === isoDate && h.tx.toLowerCase() === nl && h.amount === amount) {
+    if (!txEdited && h.date === isoDate && h.tx.toLowerCase() === nl && h.amount === amount) {
+      txEdited = true;
       return {...h, date:newDate, tx:newTx, amount:newAmount, category:newCat, pm:newPm,
               notes:newNotes||'', type: newIsIncome ? 'income' : 'expense', future: newIsFuture,
               nativeAmount: newCcy ? newNativeAmount : 0, ccy: newCcy || ''};
@@ -1875,11 +1883,22 @@ function _applyLocalEdit(isoDate, txName, amount, newDate, newTx, newAmount, new
     return h;
   });
   localStorage.setItem('notapub_history_v2', JSON.stringify(txHistory));
-  // nota_curMonth cache: remove from old month, add to new month
+  // nota_curMonth cache: remove ONE matching row from the old month, add one to the new
+  // month. The old code's .filter(r => !matches) removed every matching row from the old
+  // day — with two identical transactions this deleted BOTH from the old day's cache while
+  // only one new row was ever added to the new day, so one of the two vanished outright
+  // rather than staying put, unedited, on the old day.
   const oldKey = curMonthCacheKey(fy, fm);
   const oldCached = JSON.parse(localStorage.getItem(oldKey) || '[]');
+  let cacheEdited = false;
   localStorage.setItem(oldKey, JSON.stringify(
-    oldCached.filter(r => !(r.d === fd && (r.tx||'').toLowerCase() === nl && (r.exp||r.inc||0) === amount))
+    oldCached.filter(r => {
+      if (!cacheEdited && r.d === fd && (r.tx||'').toLowerCase() === nl && (r.exp||r.inc||0) === amount) {
+        cacheEdited = true;
+        return false;
+      }
+      return true;
+    })
   ));
   const newKey = curMonthCacheKey(nfy, nfm);
   const newCached = JSON.parse(localStorage.getItem(newKey) || '[]');

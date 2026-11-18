@@ -4,6 +4,37 @@ function calIsPlainExpense(r) {
   return c !== 'Income' && c !== 'Transfer' && c !== 'Investment' && !isCreditCardPM(r.pm || '');
 }
 
+// The day-cell data-txns payload. Was copy-pasted four times (calBuildMonthHTML,
+// calGetRemainingWeeksHTML, calGetCurrentWeekHTML, calBuildCurrentMonthHiddenWeeks) and
+// the copies had already drifted: two of the four omitted the 'transfer' type mapping,
+// `future` and `synced` entirely, and one of those two also omitted `nativeAmount`/`ccy`.
+// A transaction tapped from one of the affected weeks lost its transfer label, its
+// future/synced state and its native currency — not a display-only difference, it fed
+// straight into calSelectDay's edit/delete flow. This is the merged superset: every
+// field any of the four copies ever included.
+function calTxJson(txs) {
+  if (!txs || !txs.length) return '[]';
+  return JSON.stringify(txs.map(r => ({
+    tx: r.tx || r.payee || r.mk || '',
+    cat: r.category || r.cat || '',
+    pm: r.pm || '',
+    amt: r.amount || r.exp || r.inc || 0,
+    type: (r.category || r.cat) === 'Income' ? 'income' : ((r.category || r.cat) === 'Investment' ? 'invest' : ((r.category || r.cat) === 'Transfer' ? 'transfer' : '')),
+    rowIndex: r.rowIndex || null,
+    sheetId: r.rowIndex ? (r.id || null) : null,
+    notes: r.notes || '',
+    inc: (r.inc || (r.isIncome ? (r.amount || 0) : 0)),
+    projected: r.projected || false,
+    ruleId: r.ruleId || null,
+    future: r.future || false,
+    synced: r.synced,
+    transferFromPm: r.transferFromPm || null,
+    transferToPm: r.transferToPm || null,
+    nativeAmount: r.nativeAmount || 0,
+    ccy: r.ccy || ''
+  }))).replace(/'/g, '&#39;');
+}
+
 // ── HOME CALENDAR ─────────────────────────────────────────────
 
 const CAL_TX_HEADER_H  = 46;
@@ -293,27 +324,7 @@ function calBuildMonthHTML(year, month, today, collapseBtn = '') {
       if (isToday)   cls += ' today';
       if (d >= 5)    cls += ' weekend';
 
-      const txJson = hasData
-        ? JSON.stringify(txs.map(r => ({
-            tx: r.tx || r.payee || r.mk || '',
-            cat: r.category || r.cat || '',
-            pm: r.pm || '',
-            amt: r.amount || r.exp || r.inc || 0,
-            type: (r.category || r.cat) === 'Income' ? 'income' : ((r.category || r.cat) === 'Investment' ? 'invest' : ((r.category || r.cat) === 'Transfer' ? 'transfer' : '')),
-            rowIndex: r.rowIndex || null,
-            sheetId: r.rowIndex ? (r.id || null) : null,
-            notes: r.notes || '',
-            inc: (r.inc || (r.isIncome ? (r.amount || 0) : 0)),
-            projected: r.projected || false,
-            ruleId: r.ruleId || null,
-            future: r.future || false,
-            synced: r.synced,
-            transferFromPm: r.transferFromPm || null,
-            transferToPm: r.transferToPm || null,
-            nativeAmount: r.nativeAmount || 0,
-            ccy: r.ccy || ''
-          }))).replace(/'/g, '&#39;')
-        : '[]';
+      const txJson = calTxJson(txs);
       const dateStr  = `${cellY}-${String(cellM).padStart(2,'0')}-${String(cell.day).padStart(2,'0')}`;
       const projPrefix = allProjected ? '~' : '';
       const totalStr = dayTotal ? projPrefix + fRp(dayTotal) : '';
@@ -380,27 +391,7 @@ function calGetRemainingWeeksHTML(year, month, today) {
       let cls = 'cal-day' + (isCur ? (isFuture && hasData ? ' future' : (hasData ? ' has-data' : '')) : ' other-month');
       if (i >= 5) cls += ' weekend';
 
-      const txJson = hasData
-        ? JSON.stringify(txs.map(r => ({
-            tx: r.tx || r.payee || r.mk || '',
-            cat: r.category || r.cat || '',
-            pm: r.pm || '',
-            amt: r.amount || r.exp || r.inc || 0,
-            type: (r.category || r.cat) === 'Income' ? 'income' : ((r.category || r.cat) === 'Investment' ? 'invest' : ((r.category || r.cat) === 'Transfer' ? 'transfer' : '')),
-            rowIndex: r.rowIndex || null,
-            sheetId: r.rowIndex ? (r.id || null) : null,
-            notes: r.notes || '',
-            inc: (r.inc || (r.isIncome ? (r.amount || 0) : 0)),
-            projected: r.projected || false,
-            ruleId: r.ruleId || null,
-            future: r.future || false,
-            synced: r.synced,
-            transferFromPm: r.transferFromPm || null,
-            transferToPm: r.transferToPm || null,
-            nativeAmount: r.nativeAmount || 0,
-            ccy: r.ccy || ''
-          }))).replace(/'/g,'&#39;')
-        : '[]';
+      const txJson = calTxJson(txs);
       const dateStr = `${dy}-${String(dm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
       const totalStr = dayTotal ? fRp(dayTotal) : '';
       const clickAttr = `onclick="calSelectDay(this,'${dateStr}','${totalStr}')"` ;
@@ -441,26 +432,7 @@ function calGetCurrentWeekHTML(year, month, today) {
     if (isToday)    cls += ' today';
     if (i >= 5)     cls += ' weekend';
 
-    const txJson = hasData
-      ? JSON.stringify(txs.map(r => ({
-          tx: r.tx || r.payee || r.mk || '',
-          cat: r.category || r.cat || '',
-          pm: r.pm || '',
-          amt: r.amount || r.exp || r.inc || 0,
-          type: (r.category || r.cat) === 'Income' ? 'income' : ((r.category || r.cat) === 'Investment' ? 'invest' : ''),
-          rowIndex: r.rowIndex || null,
-          sheetId: r.rowIndex ? (r.id || null) : null,
-          notes: r.notes || '',
-          inc: (r.inc || (r.isIncome ? (r.amount || 0) : 0)),
-          projected: r.projected || false,
-          ruleId: r.ruleId || null,
-          synced: r.synced,
-          transferFromPm: r.transferFromPm || null,
-          transferToPm: r.transferToPm || null,
-          nativeAmount: r.nativeAmount || 0,
-          ccy: r.ccy || ''
-        }))).replace(/'/g,'&#39;')
-      : '[]';
+    const txJson = calTxJson(txs);
     const dateStr  = `${dy}-${String(dm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     const totalStr = dayTotal ? fRp(dayTotal) : '';
     const clickAttr = `onclick="calSelectDay(this,'${dateStr}','${totalStr}')"` ;
@@ -755,10 +727,15 @@ function calBuildCurrentMonthHiddenWeeks() {
         const cellY  = isCur ? year : prevYear;
         const cellM  = isCur ? month : prevMonth;
         const txs    = getTxByDayFor(cellY, cellM)[cell.day] || [];
-        const total  = txs.filter(r=>(r.category||r.cat)!=='Income').reduce((s,r)=>s+(r.amount||r.exp||0),0);
+        // Was filter(r => cat !== 'Income') — excluded Income but, unlike every other
+        // day-total computation in this file, still counted Transfer, Investment and
+        // credit-card spend. A day in one of these "hidden weeks" of the current month
+        // (every week except the single highlighted current-week row) showed a
+        // different total than the exact same day would show elsewhere.
+        const total  = txs.filter(calIsPlainExpense).reduce((s,r)=>s+(r.amount||r.exp||0),0);
         const hasData = txs.length > 0;
         let cls = 'cal-day' + (isCur ? (hasData ? ' has-data' : '') : ' other-month') + (d >= 5 ? ' weekend' : '');
-        const txJson = hasData ? JSON.stringify(txs.map(r=>({tx:r.tx||r.payee||r.mk||'',cat:r.category||r.cat||'',pm:r.pm||'',amt:r.amount||r.exp||r.inc||0,type:(r.category||r.cat)==='Income'?'income':((r.category||r.cat)==='Investment'?'invest':''),rowIndex:r.rowIndex||null,sheetId:r.rowIndex?(r.id||null):null,notes:r.notes||'',inc:(r.inc||(r.isIncome?(r.amount||0):0)),projected:r.projected||false,ruleId:r.ruleId||null,transferFromPm:r.transferFromPm||null,transferToPm:r.transferToPm||null}))).replace(/'/g,'&#39;') : '[]';
+        const txJson = calTxJson(txs);
         const dateStr = `${cellY}-${String(cellM).padStart(2,'0')}-${String(cell.day).padStart(2,'0')}`;
         const totalStr = total ? fRp(total) : '';
         const clickAttr = `onclick="calSelectDay(this,'${dateStr}','${totalStr}')"` ;

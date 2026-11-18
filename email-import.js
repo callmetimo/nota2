@@ -602,7 +602,15 @@ const EmailImport = (() => {
     showToast(`${n} transaction${n !== 1 ? 's' : ''} added ✓`, 'success');
     if (pending.length) { renderPopup(); } else { closePopup(); }
     renderPage();
-    Promise.all(promises).then(() => {
+    // Promise.all rejects (and skips its .then entirely) the moment any ONE promise
+    // rejects — including one whose underlying sync actually succeeded but whose
+    // post-sync cache write then threw (e.g. a corrupted localStorage value, which
+    // these addAndSync* functions don't guard). That left isSyncing stuck true and
+    // the Add button disabled for the rest of the session, with nothing short of a
+    // reload able to clear it. allSettled waits for every outcome without rejecting
+    // on any of them, so the reset below always runs; the trailing catch is a second
+    // line of defense in case the reset logic itself throws.
+    Promise.allSettled(promises).then(() => {
       isSyncing = false;
       btn.disabled = false;
       calInited = false;
@@ -611,6 +619,10 @@ const EmailImport = (() => {
         calInited = false;
         if (document.getElementById('page-home').classList.contains('active')) initCalendar();
       });
+    }).catch(e => {
+      console.error('[email-import] addSelected sync failed', e && e.message);
+      isSyncing = false;
+      btn.disabled = false;
     });
   }
 

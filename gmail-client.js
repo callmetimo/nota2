@@ -63,12 +63,24 @@ const GmailClient = (() => {
   // Some receipts carry the amount only in an attached PDF. The text is read on this device with
   // pdf.js (loaded from cdnjs only the first time a PDF is needed; scanned or password-protected
   // PDFs have no readable text and are simply skipped).
-  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
-  const PDFJS_SRI = 'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e';
-  const PDFJS_WORKER_SRI = 'sha384-SnzOobpRMLXZ52iJvZm/C0fYw0OQemTXzTjIsdsfMcrCtCEe9qgzxTd3RSklO5x2';
+  //
+  // Was pinned to 3.11.174, which carries CVE-2024-4367 (arbitrary JS execution via a crafted
+  // font in a malicious PDF — fixed upstream in 4.2.67). Every 4.x release on cdnjs, including
+  // this one, dropped the classic pdf.min.js/<script> build entirely and ships only ES modules
+  // (pdf.min.mjs), so the loader below is a rewrite, not a version-string bump:
+  //   - <script integrity> has no equivalent for a dynamically import()'d module in the browsers
+  //     this app targets, so the library file is now verified the same way the worker already
+  //     was: fetched, hash-checked against a value computed directly from the downloaded bytes
+  //     (not copied from a registry listing), then imported from a same-origin Blob URL.
+  //   - the loaded module is a namespace object, not a global — window.pdfjsLib no longer gets
+  //     set by the library itself, so it is cached locally instead.
+  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/';
+  const PDFJS_SRI = 'sha384-+0ti2moQlmLN7WZHE2RHIf5lV8hHxhxEalN0il3YZceG26fUPyOkR0hp9daxk1i7';
+  const PDFJS_WORKER_SRI = 'sha384-ToeVvShCxKc6CEvhHeMt0Q8A06pSPDbAlngO9nokrDmh914gk/pYd0N7D0a4Lz2o';
   const PDF_MAX_BYTES = 2000000;
   const PDF_MAX_PAGES = 4;
   let pdfjsPromise = null;
+  let pdfjsLib = null;
 
   function b64ToBytes(data) {
     const bin = atob(String(data || '').replace(/-/g, '+').replace(/_/g, '/'));
@@ -77,25 +89,31 @@ const GmailClient = (() => {
     return bytes;
   }
 
+  // Fetches a cdnjs file and throws unless its hash matches exactly — the same check a
+  // <script integrity> attribute performs, applied by hand because neither a dynamically
+  // import()'d module nor a Worker constructed from a URL goes through that attribute.
+  async function fetchVerified(url, expectedSri) {
+    const buf = await (await fetch(url)).arrayBuffer();
+    const sum = 'sha384-' + btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-384', buf))));
+    if (sum !== expectedSri) throw new Error('PDF reader failed its integrity check');
+    return buf;
+  }
+
   function loadPdfJs() {
-    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (pdfjsLib) return Promise.resolve(pdfjsLib);
     if (pdfjsPromise) return pdfjsPromise;
-    pdfjsPromise = new Promise((resolve, reject) => {
-      const sc = document.createElement('script');
-      sc.src = PDFJS + 'pdf.min.js'; sc.integrity = PDFJS_SRI; sc.crossOrigin = 'anonymous';
-      sc.onerror = () => reject(new Error('Could not load the PDF reader'));
-      sc.onload = async () => {
-        try {
-          // The worker must be same-origin: fetch it, check its hash, and run it from a blob.
-          const buf = await (await fetch(PDFJS + 'pdf.worker.min.js')).arrayBuffer();
-          const sum = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-384', buf))));
-          if ('sha384-' + sum !== PDFJS_WORKER_SRI) throw new Error('PDF reader failed its integrity check');
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([buf], { type: 'text/javascript' }));
-          resolve(window.pdfjsLib);
-        } catch (e) { reject(e); }
-      };
-      document.head.appendChild(sc);
-    }).catch(e => { pdfjsPromise = null; throw e; });
+    pdfjsPromise = (async () => {
+      const libBuf = await fetchVerified(PDFJS + 'pdf.min.mjs', PDFJS_SRI);
+      const libUrl = URL.createObjectURL(new Blob([libBuf], { type: 'text/javascript' }));
+      try {
+        pdfjsLib = await import(/* webpackIgnore: true */ libUrl);
+      } finally {
+        URL.revokeObjectURL(libUrl);
+      }
+      const workerBuf = await fetchVerified(PDFJS + 'pdf.worker.min.mjs', PDFJS_WORKER_SRI);
+      pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([workerBuf], { type: 'text/javascript' }));
+      return pdfjsLib;
+    })().catch(e => { pdfjsPromise = null; pdfjsLib = null; throw e; });
     return pdfjsPromise;
   }
 
@@ -119,7 +137,11 @@ const GmailClient = (() => {
     try {
       const att = await gmailFetch('/messages/' + msg.id + '/attachments/' + part.id);
       const lib = await loadPdfJs();
-      const doc = await lib.getDocument({ data: b64ToBytes(att.data) }).promise;
+      // isEvalSupported:false is pdf.js's own switch for the exact class of bug CVE-2024-4367
+      // was: a malicious font program using eval()/Function() during glyph rendering. The
+      // library update above already carries the real fix; this is defense in depth, and
+      // costs nothing here since nothing in this read-only text extraction needs it on.
+      const doc = await lib.getDocument({ data: b64ToBytes(att.data), isEvalSupported: false }).promise;
       const pages = [];
       for (let i = 1; i <= Math.min(doc.numPages, PDF_MAX_PAGES); i++) {
         const tc = await (await doc.getPage(i)).getTextContent();

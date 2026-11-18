@@ -109,11 +109,26 @@ async function saveConfigToServer() {
   try {
     localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS));
   } catch(e) {}
-  await fetchWithTimeout(APPS_SCRIPT_URL, {
+  // Was: awaited the fetch and discarded the response without reading it. A network
+  // failure already threw (fetchWithTimeout rejects), but a request that reached the
+  // server and came back with {status:'error'} — e.g. the "too many config items" cap
+  // data-store.js now enforces — looked identical to success from here: no exception,
+  // nothing to tell applyConfigToGlobals() or any caller that the sheet still holds the
+  // OLD data. Two of this function's callers (saveConfigItem,
+  // toggleArchiveCurrentConfigItem) show "Saved ✓" / "Deleted ✓" unconditionally right
+  // after this call returns, so a server-side rejection was being reported to the user
+  // as a success.
+  const res = await fetchWithTimeout(APPS_SCRIPT_URL, {
     method: 'POST', headers: {'Content-Type': 'text/plain'},
     body: apiBody({ type: 'config', action: 'saveAll', items: CONFIG_ITEMS })
   });
+  const j = await res.json().catch(() => ({}));
+  // Local-first, same as everywhere else in this app: apply to the in-memory globals
+  // regardless of the server outcome, so a failed save doesn't leave CONFIG_ITEMS (just
+  // mutated by the caller) out of step with allCategories/allPMs/CAT_COLORS/etc. Still
+  // throw afterward so the caller knows the SHEET itself wasn't updated.
   applyConfigToGlobals();
+  if (j.status !== 'ok') throw new Error(j.message || 'Save failed');
 }
 
 // Initial hydration from cached CONFIG_ITEMS
@@ -254,7 +269,11 @@ async function togglePMCreditCard(pmName, checked) {
   }
   try { localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS)); } catch(e) {}
   renderSettingsLists();
-  await saveConfigToServer();
+  // This had no success toast before and still doesn't (the checkbox itself is the
+  // feedback) — but saveConfigToServer() can now throw where it previously couldn't
+  // reach a failure path at all without a network-level rejection, so a bare await with
+  // no catch here would surface as an unhandled rejection with no feedback at all.
+  try { await saveConfigToServer(); } catch (e) { showToast('Could not save: ' + e.message, 'error'); }
 }
 
 async function toggleAccountShowOnInsights(accountName, checked) {
@@ -265,7 +284,8 @@ async function toggleAccountShowOnInsights(accountName, checked) {
   buildAccountBalances();
   renderAccountBalanceCards();
   renderSettingsLists();
-  await saveConfigToServer();
+  // Same reasoning as togglePMCreditCard just above.
+  try { await saveConfigToServer(); } catch (e) { showToast('Could not save: ' + e.message, 'error'); }
 }
 
 function _configFieldsForKind(kind) {
@@ -513,9 +533,16 @@ async function saveConfigItem() {
   closeConfigItemOverlay();
   renderSettingsLists();
   showToast('Saving…', 'loading');
-  await saveConfigToServer();
-  renderSettingsLists();
-  showToast('Saved ✓', 'success');
+  // Was unconditional — saveConfigToServer() now throws when the server rejects the
+  // save (e.g. the new too-many-items cap), so that no longer shows "Saved ✓" too.
+  try {
+    await saveConfigToServer();
+    renderSettingsLists();
+    showToast('Saved ✓', 'success');
+  } catch (e) {
+    renderSettingsLists();
+    showToast('Could not save: ' + e.message, 'error');
+  }
 }
 
 async function toggleArchiveCurrentConfigItem() {
@@ -528,9 +555,15 @@ async function toggleArchiveCurrentConfigItem() {
   closeConfigItemOverlay();
   renderSettingsLists();
   showToast(existing.archived ? 'Deleting…' : 'Restoring…', 'loading');
-  await saveConfigToServer();
-  renderSettingsLists();
-  showToast(existing.archived ? 'Deleted ✓' : 'Restored ✓', 'success');
+  // Was unconditional — same fix as saveConfigItem just above.
+  try {
+    await saveConfigToServer();
+    renderSettingsLists();
+    showToast(existing.archived ? 'Deleted ✓' : 'Restored ✓', 'success');
+  } catch (e) {
+    renderSettingsLists();
+    showToast('Could not save: ' + e.message, 'error');
+  }
 }
 
 // ── ACCOUNT PAGE ───────────────────────────────────────────────

@@ -1106,7 +1106,10 @@ function calSelectDay(cell, dateStr, totalStr, noScroll) {
 
   const [y, m, d] = dateStr.split('-').map(Number);
   const dateObj = new Date(y, m - 1, d);
-  const isToday = dateStr === new Date().toISOString().slice(0,10);
+  // Was new Date().toISOString().slice(0,10) — UTC, not local. Between 00:00 and 07:00
+  // WIB (UTC+7) that's still "yesterday" in UTC, so today's own date never matched and
+  // the "— Today" label silently never appeared during exactly those hours.
+  const isToday = dateStr === todayISO();
   const dateLabel = dateObj.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric'})
     + (isToday ? ' — Today' : '');
 

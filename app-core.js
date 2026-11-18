@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.102';
+const APP_VERSION = 'v4.103';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2512,7 +2512,11 @@ function pruneStaleHistory(){
   const prevMk=`${MO[prevDate.getMonth()]} ${prevDate.getFullYear()}`;
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 60);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  // Was cutoff.toISOString().slice(0,10) — UTC, compared against h.date below which is
+  // a local YYYY-MM-DD string (same WIB/UTC+7 mismatch as todayISO()'s other call
+  // sites). Shifts the 60-day retention boundary by up to a day depending on time of
+  // day; low-impact on its own, fixed here for the same reason as the others.
+  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
   const before=txHistory.length;
   txHistory=txHistory.filter(r=>{
     if(!r.synced) return true; // never drop unsynced

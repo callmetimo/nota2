@@ -33,7 +33,9 @@ function parseConfigBalance(val) {
 
 function syncConfigToRawAccountBalances() {
   if (!CONFIG_ITEMS || !CONFIG_ITEMS.length) return;
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // Was UTC (new Date().toISOString()), not local — see todayISO()'s other call sites
+  // fixed alongside this one for the same WIB (UTC+7) off-by-one-day window.
+  const todayStr = todayISO();
 
   // Clean up legacy or word-reversed keys in rawAccountBalances that belong to configured items (e.g. IDR BCA -> BCA IDR)
   const configuredNames = CONFIG_ITEMS.map(i => i.name).filter(Boolean);
@@ -424,7 +426,7 @@ function openConfigItemOverlay(kind, name) {
   }
   if (document.getElementById('configItemBalanceDate')) {
     const raw = item ? rawAccountBalances[item.name] : null;
-    const dateVal = (item && item.balanceDate) ? item.balanceDate : (raw ? raw.date : new Date().toISOString().slice(0, 10));
+    const dateVal = (item && item.balanceDate) ? item.balanceDate : (raw ? raw.date : todayISO());
     document.getElementById('configItemBalanceDate').value = dateVal;
   }
   if (document.getElementById('configItemShowOnInsightsCheckbox')) {
@@ -523,7 +525,7 @@ async function saveConfigItem() {
   }
 
   if ((kind === 'account' || kind === 'stock') && balance !== null) {
-    const effectiveDate = balanceDate || new Date().toISOString().slice(0, 10);
+    const effectiveDate = balanceDate || todayISO();
     rawAccountBalances[name] = { amount: balance, date: effectiveDate, txId: 'config_' + name };
   }
   syncConfigToRawAccountBalances();

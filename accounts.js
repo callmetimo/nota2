@@ -154,7 +154,7 @@ function buildAccountBalances() {
     const raw = rawAccountBalances[acct.name];
     const cleanConfigBal = parseConfigBalance(acct.balance);
     let baseAmt = 0;
-    let baseDate = acct.balanceDate || new Date().toISOString().slice(0, 10);
+    let baseDate = acct.balanceDate || todayISO();
     if (cleanConfigBal !== null) {
       // Config (Config sheet columns I/J — the same balance/date shown and edited in
       // Settings → Accounts) is the sole authoritative source now that the legacy
@@ -297,7 +297,7 @@ function openSetBalanceFromConfigOverlay() {
   const item = CONFIG_ITEMS.find(i => i.kind === 'account' && i.name === accountName);
   const raw = rawAccountBalances[accountName];
   const amtVal = (item && item.balance != null) ? item.balance : (raw ? raw.amount : '');
-  const dateVal = (item && item.balanceDate) ? item.balanceDate : (raw ? raw.date : new Date().toISOString().slice(0, 10));
+  const dateVal = (item && item.balanceDate) ? item.balanceDate : (raw ? raw.date : todayISO());
   document.getElementById('setBalanceAmount').value = amtVal !== '' ? formatGroupedAmt(amtVal) : '';
   document.getElementById('setBalanceDate').value = dateVal;
   closeConfigItemOverlay();

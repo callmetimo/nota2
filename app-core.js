@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.90';
+const APP_VERSION = 'v4.91';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2038,7 +2038,11 @@ async function updateTransaction() {
   const pm     = document.getElementById('inputPm').value.trim();
   const notes  = document.getElementById('inputNotes').value.trim();
   const isInc  = inputMode === 'income';
-  if (!date || !tx || !amount || !cat || !pm) { showToast('All fields required', 'error'); return; }
+  // Every other exit from this function resets the flag (the queued-item return below,
+  // and the try/catch/finally around the network call) — this validation failure was the
+  // one path that didn't, so visibility-driven refresh (fetchCurrentMonth on tab-focus)
+  // stayed disabled from here until something else reset it or the page reloaded.
+  if (!date || !tx || !amount || !cat || !pm) { _suppressVisRefresh = false; showToast('All fields required', 'error'); return; }
   const isFuture = date > todayISO();
 
   const pmCcy = getOpexPmCcy(pm);

@@ -797,12 +797,26 @@ async function fetchFxRates(){
         .catch(() => ({ ccy, rate: null }))
     ));
     results.forEach(({ ccy, rate }) => { if (rate) fxRates[ccy] = rate; });
-    fxLastFetch = now;
-    localStorage.setItem('notapub_fx', JSON.stringify(fxRates));
-    localStorage.setItem('notapub_fx_ts', String(now));
+    // Only stamp fxLastFetch/persist when at least one currency actually got a fresh
+    // rate this round. Every item above catches its own failure into {rate:null}, so a
+    // total outage (offline, frankfurter.app down) used to still set fxLastFetch = now
+    // unconditionally — the hour-long "don't re-fetch" window at the top of this
+    // function would then suppress every real retry for the next hour while the app
+    // kept using whatever rates it had before the outage, with nothing distinguishing
+    // "just refreshed" from "haven't refreshed in a while, last attempt failed".
+    if (results.some(r => r.rate)) {
+      fxLastFetch = now;
+      localStorage.setItem('notapub_fx', JSON.stringify(fxRates));
+      localStorage.setItem('notapub_fx_ts', String(now));
+    }
   } catch(e){
-    fxRates.USD = fxRates.USD || 16500;
-    fxRates.CHF = fxRates.CHF || 19000;
+    // Unreachable in practice today: every per-currency fetch above catches its own
+    // failure and resolves with rate:null, so this Promise.all never rejects. Logged
+    // rather than silent so a future edit to the mapping above that removes a .catch
+    // fails loud instead of quietly falling back to stale, hardcoded exchange rates —
+    // which is what used to sit here (USD/CHF pinned to 16500/19000) and would have
+    // been wrong by an unknown and growing margin the longer it went unnoticed.
+    console.warn('[fx] fetchFxRates failed unexpectedly', e && e.message);
   }
 }
 

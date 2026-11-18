@@ -1257,6 +1257,18 @@ const DataStore = (() => {
       normalizeFullDate(r.startDate),
     ]);
 
+    // The pad-to-100 loop below only ever adds rows, never removes any — more than 100
+    // input rules used to write past the reserved block with no check or signal at all.
+    // Data wasn't lost (the write range below is sized from rows.length, not hardcoded),
+    // but an unbounded write — e.g. a client-side dedup bug sending hundreds of duplicate
+    // rules in a loop — would grow the sheet indefinitely with nothing to catch it. Erring
+    // out here is a deliberate behavior change: a user who legitimately needs more than
+    // 100 active rules now gets a clear failure instead of a sheet that silently outgrows
+    // every piece of code elsewhere that assumes this block tops out at row 101.
+    if (rows.length > 100) {
+      return { status: 'error', message: `Too many recurring rules (${rows.length}, max 100)` };
+    }
+
     // Pad with empty rows to overwrite deleted rules in a single API request instead of sequential clear+update
     const emptyRow = Array(18).fill('');
     while (rows.length < 100) rows.push(emptyRow);
@@ -1363,7 +1375,14 @@ const DataStore = (() => {
     if (!Array.isArray(items)) return { status: 'error', message: 'items must be an array' };
     await ensureConfigSheetExists();
     const rows = items.map((it, idx) => serializeConfigRow(it, idx));
-    
+
+    // Same guard as handleRecurring, same reason: the pad-to-150 loop below only adds
+    // rows, so more than 150 config items used to write past the reserved block with
+    // no check. Nothing was actually lost, but nothing caught an unbounded write either.
+    if (rows.length > 150) {
+      return { status: 'error', message: `Too many config items (${rows.length}, max 150)` };
+    }
+
     // Pad with empty rows to overwrite deleted configs in a single API request
     const emptyRow = Array(14).fill('');
     while (rows.length < 150) rows.push(emptyRow);

@@ -1075,7 +1075,12 @@ const EmailImport = (() => {
       if (!p) return `<div class="account-info-card" style="margin:0 0 8px;border-left:2px solid #ff9500"><div style="font-size:13px;font-weight:600">${esc(maskDigits(m.subject) || 'Email')}</div><div style="font-size:11px;color:#ff9500;margin-top:2px">Could not find an amount in this email</div></div>`;
       const chips = (s.reader === 'receipt' && p.ambiguous)
         ? `<div style="font-size:11px;color:#ff9500;margin-top:6px">Several amounts found. Which one is the total?</div><div>${p.candidates.slice(0, 6).map(c =>
-          `<span class="smart-pill" style="margin:4px 4px 0 0" onclick="EmailImport.pickAmountLabel(${JSON.stringify(c.label).replace(/"/g, '&quot;')})">${esc(fRp(c.value))}${c.label ? ' · ' + esc(c.label) : ''}</span>`).join('')}</div>` : '';
+          // jsAttr (config-settings.js, loaded first) HTML-escapes & as well as quotes.
+          // The JSON.stringify(...).replace(/"/g,...) this replaced only escaped the
+          // delimiter quotes, so a label containing "&" (decoded by the browser to a
+          // literal & before this inline handler runs as JS) could break the string
+          // literal — c.label comes from email body text, which is attacker-controlled.
+          `<span class="smart-pill" style="margin:4px 4px 0 0" onclick="EmailImport.pickAmountLabel(${jsAttr(c.label)})">${esc(fRp(c.value))}${c.label ? ' · ' + esc(c.label) : ''}</span>`).join('')}</div>` : '';
       return `<div class="account-info-card" style="margin:0 0 8px"><div style="display:flex;justify-content:space-between;gap:10px">
         <div style="min-width:0"><div style="font-size:13px;font-weight:600">${esc(p.defaultTx || p.merchant || p.typeLabel)}</div><div style="font-size:11px;color:var(--text2)">${esc(isoDisp(p.date))}${p.amountLabel ? ' · ' + esc(p.amountLabel) : ''}</div></div>
         <div style="font-size:13px;font-weight:600;white-space:nowrap">${p.amount > 0 ? fRp(p.amount) : '—'}</div></div>${chips}</div>`;

@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.91';
+const APP_VERSION = 'v4.92';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -1355,12 +1355,16 @@ function updateXfrFxHint() {
 }
 
 // ── SUBMIT OPEX ───────────────────────────────────────────────
-function submitOpex() {
+async function submitOpex() {
   if (isSyncing) return;
   if (overlayEditMode && overlayEditType === 'opex') {
     isSyncing = true;
-    updateTransaction();
-    if (document.getElementById('inputRecurring').checked) {
+    // Was: updateTransaction() called without await. isSyncing was then cleared, and the
+    // recurring rule below created, before the edit's own network request had resolved —
+    // the "guard" did nothing for the part of the edit that actually takes time, and a
+    // failed edit still got a recurring rule created as if it had succeeded.
+    const updateOk = await updateTransaction();
+    if (updateOk && document.getElementById('inputRecurring').checked) {
       const _txDate = document.getElementById('inputDateRaw').value;
       const _sched = _readRecurringSchedule('inputRecurringFreq', 'inputRecurringInterval', 'inputRecurringStart', _txDate);
       if (_sched) {
@@ -2042,7 +2046,10 @@ async function updateTransaction() {
   // and the try/catch/finally around the network call) — this validation failure was the
   // one path that didn't, so visibility-driven refresh (fetchCurrentMonth on tab-focus)
   // stayed disabled from here until something else reset it or the page reloaded.
-  if (!date || !tx || !amount || !cat || !pm) { _suppressVisRefresh = false; showToast('All fields required', 'error'); return; }
+  // Returns true/false so submitOpex() can gate recurring-rule creation on whether the
+  // edit actually went through, instead of creating the rule unconditionally the moment
+  // this function is called.
+  if (!date || !tx || !amount || !cat || !pm) { _suppressVisRefresh = false; showToast('All fields required', 'error'); return false; }
   const isFuture = date > todayISO();
 
   const pmCcy = getOpexPmCcy(pm);
@@ -2082,7 +2089,7 @@ async function updateTransaction() {
     saveLocal();
     showToast('Updated ✓', 'success');
     _suppressVisRefresh = false;
-    return;
+    return true;
   }
 
   showToast('Updating…', 'loading', 0);
@@ -2094,10 +2101,12 @@ async function updateTransaction() {
     nativeAmount: nativeAmount || '', ccy: ccy || '',
     origDate, origMonth, origTx, origAmt, origIsIncome: origInc
   };
+  let success = false;
   try {
     const res = await fetchWithTimeout(APPS_SCRIPT_URL, { method: 'POST', headers: {'Content-Type': 'text/plain'}, body: apiBody(payload) });
     const j = await res.json().catch(() => ({}));
     if (j.status === 'ok') {
+      success = true;
       // Refresh from server to get authoritative rowIndex. _applyLocalEdit() already
       // patched the old-day/new-day cache entries precisely above — don't blind-wipe
       // the whole month's cache here, that only widens the window where a stale
@@ -2119,6 +2128,7 @@ async function updateTransaction() {
   } finally {
     _suppressVisRefresh = false;
   }
+  return success;
 }
 
 async function deleteSheetTransaction() {

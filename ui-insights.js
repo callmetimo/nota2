@@ -334,8 +334,20 @@ function setIT(type, el) {
   insightsDataType = type;
   toggleActive('#insightsTypeToggle .toggle-btn', el);
 
-  insightsAccountFilterVal = 'all';
-  wView = 'all'; mView = 'all'; yView = 'all'; cView = 'all';
+  // Was the string 'all' — every reader of these four variables (accountFilterSet,
+  // acctFilterLabel, the picker's own selected.includes(opt)/selected.length checks)
+  // expects an array, where [] means "no filter, show everything". The string 'all'
+  // broke three different things at once: accountFilterSet() wraps a non-array into a
+  // single-element array (['all']), so getRows()/getRowsForType() then filtered OUT
+  // every row whose PM isn't literally named "all" — Weekly/Monthly/Yearly/Category
+  // silently showed zero data until the user touched a per-tab filter themselves.
+  // acctFilterLabel('all') read the 3-character string's .length and showed "3
+  // Accounts". And the picker's checkbox state used 'all'.includes(opt) (a substring
+  // check on the raw string, since 'all' is truthy so the `|| []` fallback never ran)
+  // instead of Array.prototype.includes, so any option whose name was a substring of
+  // "all" showed as checked.
+  insightsAccountFilterVal = [];
+  wView = []; mView = []; yView = []; cView = [];
   renderInsightsAccountFilter();
 
   if (type === 'category') {

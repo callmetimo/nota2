@@ -70,7 +70,8 @@ function syncConfigToRawAccountBalances() {
 
 async function fetchConfig() {
   try {
-    const res = await fetch(apiGet('type=config'), { method: 'GET' });
+    // Was a raw fetch() — same hang risk as the others fixed alongside this one.
+    const res = await fetchWithTimeout(apiGet('type=config'), { method: 'GET' });
     const j = await res.json();
     if (j.status === 'ok' && Array.isArray(j.items)) {
       CONFIG_ITEMS = j.items;

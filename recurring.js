@@ -19,7 +19,8 @@ function saveRecurring(rules) {
 
 async function fetchRecurring() {
   try {
-    const res = await fetch(apiGet('type=recurring'), { method: 'GET' });
+    // Was a raw fetch() — same hang risk as the others fixed alongside this one.
+    const res = await fetchWithTimeout(apiGet('type=recurring'), { method: 'GET' });
     const j = await res.json();
     if (j.status === 'ok' && Array.isArray(j.rules)) {
       if (j.rules.length > 0) {

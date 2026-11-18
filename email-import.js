@@ -194,7 +194,8 @@ const EmailImport = (() => {
   async function pushToServer() {
     if (!isEnabled() && !config.rules.length && !config.accounts.length) return;
     try {
-      const res = await fetch(apiGet('type=emailimport'), {
+      // Was a raw fetch() — same hang risk as the others fixed alongside this one.
+      const res = await fetchWithTimeout(apiGet('type=emailimport'), {
         method: 'POST', headers: { 'Content-Type': 'text/plain' },
         body: apiBody({ type: 'emailimport', action: 'save', config, seen }),
       });
@@ -209,7 +210,8 @@ const EmailImport = (() => {
   async function loadFromServer() {
     if (serverLoaded) return;
     try {
-      const res = await fetch(apiGet('type=emailimport'), { method: 'GET' });
+      // Was a raw fetch() — same hang risk as the others fixed alongside this one.
+      const res = await fetchWithTimeout(apiGet('type=emailimport'), { method: 'GET' });
       const j = await res.json();
       if (j.status !== 'ok') return;
       serverLoaded = true;

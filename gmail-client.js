@@ -93,7 +93,13 @@ const GmailClient = (() => {
   // <script integrity> attribute performs, applied by hand because neither a dynamically
   // import()'d module nor a Worker constructed from a URL goes through that attribute.
   async function fetchVerified(url, expectedSri) {
-    const buf = await (await fetch(url)).arrayBuffer();
+    // Was a raw fetch() — same hang risk as the fixes alongside this one, and this is
+    // the modern replacement for the old pdf.worker.min.js fetch that the original
+    // review flagged by line number before the pdf.js rewrite in this file moved it
+    // here. A longer deadline than the default 8s: this downloads the ~350KB library
+    // and the ~1.4MB worker, not a small API response, and it's not gating anything
+    // on the calendar-boot path — only the on-demand PDF-reading feature.
+    const buf = await (await fetchWithTimeout(url, undefined, 20000)).arrayBuffer();
     const sum = 'sha384-' + btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-384', buf))));
     if (sum !== expectedSri) throw new Error('PDF reader failed its integrity check');
     return buf;

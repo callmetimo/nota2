@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.95';
+const APP_VERSION = 'v4.96';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -235,7 +235,10 @@ async function fetchSheetPrices(force) {
   }
   if (statusEl) statusEl.textContent = 'Fetching prices from Google Sheets…';
   try {
-    const res = await fetch(apiGet('type=prices'), {method:'GET'});
+    // Was a raw fetch(): the same bug class already fixed once in this project (see the
+    // calendar-skeleton-stuck memory) — a hung Auth token wait or a stalled connection
+    // left this await pending forever, with nothing to time it out.
+    const res = await fetchWithTimeout(apiGet('type=prices'), {method:'GET'});
     const j = await res.json();
     if (j.prices) {
       // j.prices: { AAPL: 298.21, JNJ: 230.80, VYM: 157.24, QQQ: 719.79, CHFIDR: 22425, USDIDR: 17599, StarStable: 2205 }
@@ -346,7 +349,8 @@ async function fetchLiveInvest() {
   // fetches full invest history rather than falling back to a recent cutoff.
   const since = HIST.cashBalanceAsOf || '2000-01-01';
   try {
-    const res = await fetch(apiGet(`type=invest&since=${since}`), { method: 'GET' });
+    // Was a raw fetch() — same hang risk as fetchSheetPrices above.
+    const res = await fetchWithTimeout(apiGet(`type=invest&since=${since}`), { method: 'GET' });
     const j = await res.json();
     if (j.status === 'ok' && Array.isArray(j.rows)) {
       liveInvest = j.rows.map(r => {

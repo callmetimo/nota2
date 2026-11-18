@@ -786,8 +786,12 @@ async function fetchFxRates(){
   });
 
   try {
+    // Was a raw fetch(). Promise.all hangs on the slowest item, and a per-item .catch
+    // only catches a rejection — a connection that never resolves or rejects (a stalled
+    // socket, a captive portal) isn't caught by that .catch at all, so one stuck currency
+    // used to block this whole function, and renderNetWorth() awaits it first.
     const results = await Promise.all(Array.from(configuredCcys).map(ccy =>
-      fetch(`https://api.frankfurter.app/latest?from=${encodeURIComponent(ccy)}&to=IDR`)
+      fetchWithTimeout(`https://api.frankfurter.app/latest?from=${encodeURIComponent(ccy)}&to=IDR`)
         .then(res => res.json())
         .then(j => ({ ccy, rate: j.rates?.IDR }))
         .catch(() => ({ ccy, rate: null }))

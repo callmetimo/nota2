@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.99';
+const APP_VERSION = 'v4.100';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2528,17 +2528,29 @@ function pruneStaleHistory(){
   }
 }
 function updateStatus(){}
+// Was: every showToast() call with a non-zero duration scheduled a bare setTimeout with
+// no reference kept to it. Two toasts shown back to back (e.g. "Saving…" replaced
+// quickly by "Saved ✓", or any error toast racing a status update) left both timers
+// running independently; whichever fired first cleared whatever toast happened to be
+// showing at that moment — not necessarily its own — so a later toast could be wiped
+// early by an earlier call's leftover timer, or a stale timer could clear a toast that
+// had already changed since it was scheduled. Tracking the one active timer and
+// cancelling it at the start of every call (and on an explicit hideToast()) means only
+// the most recent call's timer is ever pending.
+let _toastTimer = null;
 function showToast(msg,type,duration){
   // Keep the "Tap anywhere" hint (see first-tap script) up through background loading toasts.
   if(window.__notaTapHintActive && type==='loading') return;
   window.__notaTapHintActive=false;
+  clearTimeout(_toastTimer); _toastTimer = null;
   const t=document.getElementById('toast');t.textContent=msg;
   t.className='toast show'+(type?' '+type:'');
   if(duration===0)return; // persistent — caller must dismiss
-  setTimeout(()=>t.className='toast',duration||3000);
+  _toastTimer = setTimeout(()=>{ t.className='toast'; _toastTimer = null; },duration||3000);
 }
 function hideToast(){
   if(window.__notaTapHintActive) return;
+  clearTimeout(_toastTimer); _toastTimer = null;
   const t=document.getElementById('toast');t.className='toast';
 }
 

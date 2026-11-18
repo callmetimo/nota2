@@ -887,6 +887,16 @@ const DataStore = (() => {
         return payload;
       } catch (e) {
         console.warn('[data-store] Background fetch failed for allOpex', e);
+        // This branch is only reached when cachedStr was truthy (see the no-cache call
+        // below, which awaits fetchFresh() directly and lets a failure there throw).
+        // That background call is never awaited by its caller — "fetchFresh(); return
+        // JSON.parse(cachedStr);" below — so nothing else in the app has ever been able
+        // to tell a revalidation that quietly failed apart from one that simply hasn't
+        // run yet, and the stale data it returns here goes nowhere; the caller already
+        // got its answer from the cache a tick earlier. notaSyncFailed is dispatched so
+        // the UI has a way to know its data might be out of date instead of trusting a
+        // cache that already failed to refresh at least once.
+        window.dispatchEvent(new CustomEvent('notaSyncFailed', { detail: { type: 'allOpex', message: (e && e.message) || String(e) } }));
         if (!cachedStr) throw e;
         return JSON.parse(cachedStr);
       }

@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.101';
+const APP_VERSION = 'v4.102';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -3312,22 +3312,30 @@ window.addEventListener('DOMContentLoaded', async () => {
     // If it instead failed outright (transient network/auth hiccup on cold launch),
     // retry a couple times with backoff instead of leaving the calendar empty until
     // the user happens to revisit the Home tab (which re-triggers fetchCurrentMonth).
-    _monthFetch
-      .then(() => { patchCurMonthCache(); calInited = false; if (isHome()) initCalendar(); })
-      .catch(async (err) => {
-        console.warn('[home] initial month fetch failed, retrying', err);
-        for (let attempt = 0; attempt < 2; attempt++) {
-          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
-          try {
-            await fetchCurrentMonth(true);
-            patchCurMonthCache();
-            calInited = false;
-            if (isHome()) initCalendar();
-            return;
-          } catch (e) { /* try next attempt */ }
+    //
+    // fetchCurrentMonth() has its own internal try/catch and never rejects — any
+    // failure (network, timeout, a bad response) is swallowed and it resolves with
+    // null instead. The .then()/.catch() this replaced relied on a rejection that
+    // could therefore never happen: every cold-start outcome, success or failure, took
+    // the .then() branch, and the retry-with-backoff in .catch() was unreachable dead
+    // code from the day it was written. Checking the resolved value (null = failed, a
+    // number = a real answer from the sheet, 0 included) is what makes this reachable.
+    _monthFetch.then(async (result) => {
+      if (result !== null) {
+        patchCurMonthCache(); calInited = false; if (isHome()) initCalendar();
+        return;
+      }
+      console.warn('[home] initial month fetch failed, retrying');
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+        const retryResult = await fetchCurrentMonth(true);
+        if (retryResult !== null) {
+          patchCurMonthCache(); calInited = false; if (isHome()) initCalendar();
+          return;
         }
-        console.error('[home] month fetch retries exhausted');
-      });
+      }
+      console.error('[home] month fetch retries exhausted');
+    });
   }
 
   // Retry any locally-queued transactions that failed to sync previously

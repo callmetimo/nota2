@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.114';
+const APP_VERSION = 'v4.115';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2870,8 +2870,16 @@ function openSearchTxEdit(source, idx) {
 }
 
 function openSearchInvestEdit(source, idx) {
+  // 'local-invest' — an unsynced Buy/Sell still sitting in investHistory/queue — is a
+  // real source value performSearch()/renderAllTxPage() tag search results with (see
+  // the two `source:'local-invest'` producers above), but this never knew about it, so
+  // tapping one of those results silently did nothing. openEditInvestOverlay() and the
+  // save/delete handlers already branch correctly on a local row via its queue match
+  // (see updateInvestTransaction/deleteSheetInvestTransaction's `queuedIdx` check) —
+  // only the row lookup here was missing.
   const row = source === 'live-invest' ? (liveInvest || [])[idx]
             : source === 'hist-invest' ? (HIST.invest || [])[idx]
+            : source === 'local-invest' ? (investHistory || [])[idx]
             : null;
   if (!row || !row.id) return;
   openEditInvestOverlay(row);

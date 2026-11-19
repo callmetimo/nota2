@@ -31,10 +31,12 @@ const EmailParser = (() => {
   // ── text helpers ────────────────────────────────────────────
   function decodeEntities(s) {
     return s
-      .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
       .replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
       .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
-      .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
+      .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+      .replace(/&amp;/gi, '&');
   }
 
   // Keeps table structure as tabs/newlines so "Label : Value" rows survive as lines.
@@ -93,15 +95,25 @@ const EmailParser = (() => {
 
   // "IDR 63,500.00" (BCA) / "Rp501.755,00" / "Rp. 601.149,00" (Indonesian) -> { ccy, value }.
   function parseAmount(raw) {
-    const s = String(raw || '').trim();
+    let s = String(raw || '').trim();
     if (!s) return { ccy: 'IDR', value: null };
+    let isNeg = false;
+    if (/^[-−]/.test(s)) {
+      isNeg = true;
+      s = s.replace(/^[-−]\s*/, '');
+    }
     const ccyM = s.match(/^(IDR|Rp\.?|USD|SGD|EUR|JPY|AUD|GBP|MYR|CNY|HKD|THB|CHF|\$)/i);
     let ccy = 'IDR';
     if (ccyM) {
       const c = ccyM[1].toUpperCase();
       ccy = (c.startsWith('RP') || c === 'IDR') ? 'IDR' : (c === '$' ? 'USD' : c);
     }
-    let num = s.replace(/^(IDR|Rp\.?|[A-Za-z]{3}|\$)/i, '').replace(/[^\d.,]/g, '');
+    s = s.replace(/^(IDR|Rp\.?|[A-Za-z]{3}|\$)\s*/i, '');
+    if (/^[-−]/.test(s)) {
+      isNeg = true;
+      s = s.replace(/^[-−]\s*/, '');
+    }
+    let num = s.replace(/[^\d.,]/g, '');
     if (!num) return { ccy, value: null };
     const lastDot = num.lastIndexOf('.');
     const lastComma = num.lastIndexOf(',');
@@ -117,14 +129,17 @@ const EmailParser = (() => {
       const isThousands = parts.length > 2 || last.length === 3;
       num = isThousands ? parts.join('') : parts.join('') .slice(0, -last.length) + '.' + last;
     }
-    const value = Number(num);
+    let value = Number(num);
     if (!isFinite(value)) return { ccy, value: null };
+    if (isNeg) value = -value;
     return { ccy, value: ccy === 'IDR' ? Math.round(value) : value };
   }
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function iso(y, m, d) {
     if (!(y >= 2000 && m >= 1 && m <= 12 && d >= 1 && d <= 31)) return '';
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return '';
     return `${y}-${pad(m)}-${pad(d)}`;
   }
 
@@ -311,7 +326,7 @@ const EmailParser = (() => {
     [/\btotal\b|sejumlah|nominal|jumlah transaksi|transaction amount/i, 6],
     [/bayar|paid|pembayaran|tagihan|amount|charged/i, 3],
   ];
-  const BAD_LABEL = /sub ?total|diskon|discount|promo|ongkir|biaya|fee|pajak|tax|ppn|saldo|balance|cashback|potongan|voucher|kembalian|\btip\b|harga dasar|base fare/i;
+  const BAD_LABEL = /sub ?total|diskon|discount|promo|ongkir|biaya|\bfee\b|pajak|tax|ppn|saldo|balance|cashback|potongan|voucher|kembalian|\btip\b|harga dasar|base fare/i;
   const AMOUNT_RE = /(?:Rp\.?|IDR)\s*(\d[\d.,]*)/gi;
   const MERCHANT_LABELS = ['Merchant', 'Merchant Name', 'Nama Merchant', 'Nama Toko', 'Restoran', 'Restaurant', 'Toko', 'Store', 'Penjual',
     'Hotel Name', 'Dibayar ke', 'Paid to', 'Payment to', 'Pembayaran ke'];

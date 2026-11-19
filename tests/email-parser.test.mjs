@@ -497,4 +497,37 @@ t('generic: ambiguous when nothing looks like a total', () => {
   assert.equal(r.candidates.length, 2);
 });
 
+t('BAD_LABEL: fee match is word-bounded so Coffee is not penalized', () => {
+  // Coffee should not be penalized by BAD_LABEL (-8); on equal score, later line wins.
+  const rCoffee = EmailParser.parseGeneric('Item: Rp 40.000\nCoffee: Rp 50.000', '2026-10-20', { from: 'cafe@shop.com' });
+  assert.equal(rCoffee.amountLabel, 'Coffee');
+  // Real fee should be penalized by BAD_LABEL (-8), so Item (score 0) wins over Delivery fee.
+  const rFee = EmailParser.parseGeneric('Item: Rp 40.000\nDelivery fee: Rp 10.000', '2026-10-20', { from: 'cafe@shop.com' });
+  assert.equal(rFee.amountLabel, 'Item');
+});
+
+t('parseDate: invalid dates like 31 Feb or 31 Apr are rejected', () => {
+  assert.equal(EmailParser.parseDate('31 Feb 2026'), '');
+  assert.equal(EmailParser.parseDate('31/02/2026'), '');
+  assert.equal(EmailParser.parseDate('31-04-2026'), '');
+  assert.equal(EmailParser.parseDate('29 Feb 2026'), ''); // not leap year
+  assert.equal(EmailParser.parseDate('28 Feb 2026'), '2026-02-28');
+  assert.equal(EmailParser.parseDate('29 Feb 2024'), '2024-02-29'); // leap year
+});
+
+t('parseAmount: handles leading minus sign for refunds and discounts', () => {
+  assert.deepEqual(EmailParser.parseAmount('-IDR 50,000'), { ccy: 'IDR', value: -50000 });
+  assert.deepEqual(EmailParser.parseAmount('IDR -50,000'), { ccy: 'IDR', value: -50000 });
+  assert.deepEqual(EmailParser.parseAmount('-Rp501.755,00'), { ccy: 'IDR', value: -501755 });
+  assert.deepEqual(EmailParser.parseAmount('Rp -501.755,00'), { ccy: 'IDR', value: -501755 });
+  assert.deepEqual(EmailParser.parseAmount('-USD 12,50'), { ccy: 'USD', value: -12.5 });
+  assert.deepEqual(EmailParser.parseAmount('-50000'), { ccy: 'IDR', value: -50000 });
+});
+
+t('htmlToText: entity decoding decodes &amp; last so double-encoded entities stay intact', () => {
+  assert.equal(EmailParser.htmlToText('&amp;lt;'), '&lt;');
+  assert.equal(EmailParser.htmlToText('&amp;gt;'), '&gt;');
+  assert.equal(EmailParser.htmlToText('&amp;amp;'), '&amp;');
+});
+
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

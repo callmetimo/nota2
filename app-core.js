@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.119';
+const APP_VERSION = 'v4.120';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -1210,6 +1210,11 @@ function switchTab(tab, el) {
     initSearchPage();
     if(!histLoaded) onHistLoaded(()=>{ renderSearchOrMonitor(); });
   }
+  // Was a window.switchTab=function(){...} wrapper installed from a tail <script> in
+  // index.html, re-wrapping this function after the fact to highlight the active
+  // sidebar sub-page. Folded in directly; typeof-guarded since syncSideNav is defined
+  // in that later script and nothing here forces load order relative to it.
+  if (typeof syncSideNav === 'function') syncSideNav(tab);
 }
 
 function openInputOverlay() {
@@ -1331,6 +1336,18 @@ function getFxAvgRate(pmName, ccy) {
   return getCcyRate(ccy);
 }
 
+// Foreign-currency PM (e.g. a USD account while travelling): the amount just typed is
+// in that currency, not IDR — convert to IDR (at that currency's own weighted-average
+// cost, see getFxAvgRate) for everything downstream that assumes IDR, while keeping the
+// native amount/ccy for the sheet and for depleting/crediting that account's own native
+// balance. An IDR PM passes amount through unchanged with nativeAmount:0, ccy:''.
+// Pulled out of submitOpex and updateTransaction, which both had this exact 5-line block.
+function toNativeIdr(pm, amount) {
+  const pmCcy = getOpexPmCcy(pm);
+  if (pmCcy === 'IDR') return { amount, nativeAmount: 0, ccy: '' };
+  return { amount: Math.round(amount * getFxAvgRate(pm, pmCcy)), nativeAmount: amount, ccy: pmCcy };
+}
+
 // Re-evaluates the selected PM's currency and flips the Amount field between
 // plain IDR and "enter it in that currency" mode. Called on inputPm blur.
 function onOpexPmSelect() {
@@ -1412,9 +1429,9 @@ async function submitOpex() {
       if (_sched) {
         const _tx     = sanitizeInput(document.getElementById('inputTx').value, 100).trim();
         const _pm     = sanitizeInput(document.getElementById('inputPm').value, 50).trim();
-        const _pmCcy  = getOpexPmCcy(_pm);
-        let _amount   = parseGroupedAmt('inputAmount');
-        if (_pmCcy !== 'IDR') _amount = Math.round(_amount * getFxAvgRate(_pm, _pmCcy));
+        // Recurring rules store amount in IDR only, so only toNativeIdr's converted
+        // amount is needed here, not its native/ccy fields.
+        const _amount = toNativeIdr(_pm, parseGroupedAmt('inputAmount')).amount;
         const _cat    = sanitizeInput(document.getElementById('inputCat').value, 50).trim();
         const _notes  = sanitizeInput(document.getElementById('inputNotes').value, 200);
         const _end    = _getEndMonthValue('inputRecurringEndMonth', 'inputRecurringEndYear');
@@ -1449,18 +1466,8 @@ async function submitOpex() {
   const notes=sanitizeInput(document.getElementById('inputNotes').value,200);
   if(!date||!tx||!amount||!cat||!pm){isSyncing=false;showToast('All fields required','error');return}
 
-  // Foreign-currency PM (e.g. a USD account while travelling): the amount just
-  // typed is in that currency, not IDR — convert to IDR (at that currency's own
-  // weighted-average cost, see getFxAvgRate) for everything downstream that
-  // assumes IDR, while keeping the native amount/ccy for the sheet and for
-  // depleting/crediting that account's own native balance.
-  const pmCcy = getOpexPmCcy(pm);
-  let nativeAmount = 0, ccy = '';
-  if (pmCcy !== 'IDR') {
-    nativeAmount = amount;
-    ccy = pmCcy;
-    amount = Math.round(nativeAmount * getFxAvgRate(pm, pmCcy));
-  }
+  let nativeAmount, ccy;
+  ({ amount, nativeAmount, ccy } = toNativeIdr(pm, amount));
 
   // CC Installment Logic
   const isInstallment = document.getElementById('ccInstallmentBtn').classList.contains('active');
@@ -2113,13 +2120,8 @@ async function updateTransaction() {
   if (!date || !tx || !amount || !cat || !pm) { _suppressVisRefresh = false; showToast('All fields required', 'error'); return false; }
   const isFuture = date > todayISO();
 
-  const pmCcy = getOpexPmCcy(pm);
-  let nativeAmount = 0, ccy = '';
-  if (pmCcy !== 'IDR') {
-    nativeAmount = amount;
-    ccy = pmCcy;
-    amount = Math.round(nativeAmount * getFxAvgRate(pm, pmCcy));
-  }
+  let nativeAmount, ccy;
+  ({ amount, nativeAmount, ccy } = toNativeIdr(pm, amount));
 
   // Snapshot orig values before closeInputOverlay clears them
   const origDate = overlayEditOrigDate;

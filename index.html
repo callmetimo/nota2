@@ -1333,15 +1333,17 @@
 <script src="./ui-insights.js?v=__BUILD__"></script>
 <script>
 /* Sidebar helpers: highlight the Profile sub-page that is open, label the version, Esc closes dialogs. */
+// syncSideNav used to run via a window.switchTab=function(){...} wrapper installed here,
+// re-wrapping the real switchTab (app-core.js) after the fact. Folded directly into the
+// end of switchTab itself instead (guarded by typeof, since this script runs after
+// app-core.js but switchTab could in principle be reached before this tag executes).
+var SIDE_NAV_SUBS=['networth','goals','recurring','emailimport','settings','account'];
+function syncSideNav(tab){
+  document.querySelectorAll('.side-sub').forEach(function(b){b.classList.toggle('on',b.dataset.tab===tab)});
+  var more=document.getElementById('nav-more');
+  if(more&&SIDE_NAV_SUBS.indexOf(tab)>-1)more.classList.add('active'); // sub-pages live under Profile
+}
 (function(){
-  var SUBS=['networth','goals','recurring','emailimport','settings','account'];
-  function syncSideNav(tab){
-    document.querySelectorAll('.side-sub').forEach(function(b){b.classList.toggle('on',b.dataset.tab===tab)});
-    var more=document.getElementById('nav-more');
-    if(more&&SUBS.indexOf(tab)>-1)more.classList.add('active'); // sub-pages live under Profile
-  }
-  var orig=window.switchTab;
-  window.switchTab=function(tab){var r=orig.apply(this,arguments);syncSideNav(tab);return r};
   var v=document.getElementById('sideVersionLabel');if(v&&typeof APP_VERSION!=='undefined')v.textContent=APP_VERSION;
   document.addEventListener('keydown',function(e){
     if(e.key!=='Escape')return;

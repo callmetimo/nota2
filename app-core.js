@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.115';
+const APP_VERSION = 'v4.116';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -3396,9 +3396,12 @@ window.addEventListener('DOMContentLoaded', async () => {
       // Clear sensitive cached data, then reload to fresh state.
       // nota_queue_v2 and nota_history_v2 are intentionally excluded: they hold
       // unsynced transactions that have not reached the server yet — deleting them
-      // causes permanent data loss with no recovery path.
+      // causes permanent data loss with no recovery path. notapub_invest_v2
+      // (investHistory) is the same kind of data for investments and was wrongly
+      // on this list — an unsynced Buy/Sell still in queue lost its local display
+      // copy on this reload, surviving only in queue until a resync re-merged it.
       [curMonthCacheKey(),
-       'notapub_invest_v2', 'notapub_fx', 'notapub_prices']
+       'notapub_fx', 'notapub_prices']
         .forEach(k => localStorage.removeItem(k));
       location.reload();
     }

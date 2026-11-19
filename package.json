@@ -3,14 +3,10 @@
   "version": "1.0.1",
   "description": "Nota personal finance and transaction tracker app",
   "type": "module",
-  "main": "server.js",
   "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js",
+    "dev": "python3 serve.py",
+    "start": "python3 serve.py",
     "build": "echo 'No build step needed'",
     "test": "node tests/email-parser.test.mjs"
-  },
-  "dependencies": {
-    "express": "^4.21.2"
   }
 }

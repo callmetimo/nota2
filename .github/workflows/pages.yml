@@ -45,6 +45,7 @@ jobs:
             node --check "$f"
           done
           node tests/email-parser.test.mjs
+          node tests/email-import.test.mjs
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

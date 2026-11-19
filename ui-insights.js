@@ -1021,7 +1021,12 @@ function renderHoldings(holdings, usdRate, chfRate, acctBals){
   html += '<div class="toggle-row">';
   sortedTypes.forEach(([type]) => {
     const active = type === holdingsGroupFilter ? ' active' : '';
-    html += `<div class="toggle-btn holdings-group-btn${active}" data-type="${esc(type)}" onclick="setHoldingsGroupFilter('${esc(type).replace(/'/g, "\\'")}', this)">${esc(type)}</div>`;
+    // Was esc(type).replace(/'/g, "\\'") — esc() already turns a literal ' into &#39;
+    // before that .replace ever sees it, so the replace is a no-op (same anti-pattern
+    // escJsAttr's own comment in app-core.js warns against). A type name containing an
+    // apostrophe (a user-typed custom assetType in Settings, or a shared sheet's data)
+    // could still break out of the inline handler's JS string literal.
+    html += `<div class="toggle-btn holdings-group-btn${active}" data-type="${esc(type)}" onclick="setHoldingsGroupFilter('${escJsAttr(type)}', this)">${esc(type)}</div>`;
   });
   html += '</div>';
 

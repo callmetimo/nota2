@@ -1,7 +1,7 @@
-# Handover: Nota architecture-review fixes — Batch 3 continuation
+# Handover: Nota architecture-review fixes — Gemini's scope (§4A) only
 
 **Written by:** Claude (Sonnet 5), 2026-11-19, because the user's Claude weekly usage ran out mid-batch.
-**For:** whichever assistant picks this up next (expected: Antigravity / Gemini Flash 3.8).
+**For:** Antigravity / Gemini Flash 3.8, on the user's explicit instruction. **The remaining items were split by the user into two scopes: §4A below (mechanical, lower-risk) for you, and §4B (needs more judgment) reserved for a separate Claude session. Do only §4A.**
 **Repo:** `G:\My Drive\AI Tools\Claude Projects\Nota` — git repo, `main` branch, clean working tree as of this writing.
 **Current app version:** `v4.106` (constant `APP_VERSION` in `app-core.js`).
 
@@ -116,7 +116,7 @@ Commits `ae725fc` through `9797c36` (v4.82 → v4.106), in order, each on `main`
 - **Cache-busting:** `index.html` script tags now carry `?v=<BUILD>`, `sw.js` derives its cache name from the same constant, CI substitutes the real commit SHA at deploy time.
 - **Data-loss / race-condition fixes:** retry-queue double-POST guard; row-identity verification before every sheet edit/delete (`data-store.js`); sign-out now clears the whole `nota*` localStorage namespace with an unsynced-transactions warning; `_applyLocalEdit` no longer collapses identical sibling transactions; length caps on recurring/config sheet writes.
 - **Resilience (batch 2, items 11–17, ALL DONE):** every remaining raw `fetch()` replaced with `fetchWithTimeout` (8 sites across 7 files); `fetchFxRates` no longer mistakes a total outage for success; `fetchWithTimeout` itself now clears its timer and actually cancels the request (two-attempt fix, see §2 point 5); `saveConfigToServer` now detects server-side save failures instead of assuming success; `showToast` no longer lets a stale timer clear a newer toast early; `notaSyncFailed` event now dispatched on background-refresh failure (infrastructure only, no UI consumer yet — that's a deliberate future item, not a bug); the dead cold-start retry-with-backoff is now reachable.
-- **Correctness (batch 3, items 19–22 DONE, 23–28 REMAINING — see §4):**
+- **Correctness (batch 3, items 19–22 DONE, 23–28 REMAINING, split between §4A/your scope and §4B/reserved for Claude — see §4):**
   - **19 DONE:** 7 sites of `new Date().toISOString().slice(0,10)` (UTC) replaced with local-date logic (`todayISO()` or equivalent), across `ui-calendar.js`, `app-core.js`, `config-settings.js`, `accounts.js`. This was a real bug for users in WIB (UTC+7): "today" was wrong for 7 hours a day. Verified against the actual browser timezone, which happens to be `Asia/Jakarta` in this dev environment — useful, lean on it.
   - **20 DONE:** `setIT()` was setting the Insights account-filter variables to the *string* `'all'` instead of the empty array `[]` that every consumer expects. This silently made Weekly/Monthly/Yearly/Category show **zero data** by default (not just a wrong label) until the user manually touched a filter. Fixed.
   - **21 DONE:** 4 copy-pasted `txJson` builders in `ui-calendar.js` (one per rendering function) had drifted — two of four were missing the `'transfer'` type mapping, `future`, `synced`, and one of those two was also missing `nativeAmount`/`ccy`. Merged into one `calTxJson()` helper (defined right after `calIsPlainExpense` near the top of the file). Also fixed: the busiest of the four builders (`calBuildCurrentMonthHiddenWeeks` — it draws every week of the current month *except* the highlighted "current week" row, so it's the most commonly hit path) was computing its day total with a weaker filter that still counted Transfer/Investment/credit-card spend; now uses `calIsPlainExpense` like the other three.
@@ -126,11 +126,15 @@ Commits `ae725fc` through `9797c36` (v4.82 → v4.106), in order, each on `main`
 
 ---
 
-## 4. What's left — do these next, in this order, one commit each
+## 4. What's left
 
-All of these were identified by the original architecture review. Line numbers below are from the **original pre-refactor review** (stale!) where given — always re-`grep` the current file to find the real location before editing. I was mid-investigation of item 23 when I had to stop; I'd located the function but made zero edits.
+**The remaining items have been split between two assistants.** This handover, and this file, is scoped to the Gemini Flash 3.8 half only. The items below in §4A are what you (Gemini) should do. The items in §4B (24, 25, 26, 28, 35, 36) are **explicitly reserved for a separate Claude session** — the user decided those need more judgment than this handoff should ask of a smaller model. **Do not attempt §4B's items.** Leave them exactly as they are; don't "helpfully" fix them if you notice them in passing, and don't refactor anything they touch. §4B is included here only as a short summary so you know what to leave alone and why — the full investigation notes for those six items live in this file's git history (commit `91bd3fc`, the first version of this handover) if the Claude session that picks them up wants to recover that context, but you don't need it.
 
-### Batch 3 remainder (correctness)
+All line numbers below are from the **original pre-refactor review** (stale!) where given — always re-`grep` the current file to find the real location before editing. I was mid-investigation of item 23 when I had to stop (before the scope split below); I'd located the function but made zero edits.
+
+## 4A. Your scope (Gemini Flash 3.8) — do these next, in this order, one commit each
+
+### Batch 3 remainder (correctness) — your part
 
 **23. `highlightMatches` breaks HTML entities when the search query matches entity text (e.g. searching "amp").**
 Current location: `app-core.js`, function `highlightMatches(text, query)` — found via `grep -n "function highlightMatches" app-core.js` (was at line 2849 as of `v4.106`, will shift as you edit other things first).
@@ -147,42 +151,6 @@ function highlightMatches(text, query) {
 **Verify it:** construct `highlightMatches("Pay & Save amp co", "amp")` (where `"amp"` appears both inside a real word *and* would appear if `&` got escaped) and confirm: (a) the real `&` renders as `&amp;` and is *not* itself highlighted or split, (b) the literal "amp" inside "Pay & Save" — wait, construct a cleaner test case: `text = "A & B"`, `query = "amp"`. Old code: `esc("A & B")` → `"A &amp; B"`, then regex `/amp/gi` matches inside `&amp;` → broken output. New code should produce `"A &amp; B"` with the ampersand intact and *not* highlighted (since "amp" only appears as an artifact of escaping, not in the real source text — the right behavior is that this string doesn't contain "amp" as real text, so nothing should be highlighted at all). Also test a query that legitimately appears in the raw text, with a `&` elsewhere in the same string, to confirm highlighting still works when it's supposed to.
 Find callers of `highlightMatches` first (`grep -rn "highlightMatches(" *.js`) to understand what kind of text actually flows through this (search results in the transaction search page, most likely) so you know what a realistic test string looks like.
 
-**24. `openSearchInvestEdit` doesn't handle the `'local-invest'` source.**
-Current location: `app-core.js`, function `openSearchInvestEdit(source, idx)` — I'd just found it when interrupted:
-```js
-function openSearchInvestEdit(source, idx) {
-  const row = source === 'live-invest' ? (liveInvest || [])[idx]
-            : source === 'hist-invest' ? (HIST.invest || [])[idx]
-            : null;
-```
-**The bug:** a search result item can be tagged with source `'local-invest'` (an unsynced, locally-queued investment — check where search results get their `source` field; likely in a `performSearch`/`renderSearchOrMonitor`-style function, grep for `'local-invest'` as a string literal to find where it's produced) but `openSearchInvestEdit` only knows about `'live-invest'` and `'hist-invest'`. Tapping a local-invest search result to edit it silently does nothing (`row` stays `null`, function presumably returns early or no-ops).
-**The fix:** add a third branch: `source === 'local-invest' ? (investHistory || [])[idx] : null`. Confirm the variable name is `investHistory` (it is, per earlier work in this review — it's the array of locally-queued/unsynced investment rows, declared in `app-core.js`). Also check what `openEditInvestOverlay` (the function this presumably calls next) expects as the row shape for a local/unsynced row vs a synced one — a local row may be missing `rowIndex`/`id` that the synced-row code paths assume exist; read `openEditInvestOverlay` before assuming the one-line fix is sufficient.
-**Verify it:** seed `investHistory` with an unsynced row, seed a search result referencing it with `source:'local-invest'`, call `openSearchInvestEdit('local-invest', 0)`, and confirm the edit overlay actually opens with that row's data (check `document.getElementById('inputOverlay').classList.contains('open')` and that the form fields got populated), instead of silently doing nothing.
-
-**25. The inactivity timer wipes `notapub_invest_v2`, contradicting its own comment.**
-Current location: `app-core.js`, inside the `DOMContentLoaded` boot handler, an inactivity-timeout IIFE. Grep for `notapub_invest_v2` to find it (there will be 2-3 hits — the `let investHistory = JSON.parse(localStorage.getItem('notapub_invest_v2')...)` declaration, `saveLocal()`'s `localStorage.setItem('notapub_invest_v2', ...)`, and the inactivity-wipe list).
-```js
-function onInactive() {
-  // Clear sensitive cached data, then reload to fresh state.
-  // nota_queue_v2 and nota_history_v2 are intentionally excluded: they hold
-  // unsynced transactions that have not reached the server yet — deleting them
-  // causes permanent data loss with no recovery path.
-  [curMonthCacheKey(),
-   'notapub_invest_v2', 'notapub_fx', 'notapub_prices']
-    .forEach(k => localStorage.removeItem(k));
-  location.reload();
-}
-```
-**The bug:** the comment explicitly says unsynced data must never be wiped because it causes permanent data loss, and explicitly protects `nota_queue_v2`/`nota_history_v2` by name — but `notapub_invest_v2` (which is `investHistory`, the exact same *kind* of data for investments as `txHistory`/`notapub_history_v2` is for regular transactions — i.e., it can hold **unsynced** investment rows sitting in the queue) is wiped. This is the same data-loss bug class as `notapub_history_v2` would be if it were on that list — an unsynced Buy/Sell sitting in `investHistory` (and therefore also referenced from `queue`, per how `submitInvest`/`addAndSyncInvest` work — check `app-core.js`'s `submitInvest`) gets its *display* copy deleted on a 30-minute idle timeout, even though the actual pending sync attempt in `queue` survives. Depending on what reads `investHistory` vs `queue` after a reload, this could mean: the user's queued investment sync still happens in the background eventually, but the transaction *disappears from view* (e.g. from Search, from Account balances if those partly read `investHistory`) until it has fully synced and been re-merged from the sheet — which is confusing and looks like data loss even if it technically isn't fully lost. Confirm by reading how `investHistory` and `queue` interact (search for all reads of `investHistory`) before deciding exactly how severe this is — but regardless of exact severity, it directly contradicts the comment's own stated intent, which is reason enough to fix.
-**The fix:** remove `'notapub_invest_v2'` from the wipe list. (Minimal, safe, matches the existing comment's clearly stated intent.)
-**Verify it:** seed `investHistory` with an unsynced row (`synced:false`), simulate the inactivity timeout firing (you likely can't easily fast-forward the real 30-minute `setTimeout`, so instead either (a) extract the `onInactive` function body the same way item 17's fix was verified earlier in this review — fetch the live file, regex out the function body, eval it standalone with spied `localStorage`/`location.reload` — or (b) just directly test that the key is absent from the literal array in the source after your edit, plus a quick manual call to a refactored-out `onInactive`-equivalent if one exists). At minimum, grep the fixed file to confirm `'notapub_invest_v2'` no longer appears in that array literal, and run the real reload path if you can stub `location.reload` to not actually navigate away mid-test.
-
-**26. New-sheet Config header/seed writes only `A:L` (12 columns) but rows are serialized with 14 columns.**
-Current location: `data-store.js`. Grep for `ensureConfigSheetExists` and `serializeConfigRow`.
-**The bug (from the original review, re-verify current line numbers and exact column letters before trusting this description — it may already be partially stale):** a brand-new user's Config sheet gets its header row and its initial seed written with a range like `A1:L1` / `A:L` (12 columns), but `serializeConfigRow()` (used elsewhere for ongoing writes) produces a 14-element array (through column `N`). The original review noted this "self-heals" the moment `ensureConfigSheetExists()` runs again on the first `handleGetConfig()` call (which apparently does correctly write `A1:N1`), but the *very first* write for a brand-new account may attempt to write a 14-wide array into a nominally 12-wide range, which the Sheets API may reject with a 400 error, or silently truncate — the original reviewer was not fully certain which, and flagged it as "worth a test with a fresh account."
-**What to actually do:** first, re-read `ensureConfigSheetExists()` and the two Config-seeding call sites (`serializeConfigRow` is called from somewhere during initial bootstrap in addition to `handleConfig`'s `saveAll` — grep for all callers of `serializeConfigRow`) to confirm the *current* column counts on each side. The fix, if the bug is confirmed, is almost certainly just widening the literal range strings and/or the header-array literal from `L`/12-wide to `N`/14-wide, to match `serializeConfigRow`'s actual output width, wherever they currently disagree. **Do not guess at this one — read both sides carefully first, since the original reviewer themselves weren't 100% sure of the exact failure mode.**
-**Verify it:** this is the one item in this batch that's hardest to verify without a real (or realistically faked) fresh Google Sheet. Use the "fresh isolated eval" technique from §2 point 4: stub `SheetsClient.updateValues`/`appendValues` to **actually check the width of the `values` array against the width implied by the `range` string you're being asked to write** (e.g. parse `A1:L1` → 12 columns, assert `values[0].length <= 12` and throw/log loudly if not), then run through the actual bootstrap-a-new-sheet code path and see whether your stub's assertion fires. If it does, you've reproduced the bug; widen the range to match, re-run, confirm the assertion no longer fires.
-
 **27. Parser regex fixes in `email-parser.js` (small, one test each — can be one commit per sub-fix, or bundle all four into one commit with four verified cases, your call, but history in this review leans toward one commit per distinct behavior change where practical):**
 - **`BAD_LABEL`'s `fee` match is unbounded** — it should be word-bounded (`\bfee\b`) so a merchant/label containing "fee" as part of a longer word (e.g. "Coffee") doesn't get incorrectly penalized/excluded by the generic receipt reader's scoring. Grep `BAD_LABEL` in `email-parser.js`.
 - **`iso()`'s date parser accepts invalid dates** like 31 February — add a real days-in-month check (e.g. construct a `Date`, then verify `getDate()` still matches what was asked for, which is the standard trick for detecting JS's silent date-rollover behavior).
@@ -191,12 +159,7 @@ Current location: `data-store.js`. Grep for `ensureConfigSheetExists` and `seria
 
 **Verify all four** by adding (or running mentally against, then formalizing as) a test case each in `tests/email-parser.test.mjs`, following the existing test file's style (34 tests currently, each a plain assertion with a descriptive name — `node tests/email-parser.test.mjs` to run). Add new test cases rather than just checking manually in the console, since this file is the actual regression-test surface for `email-parser.js` and the existing 34 tests must still all pass afterward.
 
-**28. `escJsAttr` is missing at a flagged call site (originally cited as `ui-insights.js:1394`).**
-This exact line number is almost certainly stale now (ui-insights.js has shrunk significantly since the original review, with CC-monitor math extracted to `data-networth.js`). **You need to re-find this.** The original finding was: an inline `onclick` handler does `esc(type).replace(/'/g,"\\'")` — which is a no-op/ineffective escape, because `esc()` already turns a literal `'` into the HTML entity `&#39;` before the `.replace(/'/g, "\\'")` regex ever runs (there's no literal `'` character left in the string for that regex to find — the browser only decodes `&#39;` back into `'` *after* HTML-parsing the attribute, which happens *before* the inline JS ever executes, so a value containing an apostrophe could still end up breaking the inline handler's JS string literal). The fix is to use `escJsAttr()` instead (defined in `app-core.js` — check its current exact name/behavior with `grep -n "function escJsAttr" app-core.js`; it's designed exactly for this situation: values that need to be safe both as an HTML attribute *and* as a JS string literal inside that attribute).
-**To find the current location:** `grep -rn "esc(.*)\.replace(/'/g" *.js` across the whole repo — this exact anti-pattern (`esc(something).replace(/'/g, ...)`) is distinctive enough that it should only match the one real bug site (plus possibly nothing, if it's already been incidentally fixed by one of the refactors — check carefully, don't assume it's still there untouched).
-**Verify it** the same way item 1 (the email-import XSS fix, commit `5bc72fd`) was verified earlier in this review: construct a string containing a literal `'` (or better, a string that exploits the exact double-escaping gap — read commit `5bc72fd`'s message for the precise technique, it's directly applicable here), build the actual HTML the real code would produce, parse it into a real DOM element (`div.innerHTML = ...`), read back `element.getAttribute('onclick')` (which gives you the real, HTML-entity-decoded string the browser would hand to its JS parser), and confirm the fixed version produces a syntactically safe single string argument while the old version would produce a string that breaks out early.
-
-### Batch 4 (tooling and docs) — do after batch 3
+### Batch 4 (tooling and docs) — your part, do after batch 3
 
 **29.** Add a CI gate in `.github/workflows/pages.yml`: run `node --check *.js` (or equivalent — check all `.js` files individually, since `node --check` doesn't glob) and `node tests/email-parser.test.mjs` as steps *before* the existing deploy steps, so a syntax error or a parser regression can't reach production. Look at the existing `pages.yml` structure (steps: Checkout, Setup Pages, Inject Client ID, Inject build id, Upload artifact, Deploy) — add a new step after "Inject build id" (or before it, doesn't matter much) that fails the job if either check fails.
 
@@ -208,13 +171,24 @@ This exact line number is almost certainly stale now (ui-insights.js has shrunk 
 
 **34.** (33 already done.) Add tests for `sourceFor`, `buildQuery`, `normalizeConfig`, `buildItem` — these are exposed via `EmailImport._internals` (see the `_internals` object definition near the bottom of `email-import.js`, around where `init`/`check`/etc. get returned). These currently have zero test coverage. Write a small new test file (or extend `tests/email-parser.test.mjs` if it makes sense, though these four functions live in `email-import.js` not `email-parser.js`, so a separate `tests/email-import.test.mjs` using the same plain-assertion style is probably cleaner) exercising each function's documented/observed behavior with a couple of cases each.
 
-### Batch 5 (refactor) remainder — lowest priority, do last
-
-**35.** Delete confirmed-dead code: `renderAllTransactions`, `renderAllTxPage`, `loadMoreAllTx`, `updateStatus` (check — it may already be a no-op per earlier work, grep `function updateStatus`), `updateFabBadge`, `calRevealOlder`, `calRevealCollapsed`, `calRevealYearPills`, `calRefreshOlderMonths_UNUSED`. **Grep every one of these names across the whole repo first** to confirm zero live callers before deleting each — some may have been referenced by code that's since moved or itself been deleted; don't trust the original review's "dead" labeling without re-verifying in the *current* codebase.
-
-**36.** Extract a `refreshAfterWrite()` helper and a `toNativeIdr(pm, amount)` helper to deduplicate the "recompute balances, re-render calendar, re-render search" sequence and the FX-to-native-currency conversion block that are each pasted ~3-10 times across `app-core.js`. Also fold the `window.switchTab` wrapper (a tiny tail `<script>` in `index.html`) directly into the real `switchTab` function in `app-core.js`, removing the indirection. This is pure refactor — verify with the byte-identical-blocks technique used for the earlier structural refactors in this review (commits `ae725fc`, `aede691`, `7d479d6`, `50ecfc3`, `6ee2975` all show the exact verification pattern: confirm every moved/merged block is byte-identical to what it replaced, confirm no call site's behavior changed).
+### Batch 5 (refactor) — your part, lowest priority, do last
 
 **37.** Move the ~680 lines of inline `<style>` CSS still in `index.html` out to a separate `style.css` file. Pure extraction — verify byte-for-byte, confirm the page still renders identically (take a screenshot before and after if you have a visual tool available, or at minimum diff computed styles on a few representative elements).
+
+---
+
+## 4B. Reserved for Claude — do not attempt these
+
+The user decided these six need more judgment than this handoff should ask of a smaller model. **Leave them alone** — don't fix them in passing, don't refactor code they touch, don't let batch-5 cleanup (if you get to §4A's item 37) brush up against them.
+
+- **24.** `openSearchInvestEdit` (`app-core.js`) doesn't handle a `'local-invest'` search result — tapping one to edit it silently no-ops. Needs reading how `investHistory`/`queue`/`openEditInvestOverlay` interact for an unsynced row before the obvious one-line fix can be trusted.
+- **25.** The inactivity timer (`app-core.js`, `onInactive()`) wipes `notapub_invest_v2` (unsynced investment data), contradicting its own comment, which explicitly protects the equivalent transaction data from exactly this. Needs tracing how `investHistory` vs `queue` behave after the wipe before the severity (and the fix) can be stated with confidence.
+- **26.** `data-store.js`'s new-sheet Config header/seed may write a narrower range (`A:L`) than `serializeConfigRow()`'s actual output width (14 columns, through `N`) — the original reviewer themselves weren't certain whether this 400s, truncates, or self-heals. Needs careful reading of both sides, not a guessed fix.
+- **28.** An `esc(type).replace(/'/g,"\\'")` anti-pattern somewhere (originally `ui-insights.js:1394`, now stale — needs re-finding via `grep -rn "esc(.*)\.replace(/'/g" *.js`) should use `escJsAttr()` instead; it's an ineffective escape that can still let a value break an inline JS handler. Low complexity to fix once found, but finding it and confirming it's still present (vs. already incidentally fixed by a refactor) needs real verification, not an assumption.
+- **35.** Deleting confirmed-dead code (`renderAllTransactions`, `renderAllTxPage`, `loadMoreAllTx`, `updateFabBadge`, `calRevealOlder`, `calRevealCollapsed`, `calRevealYearPills`, `calRefreshOlderMonths_UNUSED`, and re-checking whether `updateStatus` is still a no-op). Needs a careful zero-callers grep across the *current* codebase before each deletion — a wrong one breaks the app, and several of these names may have moved or already been touched by the refactors done so far.
+- **36.** Extracting `refreshAfterWrite()` / `toNativeIdr(pm, amount)` helpers to deduplicate repeated sequences in `app-core.js`, and folding the `window.switchTab` wrapper into the real `switchTab`. Cross-cutting refactor touching many call sites — real risk of behavior drift if the byte-identical-blocks verification isn't done rigorously.
+
+The detailed investigation notes for all six items (exact bug mechanism, suggested fix shape, how to verify) are in the git history of this file — `git show 91bd3fc:HANDOVER.md` from this repo recovers the original, fuller version of this document with those sections intact, for whichever Claude session picks them up.
 
 ---
 
@@ -233,12 +207,13 @@ None of batch 3/4/5's remaining items go anywhere near this, which is why they w
 
 ---
 
-## 6. Quick-start checklist for whoever picks this up
+## 6. Quick-start checklist for whoever picks this up (Gemini Flash 3.8, §4A scope only)
 
 1. `cd` to the repo, `git status` — confirm it's still clean (if not, something changed after this handover was written; investigate before proceeding).
-2. `git log --oneline -5` — confirm `9797c36` (or later) is at the tip.
+2. `git log --oneline -5` — confirm `91bd3fc` (or later) is at the tip.
 3. Read §2 (ground rules) and §5 (hard constraints) fully before writing any code.
-4. Start with item 23 (`highlightMatches`) — it's the one already investigated in §4, ready to implement.
-5. For each item: re-locate current line numbers → read enough surrounding context to understand it → reproduce the bug behaviorally → fix → re-verify behaviorally → negative-control against old code where practical → `node --check` → bump `APP_VERSION` → write a commit message in the style of the existing history → commit → push.
-6. Work through batch 3 (23–28), then batch 4 (29, 30, 31, 32, 34), then batch 5 (35, 36, 37), in that order, unless the user says otherwise.
-7. If anything is ambiguous, under-specified above, or looks like it might touch auth/sign-in — ask the user rather than guessing.
+4. Read §4B's list once so you know what to leave alone, then don't open those files unless a §4A item also legitimately needs you to.
+5. Start with item 23 (`highlightMatches`) in §4A — it's the one already investigated, ready to implement.
+6. For each item: re-locate current line numbers → read enough surrounding context to understand it → reproduce the bug behaviorally → fix → re-verify behaviorally → negative-control against old code where practical → `node --check` → bump `APP_VERSION` → write a commit message in the style of the existing history → commit → push.
+7. Work through §4A in order: batch 3's remainder (23, 27), then batch 4 (29, 30, 31, 32, 34), then batch 5's remainder (37).
+8. If anything is ambiguous, under-specified above, or looks like it might touch auth/sign-in — ask the user rather than guessing. If you find yourself needing to touch anything in §4B's list to finish a §4A item, stop and say so rather than doing it.

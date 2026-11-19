@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.106';
+const APP_VERSION = 'v4.107';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2847,10 +2847,16 @@ function loadMoreSearchResults(query) {
 }
 
 function highlightMatches(text, query) {
-  const safe = esc(text);
-  if (!query) return safe;
-  const regex = new RegExp(`(${esc(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-  return safe.replace(regex, '<span class="highlight">$1</span>');
+  if (!text) return esc(text);
+  if (!query) return esc(text);
+  const escapedQuery = String(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!escapedQuery) return esc(text);
+  const regex = new RegExp(`(${escapedQuery})`, 'gi');
+  const parts = String(text).split(regex);
+  return parts.map((part, i) => {
+    const escaped = esc(part);
+    return (i % 2 === 1) ? `<span class="highlight">${escaped}</span>` : escaped;
+  }).join('');
 }
 
 function openSearchTxEdit(source, idx) {

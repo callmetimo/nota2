@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.120';
+const APP_VERSION = 'v4.121';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2099,6 +2099,24 @@ function openEditOverlayFromRow(row, dateStr) {
   document.getElementById('inputOverlay').classList.add('open');
 }
 
+// Recomputes account balances and re-renders whatever of Search is currently showing
+// them. Pulled out of updateTransaction/deleteSheetTransaction, which each had this
+// exact 4-line tail twice. Deliberately does NOT include the calendar refresh
+// (calInited reset + initCalendar()) that always sits right before this at every call
+// site: three of those four call sites run it unconditionally since they fire
+// synchronously on the page the user is already on, but the fourth — inside an async
+// .then() that can resolve well after the user has navigated elsewhere — guards it on
+// whether Home is still active. Folding that difference away would be a behavior
+// change, not a dedup, so each caller keeps its own calendar-refresh line as-is.
+function refreshAfterWrite() {
+  buildAccountBalances();
+  renderAccountBalanceCards();
+  if (document.getElementById('page-search').classList.contains('active')) {
+    renderSearchOrMonitor();
+    if (searchActiveQuery) performSearch(searchActiveQuery);
+  }
+}
+
 async function updateTransaction() {
   _suppressVisRefresh = true;
   const rowIndex = overlayEditRowIndex;
@@ -2135,12 +2153,7 @@ async function updateTransaction() {
   _applyLocalEdit(origISO, origTx, origAmt, date, tx, amount, cat, pm, notes, isInc, rowIndex, id, nativeAmount, ccy);
   closeInputOverlay();
   calInited = false; initCalendar();
-  buildAccountBalances();
-  renderAccountBalanceCards();
-  if (document.getElementById('page-search').classList.contains('active')) {
-    renderSearchOrMonitor();
-    if (searchActiveQuery) performSearch(searchActiveQuery);
-  }
+  refreshAfterWrite();
 
   // If this transaction never reached the server (still sitting in the local retry
   // queue), there's no sheet row for an "edit" action to find. Patch the queued
@@ -2176,12 +2189,7 @@ async function updateTransaction() {
       // in-flight fetch (see curMonthFetchSeq) is the sole data to merge against.
       await fetchCurrentMonth(true);
       calInited = false; initCalendar();
-      buildAccountBalances();
-      renderAccountBalanceCards();
-      if (document.getElementById('page-search').classList.contains('active')) {
-        renderSearchOrMonitor();
-        if (searchActiveQuery) performSearch(searchActiveQuery);
-      }
+      refreshAfterWrite();
       showToast('Updated ✓', 'success');
     } else {
       showToast('Update failed', 'error');
@@ -2218,12 +2226,7 @@ async function deleteSheetTransaction() {
   _applyLocalDelete(origISO, origTx, origAmt, rowIndex, id, origInc);
   closeInputOverlay();
   calInited = false; initCalendar();
-  buildAccountBalances();
-  renderAccountBalanceCards();
-  if (document.getElementById('page-search').classList.contains('active')) {
-    renderSearchOrMonitor();
-    if (searchActiveQuery) performSearch(searchActiveQuery);
-  }
+  refreshAfterWrite();
 
   // Never reached the server — nothing to delete there. _applyLocalDelete already
   // dropped the matching queue entry above so it won't resurrect on the next retry.
@@ -2249,12 +2252,7 @@ async function deleteSheetTransaction() {
       fetchCurrentMonth(true).then(() => {
         calInited = false;
         if (document.getElementById('page-home').classList.contains('active')) initCalendar();
-        buildAccountBalances();
-        renderAccountBalanceCards();
-        if (document.getElementById('page-search').classList.contains('active')) {
-          renderSearchOrMonitor();
-          if (searchActiveQuery) performSearch(searchActiveQuery);
-        }
+        refreshAfterWrite();
       });
     } else {
       showToast('Delete failed', 'error');

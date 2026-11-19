@@ -369,11 +369,17 @@ const DataStore = (() => {
     await SheetsClient.updateValues(spreadsheetId, `${RECURRING_SHEET}!A1:R1`, [[
       'id','type','tx','cat','amount','pm','notes','dayOfMonth','active','lastFired','_deleted','endMonth','installmentTotal','installmentStart','frequency','monthOfYear','interval','startDate',
     ]]);
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:L1`, [[
-      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights', 'creditCard',
+    // Was A1:L1 / A:L (12 columns) — serializeConfigRow() writes 14 (through billingDate,
+    // creditLimit), matching what ensureConfigSheetExists()'s own header (A1:N1) already
+    // uses. Widened to match so this brand-new-spreadsheet path and the self-healing path
+    // agree, instead of relying on whatever the Sheets API does with a wider values array
+    // than its stated range (which handleGetConfig's later ensureConfigSheetExists() call
+    // would overwrite correctly either way, but shouldn't need to paper over).
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A1:N1`, [[
+      'kind', 'name', 'color', 'ccy', 'assetType', 'archived', 'sortOrder', 'linkedPM', 'balance', 'balanceDate', 'showOnInsights', 'creditCard', 'billingDate', 'creditLimit',
     ]]);
     const configRows = CONFIG_DEFAULTS.map((it, idx) => serializeConfigRow(it, idx));
-    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:L${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
+    await SheetsClient.updateValues(spreadsheetId, `${CONFIG_SHEET}!A${CONFIG_DATA_ROW}:N${CONFIG_DATA_ROW + configRows.length - 1}`, configRows);
     await SheetsClient.batchUpdate(spreadsheetId, [{
       repeatCell: {
         range: { sheetId: opexGid, startColumnIndex: 1, endColumnIndex: 2 },

@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "node server.js",
     "start": "node server.js",
-    "build": "echo 'No build step needed'"
+    "build": "echo 'No build step needed'",
+    "test": "node tests/email-parser.test.mjs"
   },
   "dependencies": {
     "express": "^4.21.2"

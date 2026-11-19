@@ -657,37 +657,6 @@ function calOnScroll() { /* all months pre-rendered on init */ }
 // #calOlderMonths is unused in the new calendar layout — all prior months live in #calCollapsedMonths.
 function calRefreshOlderMonths() { /* no-op */ }
 
-function calRefreshOlderMonths_UNUSED() {
-  const olderEl = document.getElementById('calOlderMonths');
-  if (!olderEl || !calOlderShown) return;
-  const today = new Date();
-  const year  = today.getFullYear();
-  const month = today.getMonth() + 1;
-  let olderHTML = '';
-  for (let i = 2; i >= 1; i--) {
-    let oy = year, om = month - i;
-    if (om <= 0) { om += 12; oy -= 1; }
-    const olderKey = `${oy}-${om}`;
-    const olderBtn = `<button class="cal-month-collapse-btn open" onclick="calToggleOlderMonth('${olderKey}')">›</button>`;
-    olderHTML += `<div class="cal-month-divider"></div><div class="cal-older-month" data-key="${olderKey}">${calBuildMonthHTML(oy, om, today, olderBtn)}</div>`;
-  }
-  olderEl.innerHTML = olderHTML;
-  // Re-apply any collapsed states the user toggled
-  for (let i = 2; i >= 1; i--) {
-    let oy = year, om = month - i;
-    if (om <= 0) { om += 12; oy -= 1; }
-    const key = `${oy}-${om}`;
-    if (calOlderCollapsed[key]) {
-      const container = olderEl.querySelector(`.cal-older-month[data-key="${key}"]`);
-      if (container) {
-        container.querySelectorAll('.cal-week-section').forEach(s => s.style.display = 'none');
-        const btn = container.querySelector('.cal-month-collapse-btn');
-        if (btn) btn.classList.remove('open');
-      }
-    }
-  }
-}
-
 // Builds and injects the hidden past-weeks rows for the current month.
 // Called both from calRevealOlder() (first time) and initCalendar() on re-render
 // (when calOlderShown is already true, so calRevealOlder would no-op).
@@ -829,31 +798,6 @@ function calInjectSnapSentinels(containerEl) {
 }
 
 // ── STATE 4: Collapsed month rows above Apr/May ───────────────
-function calRevealCollapsed() {
-  if (calCollapsedShown) return;
-  calCollapsedShown = true;
-
-  const today = new Date();
-  const curYear = today.getFullYear();
-  const curMonth = today.getMonth() + 1;
-  // calOlderMonths shows: (curMonth-2) and (curMonth-1)
-  // Collapsed = Jan through (curMonth-3) of current year, if any
-  const oldestFullMonth = curMonth - 2;
-  const collapsed = [];
-  for (let m = 1; m < oldestFullMonth; m++) {
-    collapsed.push({y: curYear, m});
-  }
-
-  const el = document.getElementById('calCollapsedMonths');
-  if (collapsed.length > 0) {
-    el.style.display = 'block';
-    calRenderCollapsedMonths(collapsed, el, 'state4');
-  }
-
-  // State 5 always follows State 4 — inject year pills above
-  calRevealYearPills();
-}
-
 function calRenderCollapsedMonths(months, container, ctx) {
   container.innerHTML = months.map(({y, m}) => {
     const key = `${y}-${m}`;
@@ -943,22 +887,6 @@ function calToggleCollapsedMonth(key, ctx) {
 }
 
 // ── STATE 5: Year pills above collapsed months ────────────────
-function calRevealYearPills() {
-  if (calYearPillsShown) return;
-  calYearPillsShown = true;
-
-  const curYear = new Date().getFullYear();
-  const opex = (HIST.opex || []);
-  // Years BEFORE current year only — current year gets its own special pill
-  const yearSet = new Set(opex.map(r => r.y));
-  yearSet.delete(curYear);
-  const pastYears = [...yearSet].sort((a, b) => a - b);
-
-  const el = document.getElementById('calYearPills');
-  el.style.display = 'block';
-  calRenderYearPills(pastYears, curYear, el);
-}
-
 function calGetYearsForPills() {
   const curYear = new Date().getFullYear();
   const opex = (HIST.opex || []);

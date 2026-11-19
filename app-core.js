@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.118';
+const APP_VERSION = 'v4.119';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -2767,47 +2767,6 @@ function renderSearchResults(query) {
   if (pageResults.length < total) {
     resultsEl.innerHTML += `<div class="search-loading">Scroll for more… (${pageResults.length}/${total})</div>`;
   }
-}
-
-function renderAllTransactions() {
-  const countEl = document.getElementById('searchResultsCount');
-  const resultsEl = document.getElementById('searchResults');
-
-  if (!histLoaded) {
-    countEl.style.display = 'none';
-    resultsEl.innerHTML = '<div class="empty-state">Loading…</div>';
-    return;
-  }
-
-  const results = [];
-  const histOpex = HIST.opex || [];
-  for (let i = 0; i < histOpex.length; i++) {
-    if (histOpex[i].category === 'Investment' || histOpex[i].cat === 'Investment') continue;
-    results.push({source:'hist-opex', idx:i, row:histOpex[i], type:'opex'});
-  }
-  for (let i = 0; i < liveInvest.length; i++) {
-    results.push({source:'live-invest', idx:i, row:liveInvest[i], type:'invest'});
-  }
-  for (let i = 0; i < txHistory.length; i++) {
-    if (txHistory[i].category === 'Investment' || txHistory[i].cat === 'Investment') continue;
-    results.push({source:'local-opex', idx:i, row:txHistory[i], type:'opex'});
-  }
-  // Unsynced local invest rows only — once synced they're already in liveInvest (see syncInvest).
-  for (let i = 0; i < investHistory.length; i++) {
-    if (investHistory[i].synced) continue;
-    results.push({source:'local-invest', idx:i, row:investHistory[i], type:'invest'});
-  }
-
-  const merged = mergeTransferPairs(results);
-  merged.sort((a, b) => {
-    const dateA = new Date(a.row.date || `${a.row.y}-${String(a.row.m+1).padStart(2,'0')}-${String(a.row.d).padStart(2,'0')}`);
-    const dateB = new Date(b.row.date || `${b.row.y}-${String(b.row.m+1).padStart(2,'0')}-${String(b.row.d).padStart(2,'0')}`);
-    return dateB - dateA;
-  });
-
-  allTxResults = merged;
-  allTxPageIndex = 0;
-  renderAllTxPage();
 }
 
 function renderAllTxPage() {

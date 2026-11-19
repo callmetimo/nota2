@@ -61,7 +61,7 @@ const SCRIPTS = [
   './ui-calendar.js',
   './ui-insights.js',
 ];
-const SHELL_FILES = ['./index.html', './icon.png', ...SCRIPTS.map(s => s + '?v=' + BUILD)];
+const SHELL_FILES = ['./index.html', './icon.png', './style.css?v=' + BUILD, ...SCRIPTS.map(s => s + '?v=' + BUILD)];
 
 // These are live API calls — never intercept them. Critically, this must include every
 // host DataStore/SheetsClient talk to (sheets.googleapis.com, www.googleapis.com) —

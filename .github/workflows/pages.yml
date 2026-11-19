@@ -39,6 +39,13 @@ jobs:
           grep -c "?v=${BUILD}" index.html
           grep -n "const BUILD" sw.js
 
+      - name: Syntax and test checks
+        run: |
+          for f in *.js; do
+            node --check "$f"
+          done
+          node tests/email-parser.test.mjs
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

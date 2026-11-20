@@ -41,11 +41,36 @@ jobs:
 
       - name: Syntax and test checks
         run: |
-          for f in *.js; do
+          for f in *.js tests/*.js; do
             node --check "$f"
           done
+          # index.html still carries hand-written inline <script> blocks (first-tap sign-in
+          # escalation, the sidebar/Esc tail script). node --check only sees files, so a
+          # syntax error in those shipped straight to production. Parse each inline block
+          # with vm.Script, which uses sloppy mode — the same mode the browser parses a
+          # classic script in, and looser than node --check's ES-module parse.
+          node -e '
+            const fs = require("fs"), vm = require("vm");
+            // Strip HTML comments first: several of them talk about <script> tags, and
+            // the extractor would otherwise try to parse prose as JavaScript.
+            const html = fs.readFileSync("index.html", "utf8").replace(/<!--[\s\S]*?-->/g, "");
+            const re = /<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g;
+            let m, n = 0;
+            while ((m = re.exec(html))) {
+              if (!m[1].trim()) continue;
+              n++;
+              new vm.Script(m[1], { filename: "index.html inline script #" + n });
+            }
+            if (!n) { console.error("No inline scripts found — the extractor is broken, not the page."); process.exit(1); }
+            console.log("Parsed " + n + " inline script block(s) in index.html");
+          '
           node tests/email-parser.test.mjs
           node tests/email-import.test.mjs
+
+      # tests/ is dev-only (e2e seed page and fetch stubs) and `path: "."` would otherwise
+      # publish it on the live site. Runs after the checks above so they still see it.
+      - name: Drop dev-only files from the deploy
+        run: rm -rf tests
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

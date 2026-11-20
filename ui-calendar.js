@@ -45,8 +45,6 @@ const CAL_TX_MAX_FRAC  = 0.50;
 let calInited       = false;
 let calOlderShown   = false;
 let calSelectedCell = null;
-let calCollapsedShown = false;  // State 4: collapsed months injected
-let calYearPillsShown = false;  // State 5: year pills injected
 let cal2026Collapsed  = false;  // whether 2026 months are collapsed into pill
 let calExpandedMonths = {};     // tracks which collapsed month rows are expanded
 let calExpandedYears  = {};     // tracks which year pills are expanded
@@ -511,8 +509,6 @@ function initCalendar() {
 
   // Pre-set all state flags so scroll triggers never fire
   calOlderShown     = true;
-  calCollapsedShown = true;
-  calYearPillsShown = true;
 
   const today  = new Date();
   const year   = today.getFullYear();
@@ -1135,8 +1131,6 @@ function calPopulateFutureMonths() {
 function calReinit() {
   calInited = false;
   calOlderShown = false;
-  calCollapsedShown = false;
-  calYearPillsShown = false;
   cal2026Collapsed = false;
   calExpandedMonths = {};
   calExpandedYears = {};

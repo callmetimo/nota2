@@ -1343,6 +1343,16 @@ function syncSideNav(tab){
   var more=document.getElementById('nav-more');
   if(more&&SIDE_NAV_SUBS.indexOf(tab)>-1)more.classList.add('active'); // sub-pages live under Profile
 }
+// switchTab() is callable from the moment app-core.js runs, but syncSideNav only exists
+// once this tag executes — several scripts later. A nav tap landing in that gap ran
+// switchTab with the typeof guard false, so the sidebar highlight was skipped and
+// nothing ever re-synced it: the desktop sidebar stayed wrong until the next tab switch.
+// Close the window by syncing once against whatever page is active now, derived from the
+// DOM rather than a tab variable (switchTab keeps no such global).
+(function(){
+  var p=document.querySelector('.page.active');
+  if(p&&p.id&&p.id.indexOf('page-')===0)syncSideNav(p.id.slice(5));
+})();
 (function(){
   var v=document.getElementById('sideVersionLabel');if(v&&typeof APP_VERSION!=='undefined')v.textContent=APP_VERSION;
   document.addEventListener('keydown',function(e){

@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.122';
+const APP_VERSION = 'v4.123';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -404,6 +404,10 @@ async function fetchLiveInvest() {
           source:'live'
         };
       });
+      // Only safe point to prune investHistory: liveInvest has just been refreshed, so
+      // pruneStaleInvestHistory()'s "is this row confirmed in Sheets?" test is against
+      // current data rather than a stale or empty array.
+      pruneStaleInvestHistory();
     }
     if (j.txAccount) {
       HIST.txAccount = j.txAccount;
@@ -2531,6 +2535,42 @@ function pruneStaleHistory(){
     localStorage.setItem('notapub_history_v2',JSON.stringify(txHistory));
   }
 }
+// investHistory had no prune at all. Until v4.111 the inactivity timer wiped the whole
+// key, which accidentally served as one; removing that wipe (it was destroying unsynced
+// Buy/Sell rows — real data loss) left the array growing without bound for the life of
+// the install. This is the invest-side counterpart of pruneStaleHistory(), deliberately
+// stricter: a row is only dropped when it is marked synced, is older than the same
+// 60-day cutoff, AND its TxID is present in liveInvest — i.e. the authoritative Sheets
+// copy is in hand right now. A row whose liveInvest copy hasn't been fetched (offline,
+// failed fetch, pre-TxID row with no id) is always kept, so this can never be the cause
+// of a disappearing transaction.
+function pruneStaleInvestHistory(){
+  if(!investHistory.length) return;
+  // Search results hold `idx` positions into investHistory and re-read investHistory[idx]
+  // at tap time (openSearchInvestEdit), so dropping rows while those results are on
+  // screen would shift every index and open the wrong transaction. Skip while the Search
+  // page is up; the next fetchLiveInvest() after the user leaves it will prune instead.
+  const sp = document.getElementById('page-search');
+  if(sp && sp.classList.contains('active')) return;
+  const live = liveInvest || [];
+  if(!live.length) return; // nothing authoritative to check against — keep everything
+  const liveIds = new Set(live.map(r => r.id).filter(Boolean));
+  if(!liveIds.size) return;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 60);
+  // Local-date string, matching pruneStaleHistory()'s WIB-safe cutoff (not toISOString()).
+  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
+  const before = investHistory.length;
+  investHistory = investHistory.filter(r => {
+    if(!r.synced) return true;                                  // never drop unsynced
+    if(!r.id || !liveIds.has(r.id)) return true;                // no confirmed Sheets copy
+    if(!r.date || typeof r.date !== 'string') return true;      // unparseable date — keep
+    return !(r.date < cutoffStr);
+  });
+  if(investHistory.length < before){
+    localStorage.setItem('notapub_invest_v2',JSON.stringify(investHistory));
+  }
+}
 function updateStatus(){}
 // Was: every showToast() call with a non-zero duration scheduled a bare setTimeout with
 // no reference kept to it. Two toasts shown back to back (e.g. "Saving…" replaced
@@ -2564,8 +2604,6 @@ let searchCurrentResults = [];
 let searchPageIndex = 0;
 let searchActiveQuery = '';
 let searchScrollAttached = false;
-let allTxResults = [];
-let allTxPageIndex = 0;
 
 function renderSearchOrMonitor() {
   const query = (document.getElementById('searchInput')?.value || '').trim();
@@ -2652,11 +2690,17 @@ function performSearch(query) {
     if (txMatch || notesMatch) results.push({source: 'hist-opex', idx: i, row, type: 'opex'});
   }
   
-  const histInvest = HIST.invest || [];
-  for (let i = 0; i < histInvest.length; i++) {
-    const row = histInvest[i];
+  // Was iterating HIST.invest, which is declared at app-core.js:179 and never assigned —
+  // fetchLiveInvest() populates `liveInvest` instead. So this loop always ran zero times
+  // and synced Invest rows (including every Buy/Sell entered on another device) could not
+  // be found in Search at all. getAllInvestRows() already reads liveInvest as the
+  // authoritative synced set; search it here for the same reason. 'live-invest' was
+  // already a handled source in openSearchInvestEdit() — it just had no producer.
+  const liveInv = liveInvest || [];
+  for (let i = 0; i < liveInv.length; i++) {
+    const row = liveInv[i];
     const txMatch = row.stock && row.stock.toLowerCase().includes(q);
-    if (txMatch) results.push({source: 'hist-invest', idx: i, row, type: 'invest'});
+    if (txMatch) results.push({source: 'live-invest', idx: i, row, type: 'invest'});
   }
   
   for (let i = 0; i < txHistory.length; i++) {
@@ -2677,7 +2721,14 @@ function performSearch(query) {
   for (let i = 0; i < investHistory.length; i++) {
     const r = investHistory[i];
     const txMatch = r.stock && r.stock.toLowerCase().includes(q);
-    if (txMatch) results.push({source: 'local-invest', idx: i, row: r, type: 'invest'});
+    if (!txMatch) continue;
+    // Mirrors the synced-row skip in the opex loop above (and getAllInvestRows()'s
+    // `!r.synced` filter): a synced local row also exists in liveInvest, so listing both
+    // would show the same Buy/Sell twice. Matched on the shared TxID rather than blanket-
+    // skipping r.synced, so a row whose liveInvest copy hasn't arrived yet (fetch failed,
+    // or not run) still shows up instead of silently vanishing from Search.
+    if (r.synced && r.id && liveInv.some(h => h.id === r.id)) continue;
+    results.push({source: 'local-invest', idx: i, row: r, type: 'invest'});
   }
 
   const merged = mergeTransferPairs(results);
@@ -2769,32 +2820,6 @@ function renderSearchResults(query) {
   }
 }
 
-function renderAllTxPage() {
-  const countEl = document.getElementById('searchResultsCount');
-  const resultsEl = document.getElementById('searchResults');
-  const total = allTxResults.length;
-
-  countEl.style.display = 'block';
-  countEl.textContent = `All transactions · ${total} total`;
-
-  const pageSize = 20;
-  const pageResults = allTxResults.slice(0, (allTxPageIndex + 1) * pageSize);
-
-  resultsEl.innerHTML = pageResults.map(item => renderTxItemHTML(item, '')).join('');
-
-  if (pageResults.length < total) {
-    resultsEl.innerHTML += `<div class="search-loading">Scroll for more… (${pageResults.length}/${total})</div>`;
-  }
-}
-
-function loadMoreAllTx() {
-  const pageSize = 20;
-  if ((allTxPageIndex + 1) * pageSize < allTxResults.length) {
-    allTxPageIndex++;
-    renderAllTxPage();
-  }
-}
-
 function loadMoreSearchResults(query) {
   const pageSize = 20;
   const total = searchCurrentResults.length;
@@ -2830,14 +2855,14 @@ function openSearchTxEdit(source, idx) {
 
 function openSearchInvestEdit(source, idx) {
   // 'local-invest' — an unsynced Buy/Sell still sitting in investHistory/queue — is a
-  // real source value performSearch()/renderAllTxPage() tag search results with (see
-  // the two `source:'local-invest'` producers above), but this never knew about it, so
-  // tapping one of those results silently did nothing. openEditInvestOverlay() and the
-  // save/delete handlers already branch correctly on a local row via its queue match
-  // (see updateInvestTransaction/deleteSheetInvestTransaction's `queuedIdx` check) —
+  // real source value performSearch() tags search results with, but this never knew
+  // about it, so tapping one of those results silently did nothing. openEditInvestOverlay()
+  // and the save/delete handlers already branch correctly on a local row via its queue
+  // match (see updateInvestTransaction/deleteSheetInvestTransaction's `queuedIdx` check) —
   // only the row lookup here was missing.
+  // The 'hist-invest' arm was dropped: HIST.invest is never assigned, so performSearch()
+  // now tags synced rows 'live-invest' and no caller can produce 'hist-invest'.
   const row = source === 'live-invest' ? (liveInvest || [])[idx]
-            : source === 'hist-invest' ? (HIST.invest || [])[idx]
             : source === 'local-invest' ? (investHistory || [])[idx]
             : null;
   if (!row || !row.id) return;
@@ -2866,8 +2891,12 @@ function initSearchPage() {
     const resultsEl = document.getElementById('searchResults');
     resultsEl.addEventListener('scroll', () => {
       if (resultsEl.scrollTop + resultsEl.clientHeight >= resultsEl.scrollHeight - 100) {
+        // No `else` branch: the "all transactions" paged view it used to call
+        // (renderAllTxPage/loadMoreAllTx) was fed only by renderAllTransactions, whose
+        // last caller went away in 378f190 when Transactions became the Search page.
+        // With an empty query renderSearchOrMonitor() hides #searchResults and shows the
+        // CC monitor instead, so this listener cannot fire there anyway.
         if (searchActiveQuery) loadMoreSearchResults(searchActiveQuery);
-        else loadMoreAllTx();
       }
     });
 

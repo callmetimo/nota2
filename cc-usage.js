@@ -111,6 +111,12 @@ let ccgSaving = false;
 const ccCardPMs = () => CONFIG_ITEMS.filter(i => i.kind === 'pm' && i.creditCard && !i.archived);
 const ccShortDate = iso => isoDisp(iso).split(' ').slice(0, 2).join(' ');
 
+// The group a payment method belongs to (case-insensitive), or null.
+function ccGroupForPM(name) {
+  const k = String(name || '').toLowerCase();
+  return CC_GROUPS.find(g => g.pms.some(p => p.toLowerCase() === k)) || null;
+}
+
 function ccSelectedGroup() {
   return CC_GROUPS.find(g => g.id === ccUsageSelectedId) || CC_GROUPS[0] || null;
 }

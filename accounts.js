@@ -278,6 +278,13 @@ function tapAccountCard(accountName) {
       pmToFilter = exactPm || account.name;
     }
   }
+  // A card that belongs to a CC group is tracked on the CC Usage page, not the Search monitor.
+  const ccGroup = (pmToFilter && typeof ccGroupForPM === 'function') ? ccGroupForPM(pmToFilter) : null;
+  if (ccGroup) {
+    ccUsageSelect(ccGroup.id);
+    switchTabFromMore('ccusage');
+    return;
+  }
   ccMonitorPmFilter = pmToFilter ? [pmToFilter] : [];
   ccMonitorDate = new Date();
   
@@ -428,12 +435,6 @@ function getCCBillingDate(pmName) {
   if (!pmName) return 0;
   const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && i.name === pmName);
   return (item && item.creditCard && item.billingDate) ? Number(item.billingDate) : 0;
-}
-
-function getCCCreditLimit(pmName) {
-  if (!pmName) return 0;
-  const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && i.name === pmName);
-  return (item && item.creditCard && item.creditLimit) ? Number(item.creditLimit) : 0;
 }
 
 function applyBillingCycle(r) {

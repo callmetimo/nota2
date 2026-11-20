@@ -156,9 +156,9 @@ function renderCCMonitor() {
   if (!container) return;
 
   const {
-    curY, curM, pmList, activeBillingDate, activeCreditLimit,
+    curY, curM, pmList, activeBillingDate,
     currentTxns, prevTotal, prevIncomeTotal,
-    currentTotalExpenses, currentTotalIncome, txCount, creditUsage,
+    currentTotalExpenses, currentTotalIncome, txCount,
   } = computeCCMonitor(ccMonitorDate, ccMonitorPmFilter);
 
   const monthNameStr = new Date(curY, curM - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
@@ -194,26 +194,6 @@ function renderCCMonitor() {
     cycleSubtitle = `<div style="font-size:12px;color:var(--text2);text-align:center;margin-top:2px;font-weight:500">Billing cycle: ${startDay} ${startMon} – ${endDay} ${endMon}</div>`;
   }
 
-  let creditBarHtml = '';
-  if (activeCreditLimit > 0) {
-    const usagePct  = Math.min(Math.round((creditUsage / activeCreditLimit) * 100), 100);
-    const isOver    = creditUsage > activeCreditLimit;
-    const barColor  = usagePct >= 90 ? 'var(--red)' : usagePct >= 70 ? 'var(--orange, #f97316)' : 'var(--accent)';
-    const usedFmt   = fRpS(creditUsage);
-    const limitFmt  = fRpS(activeCreditLimit);
-    const overCls   = isOver ? ' over' : '';
-    creditBarHtml = `
-      <div class="cal-progress-wrap" style="margin-top:12px;margin-bottom:12px">
-        <div class="cal-progress-bar">
-          <div class="cal-progress-fill${overCls}" style="width:${usagePct}%;background:${barColor}"></div>
-        </div>
-        <div class="cal-progress-right">
-          <div class="cal-progress-amount"></div>
-          <div class="cal-progress-avg">limit ${limitFmt}</div>
-        </div>
-      </div>`;
-  }
-
   let html = `
     <!-- Header Controls -->
     <div class="chart-card" style="margin-bottom:12px;padding:12px">
@@ -230,8 +210,6 @@ function renderCCMonitor() {
         <span style="font-size:12px;color:var(--text2);white-space:nowrap">Account Filter:</span>
         <div id="ccMonitorAccountFilterControl"></div>
       </div>
-      
-      ${creditBarHtml}
     </div>
 
     <!-- Summary Stats -->

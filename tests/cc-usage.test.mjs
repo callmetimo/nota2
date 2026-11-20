@@ -123,4 +123,32 @@ t('duplicate X flags ambiguous; closedSeries zeroes remaining', () => {
   assert.equal(c.closed, true);
 });
 
+t('"(Installment)" rows from the old recurring system continue the numbered series', () => {
+  const g = { pms: ['CC'], permanentLimit: 1 };
+  const rows = [
+    row('2026-08-27', 'CC', 'charge', 'GYM (1/3)', 3000),
+    row('2026-09-27', 'CC', 'charge', 'GYM (Installment)', 3000),
+    row('2026-10-27', 'CC', 'charge', 'GYM (Installment)', 3000)
+  ];
+  const s = C.buildSeries(rows, g, '2026-11-20', { cc: 25 });
+  assert.equal(s.length, 1);
+  assert.deepEqual([s[0].xMax, s[0].remaining], [3, 0]);
+  // only one "(Installment)" row so far: the series is at 2 of 3 and owes one more
+  const s2 = C.buildSeries(rows.slice(0, 2), g, '2026-11-20', { cc: 25 });
+  assert.deepEqual([s2[0].xMax, s2[0].remaining, s2[0].nextX], [2, 3000, 3]);
+});
+
+t('same-name purchases stay separate series; the monthly amount decides which one continues', () => {
+  const g = { pms: ['CC'], permanentLimit: 1 };
+  const rows = [
+    row('2026-10-17', 'CC', 'charge', 'CAB (1/3)', 100),
+    row('2026-10-30', 'CC', 'charge', 'CAB (1/3)', 200),
+    row('2026-11-14', 'CC', 'charge', 'CAB (2/3)', 100),
+    row('2026-11-17', 'CC', 'charge', 'CAB (1/3)', 300)
+  ];
+  const s = C.buildSeries(rows, g, '2026-11-20', { cc: 25 });
+  assert.deepEqual(s.map(x => [x.key, x.xMax, x.remaining]), [['CAB|3', 2, 100], ['CAB|3#2', 1, 400], ['CAB|3#3', 1, 600]]);
+  assert.ok(s.every(x => x.ambiguous));
+});
+
 console.log(passed + ' passed');

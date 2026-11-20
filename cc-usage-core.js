@@ -5,6 +5,8 @@ const CCUsageCore = (() => {
   const CICILAN_RE = /CICILAN\b.*?\bKE\s*0*(\d{1,3})\s*DARI\s*0*(\d{1,3})/i; // "IPHONE CICILAN KE 1 DARI 12"
   const LEGACY_RE = /\((\d{1,3})\/(\d{1,3})\)\s*$/;                           // old in-app rows "Laptop (3/6)"
   const POKOK_RE = /\[pokok:(\d+)\]/i;                                         // principal tag written into notes
+  // Rows the old recurring system generated after the numbered ones ("Sun Yoga (Installment)"): they carry no X.
+  const CONT_RE = /\(\s*installment\s*\)\s*$/i;
 
   const pad = n => (n < 10 ? '0' + n : '' + n);
   const iso = (y, m0, d) => y + '-' + pad(m0 + 1) + '-' + pad(d);
@@ -40,8 +42,11 @@ const CCUsageCore = (() => {
     if (!m) return null;
     const x = +m[1], y = +m[2];
     if (!(x >= 1 && x <= y && y <= 60)) return null;
-    const name = s.replace(m[0], ' ').toUpperCase().replace(/[,\-–:]+/g, ' ').replace(/\s+/g, ' ').trim();
-    return { x, y, normName: name || 'CICILAN' };
+    return { x, y, normName: cleanName(s.replace(m[0], ' ')) };
+  }
+
+  function cleanName(str) {
+    return str.toUpperCase().replace(/[,\-–:]+/g, ' ').replace(/\s+/g, ' ').trim() || 'CICILAN';
   }
 
   const bdOf = (bdByPm, pm) => bdEff((bdByPm || {})[lc(pm)] || 0);
@@ -49,40 +54,65 @@ const CCUsageCore = (() => {
 
   // Rows must be charges on the group's PMs dated <= today. Installment rows are ALSO regular charges
   // for the statement/unbilled buckets (they are billed amounts); this only derives the locked principal.
+  //
+  // Real ledgers are messy, so rows are placed chronologically into series *instances*:
+  //  - a numbered row (X of Y) joins the instance of the same name whose last number is X-1 (same
+  //    monthly amount wins a tie), otherwise it starts a new instance. Two purchases that share a
+  //    name ("Train (1/3)" twice) therefore stay two series instead of being merged.
+  //  - an "(Installment)" row (no number) is the next instalment of the open instance of that name.
   function buildSeries(rows, group, today, bdByPm) {
-    const map = new Map();
-    rows.forEach(r => {
-      if (r.kind !== 'charge') return;
-      const p = parseInstallment(r.tx);
-      if (!p) return;
-      const key = p.normName + '|' + p.y;
-      let s = map.get(key);
-      if (!s) { s = { key, name: p.normName, y: p.y, rows: [] }; map.set(key, s); }
-      s.rows.push({ r, x: p.x });
-    });
     const closed = group.closedSeries || [];
-    return [...map.values()].map(s => {
-      const xMax = Math.max(...s.rows.map(e => e.x));
-      const lastRow = s.rows.filter(e => e.x === xMax).reduce((a, b) => (b.r.date >= a.r.date ? b : a)).r;
-      const a = lastRow.amount;
+    const charges = rows.map((r, i) => ({ r, i })).filter(e => e.r.kind === 'charge')
+      .sort((a, b) => a.r.date.localeCompare(b.r.date) || a.i - b.i).map(e => e.r);
+    const inst = [];
+    const place = (s, r, x) => { s.rows.push(r); if (x >= s.xMax) { s.xMax = x; s.last = r; } };
+    // Same amount as the series' last instalment wins; otherwise the most recently active one.
+    const pick = (pool, r) => {
+      if (!pool.length) return null;
+      const same = pool.filter(s => s.last.amount === r.amount);
+      return (same.length ? same : pool).reduce((a, b) => (b.last.date > a.last.date ? b : a));
+    };
+    charges.forEach(r => {
+      const p = parseInstallment(r.tx);
+      if (p) {
+        const same = inst.filter(s => s.name === p.normName && s.y === p.y);
+        const next = same.filter(s => s.xMax === p.x - 1);
+        // Earlier numbers that were never recorded: attach to a series that is behind this number.
+        const behind = p.x > 1 ? same.filter(s => s.xMax > 0 && s.xMax < p.x - 1) : [];
+        const target = pick(next.length ? next : behind, r);
+        if (target) { place(target, r, p.x); return; }
+        const fresh = { name: p.normName, y: p.y, rows: [], xMax: 0, last: null };
+        inst.push(fresh);
+        place(fresh, r, p.x);
+      } else if (CONT_RE.test(r.tx)) {
+        const open = inst.filter(s => s.name === cleanName(r.tx.replace(CONT_RE, ' ')) && s.xMax < s.y);
+        const target = pick(open, r);
+        if (target) place(target, r, target.xMax + 1);
+      }
+    });
+
+    const seen = {};
+    inst.forEach(s => { const k = s.name + '|' + s.y; seen[k] = (seen[k] || 0) + 1; s.base = k; s.n = seen[k]; });
+    return inst.map(s => {
+      const key = s.n > 1 ? `${s.base}#${s.n}` : s.base;
+      const lastRow = s.last, a = lastRow.amount;
       let P = null;
-      s.rows.some(e => { const m = String(e.r.notes || '').match(POKOK_RE); if (m) P = +m[1]; return !!m; });
+      s.rows.some(r => { const m = String(r.notes || '').match(POKOK_RE); if (m) P = +m[1]; return !!m; });
       const m = P ? Math.round(P / s.y) : 0;
-      const isClosed = closed.includes(s.key);
+      const isClosed = closed.includes(key);
       let remaining;
-      if (xMax >= s.y || isClosed) remaining = 0;
-      else if (P) remaining = P - m * xMax;
-      else remaining = a * (s.y - xMax);
-      const nextX = xMax + 1;
+      if (s.xMax >= s.y || isClosed) remaining = 0;
+      else if (P) remaining = P - m * s.xMax;
+      else remaining = a * (s.y - s.xMax);
+      const nextX = s.xMax + 1;
       let nextAmount = P ? m : a;
       if (P && nextX === s.y) nextAmount = P - m * (s.y - 1);
-      const dupX = s.rows.some((e, i) => s.rows.findIndex(f => f.x === e.x) !== i);
       const lastBd = bdOf(bdByPm, lastRow.pm);
       const prevStart = cycleRange(curIdxOf(today, lastBd) - 1, lastBd).start;
       return {
-        key: s.key, name: s.name, y: s.y, xMax, amount: a, principal: P, remaining: Math.round(remaining),
+        key, name: s.name, y: s.y, xMax: s.xMax, amount: a, principal: P, remaining: Math.round(remaining),
         nextX, nextAmount: Math.round(nextAmount), lastDate: lastRow.date, pm: lastRow.pm, cat: lastRow.cat || '',
-        ambiguous: dupX, stale: xMax < s.y && lastRow.date < prevStart, closed: isClosed
+        ambiguous: seen[s.base] > 1, stale: s.xMax < s.y && lastRow.date < prevStart, closed: isClosed
       };
     });
   }

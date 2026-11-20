@@ -117,13 +117,141 @@ function ccSelectedGroup() {
 
 function ccUsageSelect(id) {
   ccUsageSelectedId = id;
+  ccUsageCycleOffset = 0;
   try { localStorage.setItem(CC_SEL_LS_KEY, id); } catch (e) {}
   renderCCUsage();
+}
+
+// ── Rows from Nota's data ─────────────────────────────────────
+const ccLc = s => String(s || '').toLowerCase();
+const ccIso = (y, m0, d) => `${y}-${String(m0 + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const ccRowIso = r => (r.date ? String(r.date).slice(0, 10) : ccIso(r.y, r.m, r.d));
+
+// Normalised rows for the core: synced rows from HIST.opex plus not-yet-synced txHistory rows.
+// Future-dated rows are left out. Amounts are IDR; `kind` carries the direction.
+function collectCCRows(pmSet) {
+  const today = todayISO();
+  const rows = [];
+  const push = (date, pm, kind, amount, r, source, idx) => {
+    if (!(amount > 0) || date > today) return;
+    rows.push({ date, pm, kind, amount, tx: r.tx || '', notes: r.notes || '', cat: r.cat || r.category || '', ref: { source, idx } });
+  };
+  // Count-based ghost matching (same idea as _reconcileUnsyncedWithSheet): an unsynced local row whose
+  // twin already arrived from the sheet in the same month must not be counted twice.
+  const sheetCounts = {};
+  (HIST.opex || []).forEach((r, i) => {
+    const k = `${r.y}-${r.m}|${sigOfSheetRow(r)}`;
+    sheetCounts[k] = (sheetCounts[k] || 0) + 1;
+    if (!pmSet.has(ccLc(r.pm))) return;
+    if ((r.exp || 0) > 0) push(ccRowIso(r), r.pm, 'charge', r.exp, r, 'hist-opex', i);
+    else if ((r.inc || 0) > 0) push(ccRowIso(r), r.pm, 'credit', r.inc, r, 'hist-opex', i);
+  });
+  const used = {};
+  (txHistory || []).forEach((h, i) => {
+    if (h.synced || !h.date) return;
+    const date = String(h.date).slice(0, 10);
+    if (h.type === 'transfer') {
+      if (pmSet.has(ccLc(h.toPm))) push(date, h.toPm, 'credit', h.amount, h, 'local-opex', i);
+      if (pmSet.has(ccLc(h.fromPm))) push(date, h.fromPm, 'charge', h.amount, h, 'local-opex', i);
+      return;
+    }
+    const [y, m] = date.split('-');
+    const key = `${+y}-${+m - 1}|${sigOfTxHistory(h)}`;
+    used[key] = (used[key] || 0) + 1;
+    if ((sheetCounts[key] || 0) >= used[key]) return;
+    if (!pmSet.has(ccLc(h.pm))) return;
+    push(date, h.pm, h.type === 'income' ? 'credit' : 'charge', h.amount, h, 'local-opex', i);
+  });
+  return rows;
+}
+
+// Transaction list items in the same shape as Search results, so renderTxItemHTML and tap-to-edit work unchanged.
+function ccListItems(listRows) {
+  const items = [], seen = new Set();
+  const add = (source, idx, row) => {
+    const k = `${source}:${idx}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    items.push({ source, idx, row, type: 'opex' });
+  };
+  listRows.forEach(r => {
+    const { source, idx } = r.ref;
+    const row = source === 'hist-opex' ? HIST.opex[idx] : txHistory[idx];
+    if (!row) return;
+    add(source, idx, row);
+    // The other leg of a Transfer may sit on a non-CC payment method; pull it in so the pair merges.
+    if (source === 'hist-opex' && (row.cat || row.category) === 'Transfer' && String(row.id || '').startsWith('xfr_')) {
+      HIST.opex.forEach((o, j) => { if (j !== idx && o.id === row.id) add('hist-opex', j, o); });
+    }
+  });
+  return mergeTransferPairs(items).sort((a, b) => ccRowIso(b.row).localeCompare(ccRowIso(a.row)));
+}
+
+// Keys (`source:idx`) of list items that give limit back: payments, refunds and transfers into the group's cards.
+function ccCreditKeys(items, pmSet) {
+  const keys = new Set();
+  items.forEach(it => {
+    const r = it.row, key = `${it.source}:${it.idx}`;
+    const xfr = it.source === 'hist-transfer' ? [r.transferFromPm, r.transferToPm]
+      : (it.source === 'local-opex' && r.type === 'transfer' ? [r.fromPm, r.toPm] : null);
+    if (xfr) { if (pmSet.has(ccLc(xfr[1])) && !pmSet.has(ccLc(xfr[0]))) keys.add(key); return; }
+    if (it.source === 'hist-opex' && pmSet.has(ccLc(r.pm)) && (r.inc || 0) > 0 && !(r.exp || 0)) keys.add(key);
+    else if (it.source === 'local-opex' && r.type === 'income') keys.add(key);
+  });
+  return keys;
+}
+
+// ── Page: render ──────────────────────────────────────────────
+let ccUsageCycleOffset = 0; // 0 = current billing cycle, -1 = previous, ...
+let ccWaitingHist = false;
+
+function openCCUsagePage() {
+  ccUsageCycleOffset = 0;
+  renderCCUsage();
+  fetchCCGroups().then(renderCCUsage);
+}
+
+function renderCCUsageIfActive() {
+  const page = document.getElementById('page-ccusage');
+  if (page && page.classList.contains('active')) renderCCUsage();
+}
+
+function ccUsageShiftCycle(d) {
+  ccUsageCycleOffset = Math.min(0, Math.max(-36, ccUsageCycleOffset + d));
+  renderCCUsage();
+}
+
+function ccRow(cls, label, value, sub) {
+  return `<div class="ccu-row"><span class="ccu-dot ${cls}"></span>
+    <span class="ccu-row-l">${label}${sub ? ` <span class="ccu-muted">${sub}</span>` : ''}</span><span class="ccu-row-v">${value}</span></div>`;
+}
+
+function ccBarHTML(u) {
+  const segs = [['c-stmt', u.statementBalance], ['c-unb', u.unbilled], ['c-inst', u.installmentRemaining],
+    ['c-pend', u.pendingAuth], ['c-rem', Math.max(0, u.remaining)]].filter(s => s[1] > 0);
+  const denom = Math.max(u.activeLimit, segs.reduce((n, s) => n + s[1], 0)) || 1;
+  const pct = v => (v / denom * 100).toFixed(2) + '%';
+  return `<div class="ccu-bar${u.overLimit ? ' over' : ''}">${segs.map(s => `<div class="ccu-seg ${s[0]}" style="width:${pct(s[1])}"></div>`).join('')}
+    ${u.overLimit ? `<div class="ccu-limit-mark" style="left:${pct(u.activeLimit)}"></div>` : ''}</div>`;
+}
+
+function ccSeriesHTML(series) {
+  const live = series.filter(s => !s.closed && s.xMax < s.y);
+  if (!live.length) return '';
+  return `<div class="chart-card"><div class="chart-card-title">Cicilan Aktif (${live.length})</div>${live.map(s => `
+    <div class="ccu-series">
+      <div class="ccu-series-t">${esc(s.name)} · KE ${s.xMax}/${s.y} · ${fRp(s.amount)}/bln</div>
+      <div class="ccu-muted">Sisa ${fRp(s.remaining)} · berikutnya KE ${s.nextX} ≈ ${fRp(s.nextAmount)}</div>
+      ${s.stale ? `<span class="ccu-flag">Belum dicatat sejak ${esc(ccShortDate(s.lastDate))}</span>` : ''}
+      ${s.ambiguous ? '<span class="ccu-flag">Nama ganda</span>' : ''}
+    </div>`).join('')}</div>`;
 }
 
 function renderCCUsage() {
   const box = document.getElementById('ccUsageContainer');
   if (!box) return;
+  // Delegated, so it survives innerHTML rebuilds; bound once.
+  if (!box.dataset.tapBound) { box.dataset.tapBound = '1'; attachTxTapToEdit(box); }
   const pms = ccCardPMs();
   if (!pms.length && !CC_GROUPS.length) {
     box.innerHTML = `<div class="empty-state">No credit cards yet. Mark a payment method as Credit Card in Settings.
@@ -135,32 +263,69 @@ function renderCCUsage() {
       <div style="margin-top:12px"><button class="ccu-link" onclick="openCCGroupOverlay(null)">+ New group</button></div></div>`;
     return;
   }
+  if (!histLoaded) {
+    box.innerHTML = '<div class="chart-loading">Loading…</div>';
+    if (!ccWaitingHist) { ccWaitingHist = true; onHistLoaded(() => { ccWaitingHist = false; renderCCUsage(); }); }
+    return;
+  }
+
   const g = ccSelectedGroup();
-  const today = todayISO();
-  const tempActive = g.tempLimit > 0 && g.tempLimitExpiry && today <= g.tempLimitExpiry;
-  const tempExpired = g.tempLimit > 0 && g.tempLimitExpiry && today > g.tempLimitExpiry;
-  const known = new Set(pms.map(p => p.name.toLowerCase()));
-  const missing = g.pms.filter(p => !known.has(p.toLowerCase()));
+  const bdByPm = {};
+  pms.forEach(p => { bdByPm[ccLc(p.name)] = getCCBillingDate(p.name); });
+  const pmSet = new Set(g.pms.map(ccLc));
+  const rows = collectCCRows(pmSet);
+  const u = CCUsageCore.computeCCUsage(g, rows, todayISO(), bdByPm);
+
   const selector = CC_GROUPS.length > 1
     ? `<div class="pill-toggle">${CC_GROUPS.map(x =>
         `<div class="pill-toggle-btn expense${x.id === g.id ? ' active' : ''}" onclick="ccUsageSelect('${escJsAttr(x.id)}')">${esc(x.name)}</div>`).join('')}</div>`
     : '';
+  const neg = n => '−' + fRp(n);
+  const period = u.cycles.length === 0 ? '–'
+    : (u.sameCycle ? `${esc(ccShortDate(u.cycles[0].start))} – ${esc(ccShortDate(u.cycles[0].end))}`
+      : u.cycles.map(c => `<div class="ccu-muted">${esc(c.pm)}: ${esc(ccShortDate(c.start))} – ${esc(ccShortDate(c.end))}</div>`).join(''));
+
+  const limitCard = `<div class="chart-card">
+      <div class="chart-card-title">${esc(g.name)} · ${u.overLimit ? 'Melebihi limit' : 'Sisa Kredit Limit'}</div>
+      <div class="ccu-top"><div class="ccu-remaining${u.overLimit ? ' neg' : ''}">${u.overLimit ? neg(-u.remaining) : fRp(u.remaining)}</div>
+        <div class="ccu-muted">of ${fRp(u.activeLimit)}</div></div>
+      <div class="ccu-limit">Limit Gabungan${u.tempActive ? ` <span class="ccu-badge-temp">Limit sementara s/d ${esc(ccShortDate(g.tempLimitExpiry))}</span>` : ''}</div>
+      ${u.tempActive ? `<div class="ccu-muted">Limit tetap ${fRp(g.permanentLimit)}</div>` : ''}
+      ${u.tempExpired ? `<div class="ccu-muted">Limit sementara berakhir ${esc(isoDisp(g.tempLimitExpiry))} — kembali ke limit tetap</div>` : ''}
+      ${ccBarHTML(u)}
+      ${ccRow('c-stmt', 'Tagihan Baru', fRp(u.statementBalance))}
+      ${ccRow('c-unb', 'Transaksi Berjalan', fRp(u.unbilled))}
+      ${ccRow('c-inst', 'Sisa Tagihan Cicilan', fRp(u.installmentRemaining))}
+      ${u.pendingAuth > 0 ? ccRow('c-pend', 'Otorisasi Menggantung', fRp(u.pendingAuth), g.pendingAuthDate ? `· updated ${esc(ccShortDate(g.pendingAuthDate))}` : '') : ''}
+      ${u.overpayment > 0 ? ccRow('c-over', 'Kelebihan Bayar', neg(u.overpayment)) : ''}
+      ${ccRow('c-rem', u.overLimit ? 'Melebihi limit' : 'Sisa Kredit Limit', u.overLimit ? neg(-u.remaining) : fRp(u.remaining))}
+      ${u.missingPms.length ? `<div class="ccu-warn">Kartu tidak ditemukan: ${esc(u.missingPms.join(', '))}</div>` : ''}
+    </div>
+    <div class="summary-row">
+      <div class="summary-card"><div class="s-label">Pemakaian periode ini</div><div class="s-value">${fRp(u.cycleSpend)}</div></div>
+      <div class="summary-card"><div class="s-label">Periode</div><div class="s-value ccu-period">${period}</div></div>
+    </div>`;
+
+  // Transaction list for the chosen cycle (each card's own cycle, so mixed billing days stay correct).
+  const off = ccUsageCycleOffset;
+  const listRows = u.cycles.flatMap(c => CCUsageCore.cycleRowsFor(rows.filter(r => ccLc(r.pm) === ccLc(c.pm)), bdByPm, c.idx + off));
+  const items = ccListItems(listRows);
+  const creditSet = ccCreditKeys(items, pmSet);
+  const refIdx = u.cycles.length ? u.cycles[0].idx + off : 0;
+  const label = u.cycles.length ? `Siklus ${MO[refIdx % 12]} ${Math.floor(refIdx / 12)}` : '';
+  const listCard = `<div class="chart-card">
+      <div class="ccu-list-head"><div class="chart-card-title" style="margin:0">Transaksi Periode Ini (${items.length})</div>
+        <div class="ccu-nav"><button onclick="ccUsageShiftCycle(-1)" ${off <= -36 ? 'disabled' : ''}>‹</button><span>${esc(label)}</span><button onclick="ccUsageShiftCycle(1)" ${off >= 0 ? 'disabled' : ''}>›</button></div></div>
+      ${items.length ? items.map(it => renderTxItemHTML(it, '', { creditSet })).join('') : '<div class="empty-state">Belum ada transaksi di periode ini.</div>'}
+    </div>`;
+
   box.innerHTML = `
     <div class="ccu-actions">
       <button class="ccu-link" onclick="openCCGroupOverlay(null)">+ New group</button>
       <button class="ccu-link" onclick="openCCGroupOverlay('${escJsAttr(g.id)}')">Edit group</button>
     </div>
     ${selector}
-    <div class="chart-card">
-      <div class="chart-card-title">${esc(g.name)}</div>
-      <div class="ccu-muted">Limit Gabungan</div>
-      <div class="ccu-limit">${fRp(tempActive ? g.tempLimit : g.permanentLimit)}
-        ${tempActive ? `<span class="ccu-badge-temp">Limit sementara s/d ${esc(ccShortDate(g.tempLimitExpiry))}</span>` : ''}</div>
-      ${tempActive ? `<div class="ccu-muted">Limit tetap ${fRp(g.permanentLimit)}</div>` : ''}
-      ${tempExpired ? `<div class="ccu-muted">Limit sementara berakhir ${esc(isoDisp(g.tempLimitExpiry))} — kembali ke limit tetap</div>` : ''}
-      <div class="ccu-card-list">${g.pms.map(p => `<span class="ccu-chip">${esc(p)}</span>`).join('') || '<span class="ccu-muted">No cards</span>'}</div>
-      ${missing.length ? `<div class="ccu-warn">Kartu tidak ditemukan: ${esc(missing.join(', '))}</div>` : ''}
-    </div>`;
+    <div class="ccu-grid"><div class="ccu-col">${limitCard}${ccSeriesHTML(u.series)}</div><div class="ccu-col">${listCard}</div></div>`;
 }
 
 // ── Group overlay ─────────────────────────────────────────────

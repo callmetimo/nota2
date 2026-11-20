@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.126';
+const APP_VERSION = 'v4.127';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -442,6 +442,7 @@ function _applyCurrentMonthRows(rows, y, m) {
       ...(r.id       ? { id: r.id }             : {})
     });
   });
+  if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
 }
 // Diagnostic logging for the still-unresolved "duplicate transaction on iOS PWA" bug
 // (README v4.15-v4.18 — 4 prior fix rounds, each targeting a different mechanism under
@@ -1187,7 +1188,7 @@ function switchTab(tab, el) {
     if(!histLoaded) onHistLoaded(()=>initNetWorth());
     else initNetWorth();
   }
-  if(tab==='ccusage' && typeof renderCCUsage==='function'){ renderCCUsage(); fetchCCGroups().then(renderCCUsage); }
+  if(tab==='ccusage' && typeof openCCUsagePage==='function') openCCUsagePage();
   if(tab==='goals'){
     fetchFxRates();
     const _loadGoals = () => Promise.all([
@@ -2122,6 +2123,7 @@ function refreshAfterWrite() {
     renderSearchOrMonitor();
     if (searchActiveQuery) performSearch(searchActiveQuery);
   }
+  if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
 }
 
 async function updateTransaction() {
@@ -2331,6 +2333,7 @@ async function updateInvestTransaction() {
     buildAccountBalances();
     renderAccountBalanceCards();
     if (document.getElementById('page-search').classList.contains('active')) renderSearchOrMonitor();
+    if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
     showToast('Updated ✓', 'success');
     return;
   }
@@ -2350,6 +2353,7 @@ async function updateInvestTransaction() {
       localStorage.removeItem(curMonthCacheKey());
       await fetchCurrentMonth(true);
       if (document.getElementById('page-search').classList.contains('active')) renderSearchOrMonitor();
+      if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
       buildAccountBalances();
       renderAccountBalanceCards();
       showToast('Updated ✓', 'success');
@@ -2377,6 +2381,7 @@ async function deleteSheetInvestTransaction() {
     buildAccountBalances();
     renderAccountBalanceCards();
     if (document.getElementById('page-search').classList.contains('active')) renderSearchOrMonitor();
+    if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
     showToast('Deleted ✓', 'success');
     return;
   }
@@ -2391,6 +2396,7 @@ async function deleteSheetInvestTransaction() {
       localStorage.removeItem(curMonthCacheKey());
       await fetchCurrentMonth(true);
       if (document.getElementById('page-search').classList.contains('active')) renderSearchOrMonitor();
+      if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
       buildAccountBalances();
       renderAccountBalanceCards();
       showToast('Deleted ✓', 'success');
@@ -2746,7 +2752,7 @@ function performSearch(query) {
   renderSearchResults(q);
 }
 
-function renderTxItemHTML(item, query) {
+function renderTxItemHTML(item, query, opts = {}) {
   const row = item.row;
   const isInvest = item.type === 'invest';
   const isPending = item.source.startsWith('local');
@@ -2785,6 +2791,8 @@ function renderTxItemHTML(item, query) {
     : '';
 
   if (isTransfer) { icon = '🔁'; cls = 'transfer'; color = '#a78bfa'; }
+  // CC Usage marks rows that give limit back (payments, refunds): shown green with a leading +.
+  if (opts.creditSet && opts.creditSet.has(`${item.source}:${item.idx}`)) { amount = '+' + amount; color = 'var(--green)'; }
   const metaLine = isTransfer ? 'Transfer' : `${esc(cat)} · ${esc(pm)}`;
 
   return `<div class="tx-item"${tapAttrs}>
@@ -2888,6 +2896,41 @@ function openSearchTransferEdit(xfrId) {
   openEditTransferOverlay(merged, dateStr);
 }
 
+// Tap on a transaction row (.tx-item / .detail-item carrying data-idx/data-source/data-type) opens its editor.
+function fireTxTap(item) {
+  const { type, source, idx } = item.dataset;
+  if (type === 'invest') openSearchInvestEdit(source, parseInt(idx));
+  else if (type === 'transfer') openSearchTransferEdit(idx); // idx is the xfr_ id string, not a numeric index
+  else openSearchTxEdit(source, parseInt(idx));
+}
+
+// Reliable tap-to-edit on mobile: inline onclick is swallowed by iOS
+// -webkit-overflow-scrolling:touch scroll layers. Use touchstart/touchend
+// event delegation on the container to detect taps vs scrolls (same
+// pattern as #calTxList). Call once per container, never from a render function.
+function attachTxTapToEdit(el) {
+  if (!el) return;
+  let _ts = 0, _tx = 0, _ty = 0, _touchFired = 0;
+  el.addEventListener('touchstart', e => {
+    _ts = Date.now(); _tx = e.touches[0].clientX; _ty = e.touches[0].clientY;
+  }, {passive: true});
+  el.addEventListener('touchend', e => {
+    const dt = Date.now() - _ts;
+    const dx = Math.abs(e.changedTouches[0].clientX - _tx);
+    const dy = Math.abs(e.changedTouches[0].clientY - _ty);
+    if (dt > 400 || dx > 8 || dy > 8) return; // scroll or long-press
+    const item = e.target.closest('.tx-item[data-idx], .detail-item[data-idx]');
+    if (!item) return;
+    _touchFired = Date.now(); fireTxTap(item);
+  }, {passive: true});
+  el.addEventListener('click', e => {
+    if (Date.now() - _touchFired < 600) return;
+    const item = e.target.closest('.tx-item[data-idx], .detail-item[data-idx]');
+    if (!item) return;
+    fireTxTap(item);
+  });
+}
+
 function initSearchPage() {
   if (!searchScrollAttached) {
     searchScrollAttached = true;
@@ -2903,42 +2946,9 @@ function initSearchPage() {
       }
     });
 
-    // Reliable tap-to-edit on mobile: inline onclick is swallowed by iOS
-    // -webkit-overflow-scrolling:touch scroll layers. Use touchstart/touchend
-    // event delegation on the container to detect taps vs scrolls (same
-    // pattern as #calTxList).
-    const fireSearchTap = item => {
-      const { type, source, idx } = item.dataset;
-      if (type === 'invest') openSearchInvestEdit(source, parseInt(idx));
-      else if (type === 'transfer') openSearchTransferEdit(idx); // idx is the xfr_ id string, not a numeric index
-      else openSearchTxEdit(source, parseInt(idx));
-    };
-
-    const setupTapToEdit = el => {
-      if (!el) return;
-      let _ts = 0, _tx = 0, _ty = 0, _touchFired = 0;
-      el.addEventListener('touchstart', e => {
-        _ts = Date.now(); _tx = e.touches[0].clientX; _ty = e.touches[0].clientY;
-      }, {passive: true});
-      el.addEventListener('touchend', e => {
-        const dt = Date.now() - _ts;
-        const dx = Math.abs(e.changedTouches[0].clientX - _tx);
-        const dy = Math.abs(e.changedTouches[0].clientY - _ty);
-        if (dt > 400 || dx > 8 || dy > 8) return; // scroll or long-press
-        const item = e.target.closest('.tx-item[data-idx], .detail-item[data-idx]');
-        if (!item) return;
-        _touchFired = Date.now(); fireSearchTap(item);
-      }, {passive: true});
-      el.addEventListener('click', e => {
-        if (Date.now() - _touchFired < 600) return;
-        const item = e.target.closest('.tx-item[data-idx], .detail-item[data-idx]');
-        if (!item) return;
-        fireSearchTap(item);
-      });
-    };
-
-    setupTapToEdit(resultsEl);
-    setupTapToEdit(document.getElementById('searchMonitorContainer'));
+    // Tap-to-edit on mobile: see attachTxTapToEdit() above (shared with the CC Usage page).
+    attachTxTapToEdit(resultsEl);
+    attachTxTapToEdit(document.getElementById('searchMonitorContainer'));
   }
   clearSearch();
 }
@@ -2977,6 +2987,7 @@ async function loadHistData(_isRetry) {
     renderAccountBalanceCards();
     histLoadCallbacks.forEach(cb => cb());
     histLoadCallbacks = [];
+    if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
   } catch(e) {
     console.warn('allOpex load failed:', e.message);
     // One automatic retry before giving up — a lot of failures here are a transient
@@ -3045,6 +3056,7 @@ window.addEventListener('notaOpexUpdated', (e) => {
     initCalendar();
     calRefreshOpenDayPanel();
   }
+  if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
 });
 
 (function() {

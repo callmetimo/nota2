@@ -1175,23 +1175,31 @@
           <input type="text" class="form-input amount-input" id="ccgTempLimit" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
         </div>
       </div>
+      <!-- The hidden date input stretches over its whole .form-group (position:relative; inset:0), so every date picker
+           sits in a group of its own, apart from labels, Clear buttons and amount fields that must stay tappable. -->
+      <div class="form-group" style="margin-bottom:6px">
+        <label class="form-label" style="margin:0">Temporary limit until <button type="button" class="ccu-link" onclick="ccgSetDate('ccgTempExpiry','')">Clear</button></label>
+      </div>
       <div class="form-group">
-        <label class="form-label">Temporary limit until <button type="button" class="ccu-link" onclick="ccgSetDate('ccgTempExpiry','')">Clear</button></label>
         <label class="date-display" for="ccgTempExpiryRaw">
           <span id="ccgTempExpiryText">Select date</span>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         </label>
         <input type="date" class="date-input-hidden" id="ccgTempExpiryRaw" onchange="ccgSetDate('ccgTempExpiry', this.value)">
       </div>
+      <div class="form-group" style="margin-bottom:6px">
+        <label class="form-label" style="margin:0">Opening balance (optional): from your last statement or the BCA app</label>
+        <div class="ccu-muted" style="margin-top:6px">As of <button type="button" class="ccu-link" onclick="ccgSetDate('ccgAnchorDate','');document.getElementById('ccgAnchorAmt').value=''">Clear both</button></div>
+      </div>
       <div class="form-group">
-        <label class="form-label">Opening balance (optional): from your last statement or the BCA app</label>
-        <div class="ccu-muted" style="margin-bottom:6px">As of</div>
         <label class="date-display" for="ccgAnchorDateRaw">
           <span id="ccgAnchorDateText">Select date</span>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         </label>
         <input type="date" class="date-input-hidden" id="ccgAnchorDateRaw" onchange="ccgSetDate('ccgAnchorDate', this.value)">
-        <div class="ccu-muted" style="margin:8px 0 6px">Outstanding <button type="button" class="ccu-link" onclick="ccgSetDate('ccgAnchorDate','');document.getElementById('ccgAnchorAmt').value=''">Clear both</button></div>
+      </div>
+      <div class="form-group">
+        <div class="ccu-muted" style="margin-bottom:6px">Outstanding</div>
         <div class="amount-wrapper">
           <span class="amount-prefix">Rp</span>
           <input type="text" class="form-input amount-input" id="ccgAnchorAmt" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">

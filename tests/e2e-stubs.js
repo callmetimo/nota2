@@ -74,9 +74,11 @@ Item B Rp20.000`, 'text/plain', 'Grab <no-reply@grab.com>', 'Grab receipt');
       const q = new URL(u).searchParams.get('type');
       const method = (opts && opts.method) || 'GET';
       if (method === 'GET' && q === 'emailimport') return json({ status: 'ok', ...window.__sheet });
+      if (method === 'GET' && q === 'ccgroups') return json({ status: 'ok', exists: !!window.__ccg, groups: window.__ccg || [] });
       if (method === 'POST') {
         const d = JSON.parse(opts.body);
         if (d.type === 'emailimport') { window.__posts.push(d); window.__sheet = { exists: true, config: d.config, seen: d.seen }; }
+        if (d.type === 'ccgroups') window.__ccg = d.groups;
         if (d.type === 'opex') window.__opexPosts.push(d);
         if (d.type === 'transfer') (window.__xfrPosts = window.__xfrPosts || []).push(d);
         return json({ status: 'ok' });

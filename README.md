@@ -44,6 +44,10 @@ When adding new user-configurable features (checkboxes, toggles, flags, settings
 
 Existing users: sheet values default to empty on first load (treated as `false`/unchecked), no migration needed. Once the user toggles a setting, it writes to the sheet.
 
+**Exception — CC groups (CC Usage page):** they live in a separate `CCGroups` tab (one JSON cell, `A2:B2`), created lazily on first save like `EmailImport`.
+Why: old cached clients rewrite `Config!A2:N` wholesale and drop or misalign anything past column N, and column H is capped at 50 chars.
+Client code is `cc-usage.js` (`fetchCCGroups` / `mutateCCGroups`); every write re-reads the sheet first, and an unreadable JSON cell is an error, never "empty".
+
 ## How it works
 
 - `auth.js` — Google Identity Services sign-in (OAuth `drive.file` scope:

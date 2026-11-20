@@ -61,6 +61,7 @@ const SCRIPTS = [
   './ui-calendar.js',
   './ui-insights.js',
   './cc-usage-core.js',
+  './cc-usage.js',
 ];
 const SHELL_FILES = ['./index.html', './icon.png', './style.css?v=' + BUILD, ...SCRIPTS.map(s => s + '?v=' + BUILD)];
 

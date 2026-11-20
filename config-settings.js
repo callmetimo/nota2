@@ -503,6 +503,9 @@ async function saveConfigItem() {
   const billingDate = kind === 'pm' ? (parseInt(document.getElementById('configItemBillingDate').value) || 0) : 0;
   const creditLimit = kind === 'pm' ? (parseAmt('configItemCreditLimit') || 0) : 0;
 
+  // Keep CC group links in step with a renamed payment method (CCGroups stores PM names).
+  if (kind === 'pm' && existing && origName && origName !== name && typeof ccGroupsRenamePM === 'function') ccGroupsRenamePM(origName, name);
+
   if (existing) {
     existing.name = name; existing.color = color; existing.assetType = assetType; existing.ccy = ccy; existing.linkedPM = linkedPM;
     if (kind === 'account' || kind === 'stock') {

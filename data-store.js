@@ -1454,6 +1454,43 @@ const DataStore = (() => {
     return { status: 'ok' };
   }
 
+  // ── CC GROUPS (CCGroups!A2:B2 — one JSON cell) ──
+  // Lazy like EmailImport: reading never creates the tab. Kept out of Config on purpose: old cached
+  // clients rewrite Config!A2:N wholesale, which would drop or misalign anything past column N.
+  const CC_GROUPS_SHEET = 'CCGroups';
+  const CC_GROUPS_CELL_MAX = 45000; // Sheets caps a cell at 50,000 chars
+
+  async function ccGroupsSheetExists() {
+    const meta = await SheetsClient.getSpreadsheetMeta(spreadsheetId);
+    return (meta.sheets || []).some(s => s.properties.title === CC_GROUPS_SHEET);
+  }
+
+  async function handleGetCCGroups() {
+    if (!(await ccGroupsSheetExists())) return { status: 'ok', exists: false, groups: [] };
+    const res = await SheetsClient.getValues(spreadsheetId, `${CC_GROUPS_SHEET}!A2:B2`);
+    const row = (res.values || [])[0];
+    if (!row || !row[1]) return { status: 'ok', exists: true, groups: [] };
+    let parsed;
+    try { parsed = JSON.parse(String(row[1])); } catch (e) { parsed = null; }
+    // A bad parse is an error, never "empty": the client would otherwise save [] over the real data.
+    if (!parsed || !Array.isArray(parsed.groups)) return { status: 'error', message: 'CCGroups JSON unreadable' };
+    return { status: 'ok', exists: true, groups: parsed.groups };
+  }
+
+  async function handleCCGroups(data) {
+    if (data.action !== 'saveAll') return { status: 'error', message: 'Unknown action' };
+    if (!Array.isArray(data.groups)) return { status: 'error', message: 'groups must be an array' };
+    const json = JSON.stringify({ v: 1, groups: data.groups });
+    if (json.length > CC_GROUPS_CELL_MAX) return { status: 'error', message: 'CC groups too large' };
+    if (!(await ccGroupsSheetExists())) {
+      await SheetsClient.batchUpdate(spreadsheetId, [{ addSheet: { properties: { title: CC_GROUPS_SHEET } } }]);
+    }
+    await SheetsClient.updateValues(spreadsheetId, `${CC_GROUPS_SHEET}!A1:B2`, [
+      ['key', 'json'], ['groups', json],
+    ], 'RAW');
+    return { status: 'ok' };
+  }
+
   // ── REQUEST ROUTER (mirrors the old doGet/doPost dispatch) ───
   async function handleRequest(urlStr, opts) {
     await requireReady();
@@ -1470,6 +1507,7 @@ const DataStore = (() => {
       if (type === 'recurring') return handleGetRecurring();
       if (type === 'config') return handleGetConfig();
       if (type === 'emailimport') return handleGetEmailImport();
+      if (type === 'ccgroups') return handleGetCCGroups();
       return { status: 'error', message: 'Unknown type' };
     }
 
@@ -1481,6 +1519,7 @@ const DataStore = (() => {
     if (data.type === 'config') return handleConfig(data);
     if (data.type === 'transfer') return handleTransfer(data);
     if (data.type === 'emailimport') return handleEmailImport(data);
+    if (data.type === 'ccgroups') return handleCCGroups(data);
     return { status: 'error', message: 'Unknown type' };
   }
 

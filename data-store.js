@@ -1304,7 +1304,7 @@ const DataStore = (() => {
       await SheetsClient.batchUpdate(spreadsheetId, [{ addSheet: { properties: { title: CONFIG_SHEET } } }]);
     } else {
       const colCount = configSheet.properties.gridProperties?.columnCount || 0;
-      if (colCount < 11) {
+      if (colCount < 14) {
         await SheetsClient.batchUpdate(spreadsheetId, [{
           updateSheetProperties: {
             properties: {

@@ -506,6 +506,20 @@ t('BAD_LABEL: fee match is word-bounded so Coffee is not penalized', () => {
   assert.equal(rFee.amountLabel, 'Item');
 });
 
+t('BAD_LABEL: plural and punctuation-joined fee variants are penalized too', () => {
+  // Each of these was NOT penalized by the previous /\bfee\b/ pattern, so the fee
+  // line (later, equal score) used to win the amount pick.
+  for (const label of ['Service fees', 'service_fee', 'Handling-fees']) {
+    const r = EmailParser.parseGeneric(`Item: Rp 40.000\n${label}: Rp 10.000`, '2026-10-20', { from: 'cafe@shop.com' });
+    assert.equal(r.amountLabel, 'Item', `${label} should be penalized by BAD_LABEL`);
+  }
+  // Words that merely contain "fee" stay unpenalized.
+  for (const label of ['Toffee', 'Feeding']) {
+    const r = EmailParser.parseGeneric(`Item: Rp 40.000\n${label}: Rp 50.000`, '2026-10-20', { from: 'cafe@shop.com' });
+    assert.equal(r.amountLabel, label, `${label} should not be penalized`);
+  }
+});
+
 t('parseDate: invalid dates like 31 Feb or 31 Apr are rejected', () => {
   assert.equal(EmailParser.parseDate('31 Feb 2026'), '');
   assert.equal(EmailParser.parseDate('31/02/2026'), '');

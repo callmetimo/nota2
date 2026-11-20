@@ -326,7 +326,7 @@ const EmailParser = (() => {
     [/\btotal\b|sejumlah|nominal|jumlah transaksi|transaction amount/i, 6],
     [/bayar|paid|pembayaran|tagihan|amount|charged/i, 3],
   ];
-  const BAD_LABEL = /sub ?total|diskon|discount|promo|ongkir|biaya|\bfee\b|pajak|tax|ppn|saldo|balance|cashback|potongan|voucher|kembalian|\btip\b|harga dasar|base fare/i;
+  const BAD_LABEL = /sub ?total|diskon|discount|promo|ongkir|biaya|(?:^|[^a-z])fees?(?![a-z])|pajak|tax|ppn|saldo|balance|cashback|potongan|voucher|kembalian|\btip\b|harga dasar|base fare/i;
   const AMOUNT_RE = /(?:Rp\.?|IDR)\s*(\d[\d.,]*)/gi;
   const MERCHANT_LABELS = ['Merchant', 'Merchant Name', 'Nama Merchant', 'Nama Toko', 'Restoran', 'Restaurant', 'Toko', 'Store', 'Penjual',
     'Hotel Name', 'Dibayar ke', 'Paid to', 'Payment to', 'Pembayaran ke'];

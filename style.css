@@ -686,3 +686,6 @@ html.wide .modal-handle{display:none}
 .ccu-nav button{background:var(--bg3);border:0.5px solid var(--border);color:var(--text);border-radius:6px;width:26px;height:26px;cursor:pointer}
 .ccu-nav button:disabled{opacity:0.35;cursor:default}
 html.wide .ccu-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.ccu-series-actions{display:flex;gap:16px;margin-top:8px}
+.ccu-closed{margin-top:8px;font-size:12px;color:var(--text2)}
+.ccu-closed summary{cursor:pointer;padding:4px 0}

@@ -148,10 +148,10 @@
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group">
-          <label class="form-label">Amount</label>
+          <label class="form-label" id="inputAmountLabel">Amount</label>
           <div class="amount-wrapper">
             <span class="amount-prefix" id="opexAmountPrefix">Rp</span>
-            <input type="text" class="form-input amount-input" id="inputAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event); updateOpexFxHint()">
+            <input type="text" class="form-input amount-input" id="inputAmount" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event); updateOpexFxHint(); updateInstallmentPreview()">
           </div>
         </div>
         <div class="form-group autocomplete-wrapper">
@@ -170,9 +170,10 @@
         </div>
         <div id="installmentPeriodContainer" style="display:none;align-items:center;gap:8px">
           <span style="color:var(--text2);font-size:13px">Period:</span>
-          <input type="number" class="form-input" id="inputInstallmentMonths" min="2" placeholder="X" style="width:70px">
+          <input type="number" class="form-input" id="inputInstallmentMonths" min="2" placeholder="X" style="width:70px" oninput="updateInstallmentPreview()">
           <span style="color:var(--text2);font-size:13px">months</span>
         </div>
+        <div id="installmentPreview" class="s-sub"></div>
       </div>
       <div class="form-group">
         <label class="form-label">Notes</label>

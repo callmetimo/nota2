@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.127';
+const APP_VERSION = 'v4.128';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -765,6 +765,23 @@ function setInstallmentMode(mode) {
     instBtn.classList.remove('active', 'expense');
     container.style.display = 'none';
   }
+  // In installment mode the amount typed is the whole purchase; the monthly share is derived from it.
+  const amtLabel = document.getElementById('inputAmountLabel');
+  if (amtLabel) amtLabel.textContent = mode === 'installment' ? 'Total purchase (principal)' : 'Amount';
+  updateInstallmentPreview();
+}
+
+// "3× Rp333.333 · last Rp333.334": the rounding difference lands on the final installment so the parts add up to the principal.
+function updateInstallmentPreview() {
+  const el = document.getElementById('installmentPreview');
+  if (!el) return;
+  const isInst = document.getElementById('ccInstallmentBtn').classList.contains('active');
+  const n = parseInt(document.getElementById('inputInstallmentMonths').value) || 0;
+  const pm = document.getElementById('inputPm').value.trim();
+  const p = isInst && pm ? toNativeIdr(pm, parseGroupedAmt('inputAmount')).amount : 0;
+  if (!(p > 0 && n >= 2)) { el.textContent = ''; return; }
+  const m = Math.round(p / n);
+  el.textContent = `${n}× ${fRp(m)} · last ${fRp(p - m * (n - 1))}`;
 }
 
 function dateToMonthKey(dateStr) {
@@ -1265,6 +1282,19 @@ function openInputOverlay() {
   }, 360);
 }
 
+// Opens the add-transaction sheet with fields filled in (CC Usage "Record next").
+function openInputOverlayPrefilled(p) {
+  openInputOverlay();
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+  set('inputTx', p.tx); set('inputCat', p.cat); set('inputPm', p.pm); set('inputNotes', p.notes);
+  set('inputAmount', p.amount ? formatGroupedAmt(p.amount) : '');
+  const t = todayISO();
+  set('inputDateRaw', t);
+  document.getElementById('inputDateText').textContent = isoDisp(t);
+  checkCcInstallmentVisibility();
+  onOpexPmSelect();
+}
+
 function closeInputOverlay() {
   const ov = document.getElementById('inputOverlay');
   if (ov) {
@@ -1491,14 +1521,20 @@ async function submitOpex() {
   let finalAmount = amount;
   let finalNativeAmount = nativeAmount;
   let finalTx = tx;
+  let finalNotes = notes;
   if (isInstallment) {
     finalAmount = Math.round(amount / installmentMonths);
     if (finalNativeAmount) finalNativeAmount = Math.round((finalNativeAmount / installmentMonths) * 100) / 100;
-    finalTx = `${tx} (1/${installmentMonths})`;
+    // Installments are tracked in CC Usage from the "CICILAN KE X DARI Y" rows, not from a recurring rule.
+    finalTx = `${tx} CICILAN KE 1 DARI ${installmentMonths}`;
+    // The principal tag lets CC Usage compute the exact final installment. Notes are capped at 200,
+    // so cut the user's part, never the tag.
+    const tag = `[pokok:${Math.round(amount)}]`;
+    finalNotes = `${notes.slice(0, 200 - tag.length - 1)} ${tag}`.trim();
   }
 
   const isFuture = date > todayISO();
-  const r = {id:Date.now(),date,tx:finalTx,amount:finalAmount,category:cat,pm,notes,type:inputMode,synced:false,future:isFuture,nativeAmount:finalNativeAmount,ccy};
+  const r = {id:Date.now(),date,tx:finalTx,amount:finalAmount,category:cat,pm,notes:finalNotes,type:inputMode,synced:false,future:isFuture,nativeAmount:finalNativeAmount,ccy};
   txHistory.unshift(r);
   queue.push({...r, action:inputMode});
   saveLocal();updateStatus();
@@ -1530,30 +1566,7 @@ async function submitOpex() {
     else showToast(navigator.onLine ? 'Save failed' : 'Saved offline — will sync ✓', '');
   });
   // Save recurring rule if toggle is ON
-  if (isInstallment) {
-    const endMonthVal = getEndMonth(date, installmentMonths);
-    const rules = loadRecurring();
-    rules.push({
-      id: Date.now() + 1,
-      type: 'expense',
-      tx: `${tx} (Installment)`,
-      cat,
-      amount: finalAmount,
-      pm,
-      notes: notes || '',
-      dayOfMonth: parseInt(date.split('-')[2]) || new Date().getDate(),
-      active: true,
-      lastFired: dateToMonthKey(date),
-      endMonth: endMonthVal,
-      installmentTotal: installmentMonths,
-      installmentStart: dateToMonthKey(date),
-      frequency: 'monthly',
-      interval: 1,
-      monthOfYear: parseInt(date.split('-')[1]) || 1,
-      startDate: date
-    });
-    saveRecurring(rules);
-  } else if (document.getElementById('inputRecurring').checked) {
+  if (!isInstallment && document.getElementById('inputRecurring').checked) {
     const sched = _readRecurringSchedule('inputRecurringFreq', 'inputRecurringInterval', 'inputRecurringStart', date);
     if (sched) {
       const endMonth = _getEndMonthValue('inputRecurringEndMonth', 'inputRecurringEndYear');

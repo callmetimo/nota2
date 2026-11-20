@@ -235,17 +235,60 @@ function ccBarHTML(u) {
     ${u.overLimit ? `<div class="ccu-limit-mark" style="left:${pct(u.activeLimit)}"></div>` : ''}</div>`;
 }
 
+let ccLastSeries = [];
+
 function ccSeriesHTML(series) {
   const live = series.filter(s => !s.closed && s.xMax < s.y);
-  if (!live.length) return '';
+  const closed = series.filter(s => s.closed && s.xMax < s.y);
+  if (!live.length && !closed.length) return '';
+  const key = s => escJsAttr(s.key);
   return `<div class="chart-card"><div class="chart-card-title">Cicilan Aktif (${live.length})</div>${live.map(s => `
     <div class="ccu-series">
       <div class="ccu-series-t">${esc(s.name)} · KE ${s.xMax}/${s.y} · ${fRp(s.amount)}/bln</div>
       <div class="ccu-muted">Sisa ${fRp(s.remaining)} · berikutnya KE ${s.nextX} ≈ ${fRp(s.nextAmount)}</div>
       ${s.stale ? `<span class="ccu-flag">Belum dicatat sejak ${esc(ccShortDate(s.lastDate))}</span>` : ''}
       ${s.ambiguous ? '<span class="ccu-flag">Nama ganda</span>' : ''}
-    </div>`).join('')}</div>`;
+      <div class="ccu-series-actions">
+        <button class="ccu-link" onclick="ccUsageRecordNext('${key(s)}')">Record next</button>
+        <button class="ccu-link" onclick="ccUsageMarkPaidOff('${key(s)}')">Mark paid off</button>
+      </div>
+    </div>`).join('')}
+    ${closed.length ? `<details class="ccu-closed"><summary>Lunas lebih awal (${closed.length})</summary>${closed.map(s => `
+      <div class="ccu-series"><div class="ccu-series-t">${esc(s.name)} · KE ${s.xMax}/${s.y}</div>
+        <div class="ccu-series-actions"><button class="ccu-link" onclick="ccUsageRestoreSeries('${key(s)}')">Restore</button></div></div>`).join('')}</details>` : ''}
+  </div>`;
 }
+
+// Opens the add-transaction sheet for the next installment of a series (name, card and category carried over).
+function ccUsageRecordNext(key) {
+  const s = ccLastSeries.find(x => x.key === key);
+  if (!s) return;
+  const label = `CICILAN KE ${s.nextX} DARI ${s.y}`;
+  openInputOverlayPrefilled({
+    tx: s.name === 'CICILAN' ? label : `${s.name} ${label}`,
+    amount: s.nextAmount, cat: s.cat, pm: s.pm,
+    notes: s.principal ? `[pokok:${s.principal}]` : ''
+  });
+}
+
+async function ccUsageSetSeriesClosed(key, closed) {
+  const g = ccSelectedGroup();
+  if (!g) return;
+  const ok = await mutateCCGroups(groups => groups.map(x => (x.id !== g.id ? x : {
+    ...x, closedSeries: closed ? [...new Set([...x.closedSeries, key])] : x.closedSeries.filter(k => k !== key)
+  })));
+  if (!ok) return;
+  renderCCUsage();
+  showToast(closed ? 'Marked as paid off' : 'Restored', 'success');
+}
+
+function ccUsageMarkPaidOff(key) {
+  const s = ccLastSeries.find(x => x.key === key);
+  if (!s || !confirm(`Mark "${s.name}" as paid off? Its remaining ${fRp(s.remaining)} is released from your limit.`)) return;
+  ccUsageSetSeriesClosed(key, true);
+}
+
+function ccUsageRestoreSeries(key) { ccUsageSetSeriesClosed(key, false); }
 
 function renderCCUsage() {
   const box = document.getElementById('ccUsageContainer');
@@ -275,6 +318,7 @@ function renderCCUsage() {
   const pmSet = new Set(g.pms.map(ccLc));
   const rows = collectCCRows(pmSet);
   const u = CCUsageCore.computeCCUsage(g, rows, todayISO(), bdByPm);
+  ccLastSeries = u.series;
 
   const selector = CC_GROUPS.length > 1
     ? `<div class="pill-toggle">${CC_GROUPS.map(x =>

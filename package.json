@@ -7,6 +7,6 @@
     "dev": "python3 serve.py",
     "start": "python3 serve.py",
     "build": "echo 'No build step needed'",
-    "test": "node tests/email-parser.test.mjs && node tests/email-import.test.mjs"
+    "test": "node tests/email-parser.test.mjs && node tests/email-import.test.mjs && node tests/cc-usage.test.mjs"
   }
 }

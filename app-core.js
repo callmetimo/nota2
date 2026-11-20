@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.125';
+const APP_VERSION = 'v4.126';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -1141,6 +1141,7 @@ function pnlDual(pnl, pnlPct, rate, color){
 function switchTab(tab, el) {
   closeInputOverlay();
   closeGoalsOverlay();
+  if (typeof closeCCGroupOverlay === 'function') closeCCGroupOverlay();
   closeConfigItemOverlay();
   closeSetBalanceOverlay();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -1186,6 +1187,7 @@ function switchTab(tab, el) {
     if(!histLoaded) onHistLoaded(()=>initNetWorth());
     else initNetWorth();
   }
+  if(tab==='ccusage' && typeof renderCCUsage==='function'){ renderCCUsage(); fetchCCGroups().then(renderCCUsage); }
   if(tab==='goals'){
     fetchFxRates();
     const _loadGoals = () => Promise.all([
@@ -1299,6 +1301,7 @@ function closeInputOverlay() {
 // stuck forever even after a successful sign-in.
 attachSwipeClose('inputSheetHandle', closeInputOverlay);
 attachSwipeClose('goalsSheetHandle', () => closeGoalsOverlay());
+attachSwipeClose('ccGroupSheetHandle', () => closeCCGroupOverlay());
 attachSwipeClose('configItemSheetHandle', () => closeConfigItemOverlay());
 
 function openInputFromHome() {

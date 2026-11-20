@@ -4,6 +4,7 @@
   --text:#f0f0f0;--text2:#8e8e93;--text3:#636366;
   --accent:#c8f060;--accent-dim:rgba(200,240,96,0.12);
   --red:#ff6b6b;--red-dim:rgba(255,107,107,0.11);
+  --orange:#ffa500;--purple:#a78bfa;
   --blue:#60a0f0;--blue-dim:rgba(96,160,240,0.11);
   --green:#4ade80;--green-dim:rgba(74,222,128,0.11);
   --radius:14px;--radius-sm:8px;
@@ -80,7 +81,7 @@ body{font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;background:
 .page{display:none;padding:0 20px}
 .page.active{display:block}
 /* Non-home pages need their own scroll since body is overflow:hidden */
-#page-insights.active,#page-networth.active,#page-goals.active,#page-recurring.active,#page-profile.active,#page-settings.active,#page-account.active,#page-emailimport.active{
+#page-insights.active,#page-networth.active,#page-ccusage.active,#page-goals.active,#page-recurring.active,#page-profile.active,#page-settings.active,#page-account.active,#page-emailimport.active{
   display:block;
   height:calc(var(--app-vh,100dvh) - var(--header-height,80px) - var(--bottom-nav-h,56px));
   overflow-y:auto;
@@ -561,7 +562,7 @@ html.wide .cal-month-collapsed .cal-month-name{font-size:17px;min-width:130px}ht
 html.wide .cal-tx-panel{grid-column:3;grid-row:2;flex:none;border-top:none}
 
 /* Other pages: readable width, centred in the available space */
-html.wide #page-insights.active,html.wide #page-networth.active,html.wide #page-goals.active,html.wide #page-recurring.active,html.wide #page-profile.active,html.wide #page-settings.active,html.wide #page-account.active,html.wide #page-emailimport.active{
+html.wide #page-insights.active,html.wide #page-networth.active,html.wide #page-ccusage.active,html.wide #page-goals.active,html.wide #page-recurring.active,html.wide #page-profile.active,html.wide #page-settings.active,html.wide #page-account.active,html.wide #page-emailimport.active{
   padding-left:max(28px,calc((100% - 1120px)/2));padding-right:max(28px,calc((100% - 1120px)/2))}
 html.wide #page-account.active{padding-left:max(28px,calc((100% - 560px)/2));padding-right:max(28px,calc((100% - 560px)/2))}
 html.wide #page-search #searchResults,html.wide #page-search #searchMonitorContainer,html.wide #page-search .search-page-header,html.wide #page-search #searchResultsCount{padding-left:max(28px,calc((100% - 900px)/2));padding-right:max(28px,calc((100% - 900px)/2))}
@@ -653,3 +654,13 @@ html.wide .input-sheet-handle-wrap{display:none}
 html.wide .modal-overlay{align-items:center;justify-content:center}
 html.wide .modal{width:min(520px,calc(100% - 32px));border-radius:20px;border:0.5px solid var(--border2)}
 html.wide .modal-handle{display:none}
+
+/* CC Usage page */
+.ccu-actions{display:flex;justify-content:flex-end;gap:16px;margin-bottom:10px}
+.ccu-link{background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:0}
+.ccu-muted{font-size:12px;color:var(--text2)}
+.ccu-limit{font-size:26px;font-weight:700;letter-spacing:-0.4px;margin:2px 0 4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ccu-badge-temp{font-size:11px;font-weight:600;padding:3px 8px;border-radius:10px;background:var(--accent-dim);color:var(--accent)}
+.ccu-card-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.ccu-chip{font-size:12px;padding:4px 10px;border-radius:12px;background:var(--bg3);border:0.5px solid var(--border);color:var(--text2)}
+.ccu-warn{font-size:12px;color:var(--red);margin-top:10px}

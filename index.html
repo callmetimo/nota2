@@ -478,6 +478,20 @@
   <div id="goalsListContainer"><div class="chart-loading">Loading…</div></div>
 </div>
 
+<!-- CC USAGE PAGE -->
+<div class="page" id="page-ccusage">
+  <div style="padding:24px 0 0">
+    <button class="profile-back-btn" onclick="switchTab('profile', document.getElementById('nav-more'))">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="15 18 9 12 15 6"/></svg>
+      Profile
+    </button>
+  </div>
+  <div style="padding:0 0 14px;display:flex;align-items:center;justify-content:space-between">
+    <div style="font-size:28px;font-weight:700;letter-spacing:-0.5px">CC Usage</div>
+  </div>
+  <div id="ccUsageContainer"><div class="chart-loading">Loading…</div></div>
+</div>
+
 <!-- PROFILE HUB -->
 <div class="page" id="page-profile">
   <div style="padding:24px 0 14px;display:flex;align-items:center;justify-content:space-between">
@@ -487,6 +501,11 @@
     <button class="more-menu-item" onclick="switchTabFromMore('networth')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
       <span>Net Worth</span>
+    </button>
+    <div class="more-menu-divider"></div>
+    <button class="more-menu-item" onclick="switchTabFromMore('ccusage')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+      <span>CC Usage</span>
     </button>
     <div class="more-menu-divider"></div>
     <button class="more-menu-item" onclick="switchTabFromMore('goals')">
@@ -731,6 +750,7 @@
   </button>
   <div class="side-subs" id="sideSubs">
     <button class="side-sub" data-tab="networth" onclick="switchTabFromMore('networth')">Net Worth</button>
+    <button class="side-sub" data-tab="ccusage" onclick="switchTabFromMore('ccusage')">CC Usage</button>
     <button class="side-sub" data-tab="goals" onclick="switchTabFromMore('goals')">Financial Goals</button>
     <button class="side-sub" data-tab="recurring" onclick="switchTabFromMore('recurring')">Recurring</button>
     <button class="side-sub" data-tab="emailimport" onclick="switchTabFromMore('emailimport')">Email Import</button>
@@ -1126,6 +1146,69 @@
   </div>
 </div>
 
+<!-- CC GROUP OVERLAY -->
+<div class="input-overlay" id="ccGroupOverlay" onclick="closeCCGroupOverlay()">
+  <div class="input-sheet" onclick="event.stopPropagation()">
+    <div class="input-sheet-handle-wrap" id="ccGroupSheetHandle"><div class="input-sheet-handle"></div></div>
+    <div style="padding:0 20px 20px">
+      <div style="font-size:20px;font-weight:700;letter-spacing:-0.3px;margin-bottom:18px" id="ccgTitle">New CC group</div>
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-input" id="ccgName" maxlength="40" placeholder="e.g. BCA">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Cards in this group (share one limit)</label>
+        <div class="goal-source-list" id="ccgCards"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Permanent limit</label>
+        <div class="amount-wrapper">
+          <span class="amount-prefix">Rp</span>
+          <input type="text" class="form-input amount-input" id="ccgPermLimit" placeholder="0" inputmode="decimal" oninput="this.dataset.auto='0';formatAmountInput(this, event)">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Temporary limit (optional)</label>
+        <div class="amount-wrapper">
+          <span class="amount-prefix">Rp</span>
+          <input type="text" class="form-input amount-input" id="ccgTempLimit" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Temporary limit until <button type="button" class="ccu-link" onclick="ccgSetDate('ccgTempExpiry','')">Clear</button></label>
+        <label class="date-display" for="ccgTempExpiryRaw">
+          <span id="ccgTempExpiryText">Select date</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </label>
+        <input type="date" class="date-input-hidden" id="ccgTempExpiryRaw" onchange="ccgSetDate('ccgTempExpiry', this.value)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Opening balance (optional): from your last statement or the BCA app</label>
+        <div class="ccu-muted" style="margin-bottom:6px">As of</div>
+        <label class="date-display" for="ccgAnchorDateRaw">
+          <span id="ccgAnchorDateText">Select date</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </label>
+        <input type="date" class="date-input-hidden" id="ccgAnchorDateRaw" onchange="ccgSetDate('ccgAnchorDate', this.value)">
+        <div class="ccu-muted" style="margin:8px 0 6px">Outstanding <button type="button" class="ccu-link" onclick="ccgSetDate('ccgAnchorDate','');document.getElementById('ccgAnchorAmt').value=''">Clear both</button></div>
+        <div class="amount-wrapper">
+          <span class="amount-prefix">Rp</span>
+          <input type="text" class="form-input amount-input" id="ccgAnchorAmt" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Pending holds (Otorisasi Menggantung)</label>
+        <div class="amount-wrapper">
+          <span class="amount-prefix">Rp</span>
+          <input type="text" class="form-input amount-input" id="ccgPending" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
+        </div>
+      </div>
+      <button class="submit-btn expense" onclick="saveCCGroup()" style="margin-top:14px">Save</button>
+      <button class="delete-btn" id="ccgDeleteBtn" onclick="deleteCCGroup()" style="display:none">Delete group</button>
+    </div>
+  </div>
+</div>
+
 <style>
 #notaAuthOverlay{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;
   background:var(--bg,#0f1115);padding:24px}
@@ -1339,7 +1422,7 @@
 // re-wrapping the real switchTab (app-core.js) after the fact. Folded directly into the
 // end of switchTab itself instead (guarded by typeof, since this script runs after
 // app-core.js but switchTab could in principle be reached before this tag executes).
-var SIDE_NAV_SUBS=['networth','goals','recurring','emailimport','settings','account'];
+var SIDE_NAV_SUBS=['networth','ccusage','goals','recurring','emailimport','settings','account'];
 function syncSideNav(tab){
   document.querySelectorAll('.side-sub').forEach(function(b){b.classList.toggle('on',b.dataset.tab===tab)});
   var more=document.getElementById('nav-more');

@@ -304,11 +304,16 @@ function _updateIntervalUnit(freqId, intId, unitId) {
   document.getElementById(unitId).textContent = n === 1 ? units[0] : units[1];
 }
 
+// Old installment rules (installmentTotal > 0) stay in the sheet untouched but no longer generate anything:
+// installments are tracked from the recorded "CICILAN KE X DARI Y" rows in CC Usage. Reverting this
+// commit brings them back exactly as they were.
+function isLegacyInstallmentRule(r) { return Number(r.installmentTotal) > 0; }
+
 function getRecurringDue() {
   const today = todayISO();
   const due = [];
   loadRecurring().forEach(r => {
-    if (!r.active) return;
+    if (!r.active || isLegacyInstallmentRule(r)) return;
     const fired = _firedThrough(r);
     // Every occurrence on or before today that hasn't been handled yet — a backlog is offered
     // in full (one entry per missed occurrence), each carrying its own date as `_date`.
@@ -324,7 +329,7 @@ function getRecurringProjections(year, month) {
   const from = _isoOf(year, month, 1), to = _isoOf(year, month, _lastDayOf(year, month));
   const out = [];
   loadRecurring().forEach(r => {
-    if (!r.active) return;
+    if (!r.active || isLegacyInstallmentRule(r)) return;
     const fired = _firedThrough(r);
     _ruleOccurrences(r, from, to).forEach(date => {
       if (date <= fired) return;
@@ -333,7 +338,7 @@ function getRecurringProjections(year, month) {
         id: `proj_${r.id}_${date}`,
         ruleId: r.id,
         date,
-        tx: getInstallmentName(r, date.slice(0, 7)),
+        tx: r.tx,
         amount: r.amount,
         category: r.cat,
         pm: r.pm,
@@ -456,7 +461,7 @@ function _renderRecurringPrompt() {
     <label class="recurring-prompt-item">
       <input class="recurring-prompt-check" type="checkbox" data-ridx="${i}" checked onchange="_updateRecurringPromptBtn()">
       <div class="recurring-prompt-info">
-        <div class="recurring-prompt-tx">${esc(getInstallmentName(r, r._date.slice(0, 7)))}</div>
+        <div class="recurring-prompt-tx">${esc(r.tx)}</div>
         <div class="recurring-prompt-meta">${esc(r.cat)} · ${esc(r.pm)} · ${esc(isoDisp(r._date))}</div>
       </div>
       <div class="recurring-prompt-amt ${r.type === 'income' ? 'income' : ''}" style="color:${r.type==='income'?'var(--green)':'var(--text)'}">${r.type === 'income' ? '+' : '-'}${fRp(r.amount)}</div>
@@ -473,8 +478,7 @@ function _updateRecurringPromptBtn() {
 // the local optimistic transaction and pushes it to the sheet the same way submitOpex() does.
 function _addAndSyncRecurringRule(r) {
   const today = r._date || todayISO();  // the occurrence's own date (a backlog item may be older)
-  const txName = getInstallmentName(r, today.slice(0, 7));
-  const rec = { id: Date.now() + Math.random(), date: today, tx: txName, amount: r.amount,
+  const rec = { id: Date.now() + Math.random(), date: today, tx: r.tx, amount: r.amount,
     category: r.cat, pm: r.pm, notes: r.notes || '', type: r.type, synced: false };
   txHistory.unshift(rec);
   queue.push({...rec, action: r.type});
@@ -640,10 +644,15 @@ function dismissRecurringPrompt() {
 // ── RECURRING LIST PAGE ───────────────────────────────────────────────────────
 
 function renderRecurringList() {
-  const rules = loadRecurring();
+  const all = loadRecurring();
+  const rules = all.filter(r => !isLegacyInstallmentRule(r));
+  const hidden = all.length - rules.length;
+  const hiddenNote = hidden
+    ? `<p style="color:var(--text2);text-align:center;padding:12px 0;font-size:12px">${hidden} old installment rule${hidden > 1 ? 's' : ''} hidden — installments are now tracked in CC Usage.</p>`
+    : '';
   const container = document.getElementById('recurringListContainer');
   if (!rules.length) {
-    container.innerHTML = '<p style="color:var(--text2);text-align:center;padding:48px 0 24px;font-size:14px">No recurring transactions yet.<br>' + notaTap(1) + ' + to add one.</p>';
+    container.innerHTML = '<p style="color:var(--text2);text-align:center;padding:48px 0 24px;font-size:14px">No recurring transactions yet.<br>' + notaTap(1) + ' + to add one.</p>' + hiddenNote;
     return;
   }
   const expenses = rules.filter(r => r.type === 'expense');
@@ -657,7 +666,7 @@ function renderRecurringList() {
     html += `<div class="recurring-section-label">Income</div>`;
     html += income.map(r => _recurringCard(r)).join('');
   }
-  container.innerHTML = html;
+  container.innerHTML = html + hiddenNote;
 }
 
 function _recurringCard(r) {

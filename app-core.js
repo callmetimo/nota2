@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.128';
+const APP_VERSION = 'v4.129';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -782,39 +782,6 @@ function updateInstallmentPreview() {
   if (!(p > 0 && n >= 2)) { el.textContent = ''; return; }
   const m = Math.round(p / n);
   el.textContent = `${n}× ${fRp(m)} · last ${fRp(p - m * (n - 1))}`;
-}
-
-function dateToMonthKey(dateStr) {
-  if (!dateStr) return curMonthKey();
-  const parts = dateStr.split('-');
-  return `${parts[0]}-${parts[1]}`;
-}
-
-function getEndMonth(dateStr, months) {
-  const parts = dateStr.split('-');
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  
-  let targetM = m + months - 1;
-  let targetY = y;
-  while (targetM > 12) {
-    targetM -= 12;
-    targetY += 1;
-  }
-  return `${targetY}-${String(targetM).padStart(2, '0')}`;
-}
-
-function getInstallmentName(rule, monthKey) {
-  if (!rule.installmentTotal || !rule.installmentStart) return rule.tx;
-  const [startY, startM] = rule.installmentStart.split('-').map(Number);
-  const [curY, curM] = monthKey.split('-').map(Number);
-  const monthsDiff = (curY - startY) * 12 + (curM - startM);
-  const curIndex = monthsDiff + 1;
-  if (curIndex <= rule.installmentTotal) {
-    const cleanName = rule.tx.replace(/\s*\(Installment\)$/i, '');
-    return `${cleanName} (${curIndex}/${rule.installmentTotal})`;
-  }
-  return rule.tx;
 }
 
 // ── TX SMART SUGGESTIONS ──────────────────────────────────────

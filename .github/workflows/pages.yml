@@ -66,6 +66,7 @@ jobs:
           '
           node tests/email-parser.test.mjs
           node tests/email-import.test.mjs
+          node tests/cc-usage.test.mjs
 
       # tests/ is dev-only (e2e seed page and fetch stubs) and `path: "."` would otherwise
       # publish it on the live site. Runs after the checks above so they still see it.

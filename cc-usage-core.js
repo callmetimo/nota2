@@ -12,6 +12,7 @@ const CCUsageCore = (() => {
   const iso = (y, m0, d) => y + '-' + pad(m0 + 1) + '-' + pad(d);
   const parts = s => [+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)];
   const lc = s => String(s || '').toLowerCase();
+  const dayNum = s => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 86400000;
 
   function dim(y, m0) {
     if (m0 === 1) return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28;
@@ -76,10 +77,21 @@ const CCUsageCore = (() => {
       const p = parseInstallment(r.tx);
       if (p) {
         const same = inst.filter(s => s.name === p.normName && s.y === p.y);
-        const next = same.filter(s => s.xMax === p.x - 1);
+        // The same instalment entered twice within a few days is one instalment recorded twice (a real
+        // double charge still shows up in the cycle's spending, but it must not start a second series).
+        const twin = same.find(s => s.rows.some((q, i) => s.xs[i] === p.x && q.amount === r.amount && Math.abs(dayNum(q.date) - dayNum(r.date)) <= 3));
+        if (twin) { place(twin, r, p.x); return; }
+        const free = same.filter(s => !s.xs.includes(p.x));
+        const next = free.filter(s => s.xMax === p.x - 1);
         // Earlier numbers that were never recorded: attach to a series that is behind this number.
-        const behind = p.x > 1 ? same.filter(s => s.xMax > 0 && s.xMax < p.x - 1) : [];
-        const target = pick(next.length ? next : behind, r);
+        const behind = p.x > 1 ? free.filter(s => s.xMax > 0 && s.xMax < p.x - 1) : [];
+        // A number below the highest recorded one (same-day order, a late entry): join the series it fits,
+        // judged by the monthly amount (the last instalment may differ by rounding, at most Y).
+        const fill = free.filter(s => s.xMax > p.x && s.rows.some(q => Math.abs(q.amount - r.amount) <= s.y));
+        let pool = next;
+        if (!pool.length) pool = behind;
+        if (!pool.length) pool = fill;
+        const target = pick(pool, r);
         if (target) { place(target, r, p.x); return; }
         const fresh = { name: p.normName, y: p.y, rows: [], xs: [], xMax: 0, last: null };
         inst.push(fresh);
@@ -104,11 +116,11 @@ const CCUsageCore = (() => {
       const isClosed = closed.includes(key);
       let remaining;
       if (s.xMax >= s.y || isClosed) remaining = 0;
-      else if (P) remaining = P - m * s.xMax;
+      else if (P) remaining = Math.max(0, P - m * s.xMax);
       else remaining = a * (s.y - s.xMax);
       const nextX = s.xMax + 1;
       let nextAmount = P ? m : a;
-      if (P && nextX === s.y) nextAmount = P - m * (s.y - 1);
+      if (P && nextX === s.y) nextAmount = Math.max(0, P - m * (s.y - 1));
       const lastBd = bdOf(bdByPm, lastRow.pm);
       const prevStart = cycleRange(curIdxOf(today, lastBd) - 1, lastBd).start;
       return {
@@ -125,7 +137,7 @@ const CCUsageCore = (() => {
     const tempOk = group.tempLimit > 0 && !!group.tempLimitExpiry;
     const tempActive = tempOk && today <= group.tempLimitExpiry;
     const tempExpired = tempOk && today > group.tempLimitExpiry;
-    const activeLimit = tempActive ? group.tempLimit : group.permanentLimit;
+    const activeLimit = tempActive ? group.tempLimit : (+group.permanentLimit || 0);
 
     const pmSet = new Set((group.pms || []).map(lc));
     const rows = allRows.filter(r => pmSet.has(lc(r.pm)) && r.date <= today);

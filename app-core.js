@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.134';
+const APP_VERSION = 'v4.135';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -1465,9 +1465,10 @@ async function submitOpex() {
   const isInstallment = document.getElementById('ccInstallmentBtn').classList.contains('active');
   const installmentMonths = parseInt(document.getElementById('inputInstallmentMonths').value) || 0;
   if (isInstallment) {
-    if (installmentMonths < 2) {
+    // CC Usage only reads series of up to 60 instalments, so a longer one would silently vanish from the limit.
+    if (installmentMonths < 2 || installmentMonths > 60) {
       isSyncing = false;
-      showToast('Installment period must be at least 2 months', 'error');
+      showToast('Installment period must be between 2 and 60 months', 'error');
       return;
     }
   }
@@ -1550,6 +1551,7 @@ function resetOpexForm() {
   document.getElementById('inputCat').value='';
   document.getElementById('inputPm').value='';
   document.getElementById('inputNotes').value='';
+  const monthsEl=document.getElementById('inputInstallmentMonths');if(monthsEl)monthsEl.value='';
   resetRecurringToggle();
   checkCcInstallmentVisibility();
   onOpexPmSelect();
@@ -1653,6 +1655,7 @@ async function deleteTransfer(txId) {
   saveLocal();
   buildAccountBalances();
   renderAccountBalanceCards();
+  if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
 
   // Never reached the server — nothing to delete there, and the queue entry above
   // is already gone so it won't resurrect on the next retry.
@@ -1737,6 +1740,7 @@ async function updateTransferTransaction() {
     calInited = false; initCalendar();
     buildAccountBalances();
     renderAccountBalanceCards();
+    if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
     showToast('Updated ✓', 'success');
     return;
   }
@@ -1751,6 +1755,7 @@ async function updateTransferTransaction() {
   calInited = false; initCalendar();
   buildAccountBalances();
   renderAccountBalanceCards();
+  if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
 
   try {
     const payload = {

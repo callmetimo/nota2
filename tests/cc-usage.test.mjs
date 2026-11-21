@@ -114,11 +114,11 @@ t('duplicate X flags ambiguous; closedSeries zeroes remaining', () => {
   const g = { pms: ['CC'], permanentLimit: 1 };
   const rows = [
     row('2026-10-01', 'CC', 'charge', 'TV CICILAN KE 1 DARI 4', 100),
-    row('2026-10-02', 'CC', 'charge', 'TV CICILAN KE 1 DARI 4', 100)
+    row('2026-11-20', 'CC', 'charge', 'TV CICILAN KE 1 DARI 4', 100)
   ];
-  const s = C.buildSeries(rows, g, '2026-10-10', { cc: 25 })[0];
+  const s = C.buildSeries(rows, g, '2026-11-25', { cc: 25 })[0];
   assert.equal(s.ambiguous, true);
-  const c = C.buildSeries(rows, { ...g, closedSeries: ['TV|4'] }, '2026-10-10', { cc: 25 })[0];
+  const c = C.buildSeries(rows, { ...g, closedSeries: ['TV|4'] }, '2026-11-25', { cc: 25 })[0];
   assert.equal(c.remaining, 0);
   assert.equal(c.closed, true);
 });
@@ -170,6 +170,38 @@ t('series entries list every row of the series with its instalment number', () =
   const s = C.buildSeries(rows, g, '2026-11-20', { cc: 25 })[0];
   assert.deepEqual(s.entries.map(e => [e.x, e.row.date]), [[1, '2026-09-27'], [2, '2026-10-27']]);
   assert.equal(s.entries[1].row, rows[1]);
+});
+
+const keys = (rows, today = '2026-12-01') => C.buildSeries(rows, { pms: ['CC'], permanentLimit: 1 }, today, { cc: 25 }).map(s => [s.key, s.xMax, s.remaining]);
+
+t('the same numbered row entered twice within days is one instalment, not a phantom series', () => {
+  assert.deepEqual(keys([
+    row('2026-09-01', 'CC', 'charge', 'TV (1/3)', 100), row('2026-09-02', 'CC', 'charge', 'TV (1/3)', 100),
+    row('2026-10-01', 'CC', 'charge', 'TV (2/3)', 100), row('2026-11-01', 'CC', 'charge', 'TV (3/3)', 100)
+  ]), [['TV|3', 3, 0]]);
+});
+
+t('rows entered out of order or late still join their series', () => {
+  assert.deepEqual(keys([
+    row('2026-10-01', 'CC', 'charge', 'TV CICILAN KE 2 DARI 3', 100), row('2026-10-01', 'CC', 'charge', 'TV CICILAN KE 1 DARI 3', 100)
+  ]), [['TV|3', 2, 100]]);
+  assert.deepEqual(keys([
+    row('2026-08-05', 'CC', 'charge', 'TV (1/4)', 100), row('2026-10-05', 'CC', 'charge', 'TV (3/4)', 100), row('2026-10-06', 'CC', 'charge', 'TV (2/4)', 100)
+  ]), [['TV|4', 3, 100]]);
+});
+
+t('identical purchases weeks apart stay two series; a skipped number is not invented', () => {
+  assert.deepEqual(keys([row('2026-09-01', 'CC', 'charge', 'TV (1/3)', 100), row('2026-10-20', 'CC', 'charge', 'TV (1/3)', 100)]),
+    [['TV|3', 1, 200], ['TV|3#2', 1, 200]]);
+  assert.deepEqual(keys([row('2026-08-05', 'CC', 'charge', 'TV (1/4)', 100), row('2026-10-05', 'CC', 'charge', 'TV (3/4)', 100)]), [['TV|4', 3, 100]]);
+});
+
+t('guards: a group without a limit gives 0 not NaN; a tiny principal never goes negative', () => {
+  const r = C.computeCCUsage({ pms: ['CC'] }, [], '2026-12-01', { cc: 25 });
+  assert.equal(r.activeLimit, 0);
+  assert.equal(r.remaining, 0);
+  const s = C.buildSeries([row('2026-10-01', 'CC', 'charge', 'X (8/12)', 1, '[pokok:7]')], { pms: ['CC'] }, '2026-12-01', { cc: 25 })[0];
+  assert.deepEqual([s.remaining, s.nextAmount], [0, 1]);
 });
 
 console.log(passed + ' passed');

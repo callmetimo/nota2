@@ -117,6 +117,17 @@ function ccGroupForPM(name) {
   return CC_GROUPS.find(g => g.pms.some(p => p.toLowerCase() === k)) || null;
 }
 
+// Billing day for every card the group lists that still exists (archived or un-flagged ones too, so their
+// rows stay in the cycle maths). A name that exists nowhere is left out and reported as missing.
+function ccBdByPm(g) {
+  const out = {};
+  g.pms.forEach(name => {
+    const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && ccLc(i.name) === ccLc(name));
+    if (item) out[ccLc(name)] = Number(item.billingDate) || 0;
+  });
+  return out;
+}
+
 function ccSelectedGroup() {
   return CC_GROUPS.find(g => g.id === ccUsageSelectedId) || CC_GROUPS[0] || null;
 }
@@ -133,7 +144,7 @@ const ccLc = s => String(s || '').toLowerCase();
 const ccIso = (y, m0, d) => `${y}-${String(m0 + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 const ccRowIso = r => (r.date ? String(r.date).slice(0, 10) : ccIso(r.y, r.m, r.d));
 
-// Normalised rows for the core: synced rows from HIST.opex plus not-yet-synced txHistory rows.
+// Normalised rows for the core: rows from HIST.opex plus local txHistory rows the sheet data does not have yet.
 // Future-dated rows are left out. Amounts are IDR; `kind` carries the direction.
 function collectCCRows(pmSet) {
   const today = todayISO();
@@ -154,17 +165,22 @@ function collectCCRows(pmSet) {
   });
   const used = {};
   (txHistory || []).forEach((h, i) => {
-    if (h.synced || !h.date) return;
+    if (!h.date) return;
     const date = String(h.date).slice(0, 10);
+    // Synced rows are not skipped outright: a row saved for an earlier month is `synced` but that month is
+    // not reloaded into HIST.opex until the next full load. Counting by signature keeps it once either way.
+    const [y, m] = date.split('-');
+    const key = `${+y}-${+m - 1}|${sigOfTxHistory(h)}`;
+    used[key] = (used[key] || 0) + 1;
+    const covered = (sheetCounts[key] || 0) >= used[key];
     if (h.type === 'transfer') {
+      // Signatures ignore the card, so only a synced transfer is matched against the sheet; a pending one always counts.
+      if (h.synced && covered) return;
       if (pmSet.has(ccLc(h.toPm))) push(date, h.toPm, 'credit', h.amount, h, 'local-opex', i);
       if (pmSet.has(ccLc(h.fromPm))) push(date, h.fromPm, 'charge', h.amount, h, 'local-opex', i);
       return;
     }
-    const [y, m] = date.split('-');
-    const key = `${+y}-${+m - 1}|${sigOfTxHistory(h)}`;
-    used[key] = (used[key] || 0) + 1;
-    if ((sheetCounts[key] || 0) >= used[key]) return;
+    if (covered) return;
     if (!pmSet.has(ccLc(h.pm))) return;
     push(date, h.pm, h.type === 'income' ? 'credit' : 'charge', h.amount, h, 'local-opex', i);
   });
@@ -303,8 +319,7 @@ function renderCCUsage() {
   }
 
   const g = ccSelectedGroup();
-  const bdByPm = {};
-  pms.forEach(p => { bdByPm[ccLc(p.name)] = getCCBillingDate(p.name); });
+  const bdByPm = ccBdByPm(g);
   const pmSet = new Set(g.pms.map(ccLc));
   const rows = collectCCRows(pmSet);
   const u = CCUsageCore.computeCCUsage(g, rows, todayISO(), bdByPm);
@@ -427,6 +442,7 @@ function closeCCGroupOverlay() {
 
 async function saveCCGroup() {
   if (ccgSaving) return;
+  const editId = ccgEditId; // the overlay can be closed and reopened for another group while the save is in flight
   const bad = msg => showToast(msg, 'error');
   const today = todayISO();
   const name = document.getElementById('ccgName').value.trim();
@@ -445,49 +461,62 @@ async function saveCCGroup() {
   if (!!anchorRaw !== !!anchorDate) return bad('Opening balance needs both a date and an amount');
   if (anchorDate && anchorDate > today) return bad('Opening balance date cannot be in the future');
   if (pendingAuth < 0) return bad('Pending holds cannot be negative');
+  const anchorAmount = anchorDate ? parseAmt('ccgAnchorAmt') : null;
 
   ccgSaving = true;
   showToast('Saving…', 'loading');
   let problem = '';
-  let savedId = ccgEditId;
-  const ok = await mutateCCGroups(groups => {
-    const others = groups.filter(x => x.id !== ccgEditId);
-    if (others.some(x => x.name.toLowerCase() === name.toLowerCase())) { problem = 'A group with that name already exists'; return null; }
-    const taken = others.flatMap(x => x.pms.map(p => p.toLowerCase()));
-    const clash = pms.find(p => taken.includes(p.toLowerCase()));
-    if (clash) { problem = `${clash} is already in another group`; return null; }
-    const old = groups.find(x => x.id === ccgEditId);
-    const pendingChanged = !old || old.pendingAuth !== pendingAuth;
-    const next = {
-      id: old ? old.id : `ccg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      name, pms, permanentLimit,
-      tempLimit: tempRaw || null, tempLimitExpiry: tempRaw ? tempExpiry : null,
-      anchorDate: anchorDate || null, anchorOutstanding: anchorDate ? parseAmt('ccgAnchorAmt') : null,
-      pendingAuth,
-      pendingAuthDate: !pendingAuth ? null : (pendingChanged ? today : old.pendingAuthDate),
-      closedSeries: old ? old.closedSeries : [],
-      sortOrder: old ? old.sortOrder : Math.max(-1, ...groups.map(x => x.sortOrder)) + 1,
-      updatedAt: new Date().toISOString()
-    };
-    savedId = next.id;
-    return old ? groups.map(x => (x.id === old.id ? next : x)) : [...groups, next];
-  });
-  ccgSaving = false;
+  let savedId = editId;
+  let ok = false;
+  try {
+    ok = await mutateCCGroups(groups => {
+      const others = groups.filter(x => x.id !== editId);
+      if (others.some(x => x.name.toLowerCase() === name.toLowerCase())) { problem = 'A group with that name already exists'; return null; }
+      const taken = others.flatMap(x => x.pms.map(p => p.toLowerCase()));
+      const clash = pms.find(p => taken.includes(p.toLowerCase()));
+      if (clash) { problem = `${clash} is already in another group`; return null; }
+      const old = groups.find(x => x.id === editId);
+      const pendingChanged = !old || old.pendingAuth !== pendingAuth;
+      const next = {
+        id: old ? old.id : `ccg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name, pms, permanentLimit,
+        tempLimit: tempRaw || null, tempLimitExpiry: tempRaw ? tempExpiry : null,
+        anchorDate: anchorDate || null, anchorOutstanding: anchorAmount,
+        pendingAuth,
+        pendingAuthDate: !pendingAuth ? null : (pendingChanged ? today : old.pendingAuthDate),
+        closedSeries: old ? old.closedSeries : [],
+        sortOrder: old ? old.sortOrder : Math.max(-1, ...groups.map(x => x.sortOrder)) + 1,
+        updatedAt: new Date().toISOString()
+      };
+      savedId = next.id;
+      return old ? groups.map(x => (x.id === old.id ? next : x)) : [...groups, next];
+    });
+  } finally {
+    ccgSaving = false; // a throw inside the callback must not leave Save dead until reload
+  }
   if (!ok) return; // mutateCCGroups already toasted
   if (problem) { showToast(problem, 'error'); return; }
   ccUsageSelect(savedId);
-  closeCCGroupOverlay();
+  if (ccgEditId === editId) closeCCGroupOverlay();
   const expired = tempRaw && tempExpiry < today;
   showToast(expired ? 'Saved ✓ (temporary limit already expired, so it is not applied)' : 'Saved ✓', 'success');
 }
 
 async function deleteCCGroup() {
-  const g = CC_GROUPS.find(x => x.id === ccgEditId);
+  if (ccgSaving) return;
+  const id = ccgEditId;
+  const g = CC_GROUPS.find(x => x.id === id);
   if (!g || !confirm(`Delete group "${g.name}"? Transactions are not affected.`)) return;
+  ccgSaving = true;
   showToast('Saving…', 'loading');
-  const ok = await mutateCCGroups(groups => groups.filter(x => x.id !== g.id));
+  let ok = false;
+  try {
+    ok = await mutateCCGroups(groups => groups.filter(x => x.id !== id));
+  } finally {
+    ccgSaving = false;
+  }
   if (!ok) return;
-  closeCCGroupOverlay();
+  if (ccgEditId === id) closeCCGroupOverlay();
   renderCCUsage();
   showToast('Group deleted', 'success');
 }

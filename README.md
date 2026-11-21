@@ -122,7 +122,6 @@ config → sheets-client → data-store → auth
 - `app-core.js` still calls `buildSmartPills()` (typeof-guarded) — the function no longer exists; the call is a harmless leftover.
 - `calRefreshOlderMonths()` is a no-op stub kept for its callers.
 - A legacy `investHistory` row with no `id` (pre-TxID) can't be opened for edit from Search.
-- `pages.yml` runs only the `email-parser` and `email-import` suites; `tests/cc-usage.test.mjs` is in `npm test` but not in CI. Add `node tests/cc-usage.test.mjs` to the "Syntax and test checks" step.
 - `HANDOVER.md` is a finished handoff note and says to delete itself — safe to remove.
 - CC Usage: rows dated on/before the opening-balance date but labelled with the *next* Month in the sheet (posted after the statement cut-off) are ignored, because `HIST.opex` rows carry no sheet Month column. BCA counts them as used. See the **CC Usage page** section.
 - CC Usage: `closedSeries` ("mark paid off") is still honoured by the core and stored in `CCGroups`, but the UI to set or clear it was removed in v4.133; `ambiguous` on a series is computed but no longer displayed.
@@ -167,6 +166,7 @@ One JSON cell `CCGroups!A2:B2` = `{v:1, groups:[…]}` (≤ 45,000 chars), creat
 - Entering an installment on a card saves **one** row: `<name> CICILAN KE 1 DARI N` for `round(P/N)`, with `[pokok:P]` appended to the notes (the user's note is cut to fit 200 chars, never the tag). **No recurring rule is created.** The user never records `REVERSAL CICILAN`.
 - The later months are recorded by hand (or are old rows): `CICILAN KE X DARI Y`, the legacy `Name (X/Y)`, and the legacy `Name (Installment)` the old recurring system wrote after the numbered ones.
 - `buildSeries` places rows **chronologically into series instances**: a numbered row joins the instance of the same name whose last number is X−1 (same monthly amount wins a tie), else starts a new instance (`NAME|Y`, `NAME|Y#2`, …) — so two unrelated "Train (1/3)" purchases stay two series. An unnumbered `(Installment)` row is the next instalment of the open series of that name.
+- Placement details: the **same numbered row entered twice within 3 days** counts as one instalment recorded twice (no phantom series — a real double charge still shows in Current Spending); a number *below* the series' highest (same-day order, late entry) joins that series when its amount matches; two **identical purchases weeks apart** stay separate. Known limit: two genuinely identical purchases made within 3 days merge into one series. A lone legacy `Name (1/2)` that is not an installment (e.g. a meal) is read as a series — a known false positive, since 2-month installments are legitimate.
 - **Remaining** of a series = `P − round(P/Y)·xMax` when `[pokok:P]` is known (the final instalment absorbs the rounding), else `amount × (Y − xMax)`. The highest number recorded counts as billed; missing earlier rows don't matter. Each series also returns its `note` (latest transaction note, tag stripped) and `entries` (every row with its number).
 - **Old recurring installment rules** (`installmentTotal > 0`) are **hidden and no longer generate anything** (`isLegacyInstallmentRule`), but are never deleted or migrated; they expire on their own. Reverting v4.129 brings them back.
 
@@ -186,7 +186,7 @@ Top card: *Remaining limit | Current spending* split headline (red *Over limit* 
 - **Never put anything tappable in the same `.form-group` as a hidden date input**: `.date-input-hidden` is `position:absolute; inset:0` inside a `position:relative` group and covers its siblings (the Outstanding field opened the calendar).
 - Test against **real data**: a hand-checked formula passed all worked examples while the real ledger was off by Rp7.000.000 (finished installments never closing). Compare against a real statement's *Sisa Kredit Limit* when changing series logic.
 - Browser testing: scripts load as `x.js?v=__BUILD__`, so refresh those **exact** URLs; the e2e seed's own failed history load overwrites a hand-seeded `HIST.opex`, so seed rows after `histLoaded` is true and test quickly.
-- `cc-usage.js` (the UI) has **no automated tests** — only the pure core does. Verify page changes in the browser.
+- `cc-usage.js` (the UI) has **no automated tests** — only the pure core does. Verify page changes in the browser. `collectCCRows` counts a local `txHistory` row once by signature **whether or not it is `synced`** (a row saved for an earlier month is synced but is not in `HIST.opex` until the next full load); never go back to skipping synced rows outright.
 
 ---
 

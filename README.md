@@ -25,6 +25,108 @@ The complete rules, load-bearing files, Do's and Don'ts, and verification requir
 
 ---
 
+## Architecture, Refactor Rules & Do's and Don'ts (Read Before Changing Code or Adding a Feature)
+
+> [!IMPORTANT]
+> This section is the distilled rulebook from the v4.79 → v4.123 architecture-review campaign (40 findings, ~45 commits, three assistants). The blow-by-blow history is in [CHANGELOG.md](CHANGELOG.md) (Session 69). The sign-in/auth rules are separate and stricter: [docs/auth-signin.md](docs/auth-signin.md). Where this section and an older note elsewhere in this README disagree, this section is current.
+
+### File map and load order (as of v4.132)
+
+`index.html` is **markup only** (plus 3 small inline scripts); all CSS is in `style.css`, all logic in separate files. Every `.js` file is a **classic script sharing one global scope** — no modules, no bundler, no build step.
+
+| File | Owns |
+|---|---|
+| `config.js`, `sheets-client.js`, `data-store.js`, `auth.js` | OAuth client id (CI-injected), Sheets REST wrapper, the Apps-Script-emulating backend router (`handleRequest`), sign-in. **`auth.js` is FROZEN.** |
+| `app-core.js` | State, API layer + `fetch` shim, `fetchWithTimeout`, escape helpers, tx entry/edit/delete, Search, boot. `APP_VERSION` lives here. |
+| `data-networth.js` | Net-worth/asset math, `computeCCMonitor()` — pure, no DOM. |
+| `config-settings.js` · `accounts.js` · `goals.js` · `recurring.js` | Config CRUD + load-time hydration (**must load first of the four**), account balances, goals, recurring rules. |
+| `ui-settings.js` | Leftovers only (`switchTabFromMore`, `openFABAction`, global error listener). |
+| `email-parser.js` · `gmail-client.js` · `email-import.js` | Pure parsing (own tests) → Gmail REST/MIME/PDF → rules, review popup, Settings page. |
+| `ui-calendar.js` · `ui-insights.js` | Home calendar; Insights tabs + net-worth rendering. |
+| `cc-usage-core.js` · `cc-usage.js` | CC Usage page: pure limit math (own tests) → UI + `CCGroups` tab persistence. |
+| `sw.js` | Service worker; precaches everything, cache name keyed to the build id. |
+
+Load order (matters — do not reorder without reading why):
+```
+config → sheets-client → data-store → auth
+  → [first-tap sign-in inline script — DO NOT MOVE]
+  → app-core → Chart.js (async CDN)
+  → data-networth → config-settings → accounts → goals → recurring → ui-settings
+  → email-parser → gmail-client → email-import
+  → ui-calendar → ui-insights → cc-usage-core → cc-usage
+  → [tail inline script: syncSideNav, Esc handler, pane resizer]
+```
+
+### Rules for every fix (the workflow that actually caught bugs)
+
+**Do:**
+1. **Re-locate before editing.** Line numbers in old notes are stale; `grep -n` the real current location.
+2. **Reproduce the bug behaviorally first** — run the old code against a concrete scenario and watch it fail. Reading the code is not reproduction. (Several "cosmetic" findings were really data bugs: `setIT` storing `'all'` made Insights show **zero data**; `HIST.invest` never being assigned made synced Invest rows **unsearchable**.)
+3. **Fix, re-run the same scenario, then run the exact old code as a negative control** to prove "before" was really broken and your test can actually fail.
+4. **`node --check` every touched `.js`**, run `npm test`, and bump `APP_VERSION` (`v4.NNN`, stay in the v4.x series — never round up to `v5.00`) with every commit that changes shipped code.
+5. **One commit per item**, and **push after each**. Commit message = bug mechanism + fix + *exactly* what was verified and how, so "verified" is distinguishable from "assumed".
+6. **Test shared primitives with an adversarial mock, not a cooperative one.** `fetchWithTimeout`'s first rewrite dropped `Promise.race` and silently stopped timing out whenever `fetch()` ignored its abort signal; only a mock that ignores the signal caught it (commit `58d1bdb`). Keep `Promise.race` as the unconditional deadline and `AbortController` as best-effort cancellation.
+7. **Treat a "confirmed dead" list as a hypothesis.** Only 4 of 9 functions listed as dead actually were. Before deleting, grep `*.js`, inline `onclick=`/`onchange=` in `index.html`, string-built handlers, and `tests/`.
+8. **Add a self-test to any checker you write** that fails if the check matches nothing — a mis-escaped regex that matches nothing looks exactly like "0 problems found".
+
+**Don't:**
+- Don't touch `auth.js`, the first-tap `<script>`, or the stuck-sign-in banner without an explicit instruction **and** a real-device recording ([docs/auth-signin.md](docs/auth-signin.md)).
+- Don't "fix in passing" something outside the item's scope; flag it instead.
+- Don't batch commits or pushes.
+- Don't trust a `typeof fn === 'function'` guard to mean the function exists — it also hides orphans (see open items).
+
+### Rules for adding a new feature
+
+**Checklist for a new `.js` file** (miss one and it fails silently or only offline):
+- [ ] `<script src="./x.js?v=__BUILD__">` in `index.html`, **after** every file whose globals it reads at load time.
+- [ ] Add it to `SCRIPTS` in `sw.js`, in the same order (a missing precache entry is an offline miss; `cache.addAll()` is atomic, so a *listed-but-missing* file kills the whole SW install).
+- [ ] Keep it in the repo root so CI's `for f in *.js` `node --check` covers it.
+- [ ] No top-level `const`/`let`/`function` name that already exists in another file — a duplicate top-level `const`/`let` across classic scripts is a hard `SyntaxError` that kills the second script.
+- [ ] `__BUILD__` is substituted **only** in `index.html` and `sw.js`; never put the token anywhere else.
+- [ ] Put testable logic in a pure `*-core.js` (no DOM, no clock — pass `now` in) with a `tests/*.test.mjs`, and add that test to both `package.json` and `.github/workflows/pages.yml`. Pattern: `email-parser.js`, `cc-usage-core.js`.
+
+**Persistence:** a new setting normally gets a `Config` column (see *Config Persistence Pattern* above). The Config width is a **contract in five places** — header write, seed/bootstrap, `serializeConfigRow`, read range, and `ensureConfigSheetExists`'s `colCount` threshold + `columnCount` resize (currently A:N, threshold `< 14`). Widen all of them together. If old cached clients would rewrite `Config!A2:N` and clobber the new data, use a separate tab instead (the `CCGroups` exception).
+
+**Data safety:**
+- **Never delete a localStorage key that can hold unsynced data** (the inactivity timer used to wipe `notapub_invest_v2`). Prune only rows that are `synced` **and** confirmed present in the authoritative source (see `pruneStaleInvestHistory`).
+- A synced local row also exists in the live fetch — **dedup on the shared TxID** when listing both, but don't blanket-skip `r.synced` (a row whose live copy hasn't arrived must still show).
+- Search results hold `idx` positions into live arrays and re-read `array[idx]` on tap — **never mutate those arrays while results are on screen.**
+- Every external `fetch()` goes through `fetchWithTimeout` (8–15 s); no raw `fetch()` to Google/Gmail/FX hosts.
+- Verify a row's identity before any sheet edit/delete; batch multi-range writes.
+
+**Correctness:**
+- **Dates:** never `new Date().toISOString().slice(0,10)` — it's UTC, so "today" is wrong for 7 h/day in WIB. Use `todayISO()` or local-date parts.
+- **Escaping has layers.** `esc()` for HTML text; `escJsAttr()` for a value inside an inline `onclick='…'` (the browser HTML-decodes the attribute *before* running the JS, so you need both). Never `esc(x).replace(/'/g, …)`. Highlight/split on **raw** text, then escape each piece; decode `&amp;` **last**.
+- **Regex `\b` doesn't match plurals or `_`:** `\bfee\b` misses `fees` and `service_fee`.
+- **Don't copy-paste a builder** (four `txJson` copies drifted until two were missing fields — now `calTxJson()`); **don't reuse a sentinel type** (`'all'` where `[]` is expected).
+- **Every global needs a writer.** A `let`/`const` that is declared but never assigned is a silent no-op (`HIST.invest`, the `clientId` idempotency cache). `grep` for assignments when you add or audit state.
+- **`const`/`let` globals aren't `window` properties.** Feature-detect with `typeof X !== 'undefined'`, never `window.X`.
+- Don't read a later-loading script's global in a top-level statement — it throws `ReferenceError` and silently kills the rest of that script (see *Resilience* below).
+
+### Testing and verification setup
+
+- `npm test` (3 suites: `email-parser`, `email-import`, `cc-usage`). Before deploying, CI runs the `email-parser` and `email-import` suites, `node --check` on `*.js` and `tests/*.js`, and **parses each inline `<script>` in `index.html`** with `vm.Script`. **The `cc-usage` suite is not in `pages.yml` yet (see open items), so a `cc-usage-core.js` regression currently reaches deploy ungated.** `tests/` is removed from the Pages upload (dev-only).
+- `app-core.js` has **no automated tests** — verify behavior with a throwaway `vm` harness (Proxy DOM, then read script-scope `let`/`const` by `vm.runInContext`, since they're not context properties) or in the browser.
+- Browser: `python3 serve.py` (threaded — the old single-threaded server silently dropped scripts under load; `.claude/launch.json` name `notapublic-dev`, port 8010). Open `/tests/e2e-seed.html` (seeds a fake returning user, localhost-only), then `eval` `/tests/e2e-stubs.js` to stub Gmail + the Sheets API.
+- **Stale-code trap:** in dev `?v=__BUILD__` is a fixed literal, so the *browser HTTP cache* and the service worker both serve pre-edit JS. Fetch with `{cache:'no-store'}` and `(0, eval)()` it, and confirm with `fn.toString()` before trusting a result.
+- To exercise `data-store.js` internals, fetch it fresh and `eval` into an isolated global with `Auth`/`SheetsClient` rebound to stubs (note `handleRequest` awaits `Auth.ready`).
+- The dev browser timezone is `Asia/Jakarta` (UTC+7) — lean on it to reproduce WIB date bugs.
+- Test a page the way the user reaches it (`switchTabFromMore(...)`), not by calling its render function.
+- Never let a verification step open a real Google sign-in popup — it blocks all JS and can't be driven or closed from tooling.
+
+### Known open items (as of v4.132 — documented, not fixed)
+
+- `syncOpex`/`syncInvest`/`syncTransfer` still send `clientId`, but `data-store.js` has no idempotency cache; comments still describe a "6 h TTL" that no longer exists.
+- Editing a transaction while its create is still in flight loses the edit.
+- `notaSyncFailed` is dispatched but nothing listens for it (no UI).
+- `app-core.js` still calls `buildSmartPills()` (typeof-guarded) — the function no longer exists; the call is a harmless leftover.
+- `calRefreshOlderMonths()` is a no-op stub kept for its callers.
+- A legacy `investHistory` row with no `id` (pre-TxID) can't be opened for edit from Search.
+- `pages.yml` runs only the `email-parser` and `email-import` suites; `tests/cc-usage.test.mjs` is in `npm test` but not in CI. Add `node tests/cc-usage.test.mjs` to the "Syntax and test checks" step.
+- `HANDOVER.md` is a finished handoff note and says to delete itself — safe to remove.
+
+---
+
 ## Config Persistence Pattern (Best Practice)
 
 When adding new user-configurable features (checkboxes, toggles, flags, settings), always persist them to the Google Sheets `Config` sheet using an empty column, not hardcoded in `index.html` or stored only in memory/localStorage.
@@ -39,8 +141,10 @@ When adding new user-configurable features (checkboxes, toggles, flags, settings
    - Seed/bootstrap builders: the first site (line ~973) just calls the shared `serializeConfigRow(it, idx)` helper (line ~27-42, which already includes every field's ternary — add your field's ternary there); the second site (lines ~981-988) still has its own literal duplicate array needing the same `it.fieldName ? 'TRUE' : 'FALSE'` added by hand
    - Read mapping in `handleGetConfig()` (line ~977 read range `A...L`, line ~1006-1019 item object add `fieldName: String(r[N] || '').trim().toUpperCase() === 'TRUE'`)
    - Write mapping in `handleConfig()`'s `saveAll` (line ~1030 builds rows via `serializeConfigRow` — no separate `clearValues` step anymore, that was removed by Session 10's SYNC-3 optimization — then a single `updateValues` call at line ~1036)
-4. On the frontend (`index.html`), store the value on `CONFIG_ITEMS` entries and call `saveConfigToServer()` when the user changes it — no special sync code needed if `saveConfigToServer()` is already being called (which it is for overlay Save buttons and inline checkboxes).
+4. On the frontend (`config-settings.js` / `app-core.js`), store the value on `CONFIG_ITEMS` entries and call `saveConfigToServer()` when the user changes it — no special sync code needed if `saveConfigToServer()` is already being called (which it is for overlay Save buttons and inline checkboxes).
 5. Document the column and feature in README.md under the session entry.
+
+**Width contract (bit us twice, v4.117 and v4.122):** the Config column count appears in *five* places that must widen together — the header write, the seed/bootstrap write, `serializeConfigRow`, the read range, and `ensureConfigSheetExists`'s `colCount < N` threshold with its `columnCount` resize. Today that is A:N and `colCount < 14`. A threshold lower than the real width means an existing sheet with a trimmed grid skips the resize and the write is rejected by the Sheets API.
 
 Existing users: sheet values default to empty on first load (treated as `false`/unchecked), no migration needed. Once the user toggles a setting, it writes to the sheet.
 
@@ -57,11 +161,12 @@ Client code is `cc-usage.js` (`fetchCCGroups` / `mutateCCGroups`); every write r
 - `data-store.js` — reimplements the old Apps Script backend's logic
   (Opex/Invest/Goals/Recurring reads & writes) directly against the Sheets
   API, using the exact same JSON shapes the frontend already expects.
-- `index.html` — a fork of the original Nota's UI/calculation code. The only functional
-  change is a small `fetch()` shim near the top of the inline script: calls
-  that used to hit the shared Apps Script URL are now routed to
-  `DataStore.handleRequest()` instead. Everything else — rendering,
-  calculations, calendar, insights — is untouched.
+- `index.html` + `app-core.js` and the `ui-*.js` / feature files — a fork of the original Nota's
+  UI/calculation code. `index.html` is markup only now; the former inline script lives in
+  `app-core.js`, which also holds the small `fetch()` shim: calls that used to hit the shared
+  Apps Script URL are routed to `DataStore.handleRequest()` instead. See
+  [Architecture, Refactor Rules & Do's and Don'ts](#architecture-refactor-rules--dos-and-donts-read-before-changing-code-or-adding-a-feature)
+  for the full file map and load order.
 
 ## Smart autofill for transaction inputs
 
@@ -195,8 +300,9 @@ to Sell rows.
 
 ## Inherited frontend knowledge (from the original Nota)
 
-`index.html` is a fork of the original Nota's UI/calculation code — rendering,
-calculations, calendar, and insights are untouched. The notes below are hard-won
+The UI/calculation code (formerly all inline in `index.html`, now `app-core.js` and the `ui-*.js` /
+feature files) is a fork of the original Nota's — rendering,
+calculations, calendar, and insights are largely untouched. The notes below are hard-won
 knowledge from that original project's history that still applies here. (The
 original's backend-specific notes — Apps Script deployment, `API_TOKEN` rotation,
 `data.json` — don't apply to this fork and are omitted.)
@@ -235,10 +341,11 @@ original's backend-specific notes — Apps Script deployment, `API_TOKEN` rotati
 `.cal-scroll` → `flex: 54 54 0` (top 54%). `.cal-tx-panel` → `flex: 46 46 0`
 (bottom 46%). Don't add `height` to their children without understanding this split.
 
-**Calendar progressive reveal:** `calOlderShown`, `calCollapsedShown`,
-`calYearPillsShown` are one-way latches — never reset within a session.
-`calRevealOlder()` no-ops after its first call; use `calRefreshOlderMonths()`
-to update already-revealed content. `.cal-year-pill` has
+**Calendar progressive reveal:** `calOlderShown` is a one-way latch — reset only by
+`calReinit()`. `calRevealOlder()` no-ops after its first call (`calRefreshOlderMonths()`
+is now an empty stub). The `calCollapsedShown` / `calYearPillsShown` latches and
+`calRevealCollapsed` / `calRevealYearPills` were write-only dead code and were deleted
+in v4.119/v4.123 — don't resurrect them. `.cal-year-pill` has
 `scroll-snap-align: start` (each pill is a snap target).
 `calInjectSnapSentinels()` always runs via `requestAnimationFrame`.
 
@@ -293,7 +400,7 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
 ### Resilience & error handling patterns
 
 - **External API calls MUST have a timeout.** Stalled connections to external services (e.g., Google Sheets API) can leave a fetch pending forever with no error and no response. Every call to an external API (`sheets.googleapis.com`, `www.googleapis.com`, etc.) must wrap in `AbortController` with a bounded timeout (typically 15s for Sheets, 8s for user-visible calls). Without a timeout, a single stalled connection can hang the entire app's data-load chain with nothing left to catch or retry. See `sheets-client.js:authedFetch()` as a template.
-- **Local DataStore calls don't need timeout.** Calls from `index.html` to `DataStore.handleRequest()` (via the fetch shim at `index.html:1295`) are synchronous JS execution in the same thread — they can't stall. Add timeouts only to `fetch()` calls that cross the network boundary.
+- **Local DataStore calls don't need timeout.** Calls from the app to `DataStore.handleRequest()` (via the fetch shim near the top of `app-core.js`) are synchronous JS execution in the same thread — they can't stall. Add timeouts only to `fetch()` calls that cross the network boundary.
 - **`fetchWithTimeout(url, opts, ms = 8000)`:** all user-facing API calls use this to
   avoid hanging if the server is slow. Returns a `"timeout"` error if no
   response arrives in time. Callers check `e.message === 'timeout'` and show
@@ -302,10 +409,10 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
   double-submit — prevents duplicate transactions from repeated taps.
 - **`visibilitychange` listener:** re-fetches the current month when the app
   returns to foreground (tabs, app switcher) — prevents stale data on iOS.
-- **Global runtime-error logging:** `window.addEventListener('error', ...)` (now at `ui-settings.js:1136`, moved there by the Session 15 script split) logs uncaught runtime errors to console for debugging on mobile devices where DevTools aren't always available. (This has always been implemented via `addEventListener('error', ...)`, never the `window.onerror` property — an old wording mismatch, not a code change.)
+- **Global runtime-error logging:** `window.addEventListener('error', ...)` (now at `ui-settings.js:62`, moved there by the Session 15 script split) logs uncaught runtime errors to console for debugging on mobile devices where DevTools aren't always available. (This has always been implemented via `addEventListener('error', ...)`, never the `window.onerror` property — an old wording mismatch, not a code change.)
 - **Service worker:** only registers on localhost/HTTPS. Opening `index.html`
   as a `file://` URL won't activate it — use `serve.py` instead.
-- **Cross-file top-level references need a deferred lookup, not a direct one.** The app is split across several `<script src>` files that all share one global scope (`index.html`'s inline script, then `ui-settings.js`, `ui-calendar.js`, `ui-insights.js` in that order). Hoisting makes a function safely callable from anywhere *within the same file*, or from any file that loads *after* the file defining it — but a **top-level** (immediately-executed, not deferred to `DOMContentLoaded`) statement in an *earlier*-loading file can never directly reference a bare identifier defined only in a *later*-loading file. The reference is evaluated the instant that line runs, before the later file has even been fetched, and throws `ReferenceError`. This doesn't just fail that one line — it halts the rest of *that script's* top-level execution, silently skipping every subsequent top-level statement (though later `function` declarations in the same file are still hoisted and remain callable). If the skipped statement happens to be the one registering the `DOMContentLoaded` listener that calls `Auth.markAppReady()`, the sign-in overlay hangs forever with no console error and no network activity — see Sessions 21 and 22. Fixes: either move the call inside `DOMContentLoaded` (the file will have loaded by then), or — if it must run immediately, like `attachSwipeClose()`'s direct-attach calls, which need to bind their touch listeners as soon as the DOM parses — wrap the cross-file reference in a closure (`() => laterFileFn()`) so the identifier lookup happens at call time instead of script-load time.
+- **Cross-file top-level references need a deferred lookup, not a direct one.** The app is split across several `<script src>` files that all share one global scope (`app-core.js` first, then the files in the load order listed in *Architecture, Refactor Rules & Do's and Don'ts* above). Hoisting makes a function safely callable from anywhere *within the same file*, or from any file that loads *after* the file defining it — but a **top-level** (immediately-executed, not deferred to `DOMContentLoaded`) statement in an *earlier*-loading file can never directly reference a bare identifier defined only in a *later*-loading file. The reference is evaluated the instant that line runs, before the later file has even been fetched, and throws `ReferenceError`. This doesn't just fail that one line — it halts the rest of *that script's* top-level execution, silently skipping every subsequent top-level statement (though later `function` declarations in the same file are still hoisted and remain callable). If the skipped statement happens to be the one registering the `DOMContentLoaded` listener that calls `Auth.markAppReady()`, the sign-in overlay hangs forever with no console error and no network activity — see Sessions 21 and 22. Fixes: either move the call inside `DOMContentLoaded` (the file will have loaded by then), or — if it must run immediately, like `attachSwipeClose()`'s direct-attach calls, which need to bind their touch listeners as soon as the DOM parses — wrap the cross-file reference in a closure (`() => laterFileFn()`) so the identifier lookup happens at call time instead of script-load time.
 
 ### Code style guidelines (learned from a prior refactor)
 
@@ -327,6 +434,7 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
 - Escape displayed text even from local/trusted-looking data — safe data
   structure doesn't mean safe to display.
 - Comment the *why*, not the *what*.
+- Follow the fix workflow and new-feature checklist in *Architecture, Refactor Rules & Do's and Don'ts* above (reproduce → fix → negative control → `node --check` → `APP_VERSION` bump → one commit → push).
 - Use descriptive variable names in loops and helpers.
 
 **Don't:**
@@ -341,7 +449,10 @@ state (all reset in `closeInputOverlay`/`openInputOverlay`):
 - Don't keep unused functions "documented but never called" — delete them or
   mark clearly why they're kept.
 - Don't comment obvious code.
-- **Don't leave `fetch()` calls to external APIs unbounded.** A stalled connection can hang forever with no error, leaving entire data-load chains pending indefinitely. Always wrap external API calls in `AbortController` with a timeout (15s for Sheets API, 8s for user-visible endpoints). See `sheets-client.js:authedFetch()` and `index.html:fetchWithTimeout()` as templates.
+- Don't `esc(x).replace(/'/g, ...)` for an inline-handler value — use `escJsAttr()`. Don't split-then-escape (or escape-then-highlight): split on raw text, then escape each piece.
+- Don't wipe or prune a localStorage key that may hold unsynced data; prune only rows confirmed present in the authoritative source.
+- Don't declare a global that nothing ever assigns, and don't delete "dead" code on a list's word alone — grep first, including inline handlers.
+- **Don't leave `fetch()` calls to external APIs unbounded.** A stalled connection can hang forever with no error, leaving entire data-load chains pending indefinitely. Always wrap external API calls in `AbortController` with a timeout (15s for Sheets API, 8s for user-visible endpoints). See `sheets-client.js:authedFetch()` and `app-core.js:fetchWithTimeout()` as templates.
 - **Don't pass a bare identifier from a later-loading script into a top-level (non-`DOMContentLoaded`) call.** It throws `ReferenceError` immediately and silently kills the rest of that script's top-level execution — no visible error unless DevTools happens to be open. See **Resilience & error handling patterns** above and Sessions 21/22. When splitting a monolith into multiple `<script src>` files, grep the file you're extracting *from* for every top-level (non-function-body) statement and check whether it references anything you just moved *out* of it into a later-loading file.
 
 ### Brand Guidelines & Design

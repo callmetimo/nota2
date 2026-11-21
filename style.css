@@ -676,7 +676,6 @@ html.wide .modal-handle{display:none}
 .ccu-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .ccu-row-l{flex:1}
 .ccu-row-v{font-weight:600}
-.ccu-period{font-size:14px}
 .ccu-series{padding:8px 0;border-bottom:0.5px solid var(--border)}
 .ccu-series:last-child{border-bottom:none}
 .ccu-series-t{font-size:13px;font-weight:600}
@@ -686,6 +685,6 @@ html.wide .modal-handle{display:none}
 .ccu-nav button{background:var(--bg3);border:0.5px solid var(--border);color:var(--text);border-radius:6px;width:26px;height:26px;cursor:pointer}
 .ccu-nav button:disabled{opacity:0.35;cursor:default}
 html.wide .ccu-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
-.ccu-series-actions{display:flex;gap:16px;margin-top:8px}
-.ccu-closed{margin-top:8px;font-size:12px;color:var(--text2)}
-.ccu-closed summary{cursor:pointer;padding:4px 0}
+.ccu-period-note{margin-top:2px}
+.ccu-row.hl{background:var(--orange-dim, rgba(255,165,0,0.12));border-radius:6px;padding:7px 8px;margin:2px -8px;font-weight:600}
+.ccu-note{font-size:12px;color:var(--text2);font-style:italic;margin:2px 0}

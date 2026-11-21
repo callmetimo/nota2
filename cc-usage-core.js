@@ -98,6 +98,8 @@ const CCUsageCore = (() => {
       const lastRow = s.last, a = lastRow.amount;
       let P = null;
       s.rows.some(r => { const m = String(r.notes || '').match(POKOK_RE); if (m) P = +m[1]; return !!m; });
+      // The latest non-empty transaction note tells same-named purchases apart ("Halle - Frankfurt").
+      const note = s.rows.slice().reverse().map(r => String(r.notes || '').replace(POKOK_RE, '').trim()).find(Boolean) || '';
       const m = P ? Math.round(P / s.y) : 0;
       const isClosed = closed.includes(key);
       let remaining;
@@ -110,7 +112,7 @@ const CCUsageCore = (() => {
       const lastBd = bdOf(bdByPm, lastRow.pm);
       const prevStart = cycleRange(curIdxOf(today, lastBd) - 1, lastBd).start;
       return {
-        key, name: s.name, y: s.y, xMax: s.xMax, amount: a, principal: P, remaining: Math.round(remaining),
+        key, name: s.name, y: s.y, xMax: s.xMax, amount: a, principal: P, remaining: Math.round(remaining), note,
         nextX, nextAmount: Math.round(nextAmount), lastDate: lastRow.date, pm: lastRow.pm, cat: lastRow.cat || '',
         ambiguous: seen[s.base] > 1, stale: s.xMax < s.y && lastRow.date < prevStart, closed: isClosed
       };

@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.132';
+const APP_VERSION = 'v4.133';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -1247,19 +1247,6 @@ function openInputOverlay() {
     const f = document.getElementById('inputTx');
     if (f) f.focus();
   }, 360);
-}
-
-// Opens the add-transaction sheet with fields filled in (CC Usage "Record next").
-function openInputOverlayPrefilled(p) {
-  openInputOverlay();
-  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
-  set('inputTx', p.tx); set('inputCat', p.cat); set('inputPm', p.pm); set('inputNotes', p.notes);
-  set('inputAmount', p.amount ? formatGroupedAmt(p.amount) : '');
-  const t = todayISO();
-  set('inputDateRaw', t);
-  document.getElementById('inputDateText').textContent = isoDisp(t);
-  checkCcInstallmentVisibility();
-  onOpexPmSelect();
 }
 
 function closeInputOverlay() {
@@ -2773,7 +2760,8 @@ function renderTxItemHTML(item, query, opts = {}) {
   if (isTransfer) { icon = '🔁'; cls = 'transfer'; color = '#a78bfa'; }
   // CC Usage marks rows that give limit back (payments, refunds): shown green with a leading +.
   if (opts.creditSet && opts.creditSet.has(`${item.source}:${item.idx}`)) { amount = '+' + amount; color = 'var(--green)'; }
-  const metaLine = isTransfer ? 'Transfer' : `${esc(cat)} · ${esc(pm)}`;
+  // CC Usage hides the card name: every row there is already on one of the group's cards.
+  const metaLine = isTransfer ? 'Transfer' : (opts.hidePm ? esc(cat) : `${esc(cat)} · ${esc(pm)}`);
 
   return `<div class="tx-item"${tapAttrs}>
     <div class="tx-icon ${cls}">${icon}</div>

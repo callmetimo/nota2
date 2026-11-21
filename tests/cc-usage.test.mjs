@@ -151,4 +151,14 @@ t('same-name purchases stay separate series; the monthly amount decides which on
   assert.ok(s.every(x => x.ambiguous));
 });
 
+t('series carries the latest transaction note (without the principal tag) so same-name purchases can be told apart', () => {
+  const g = { pms: ['CC'], permanentLimit: 1 };
+  const rows = [
+    row('2026-10-17', 'CC', 'charge', 'CAB (1/3)', 100, 'Halle - Frankfurt [pokok:300]'),
+    row('2026-10-30', 'CC', 'charge', 'CAB (1/3)', 200, 'Prague - Krakow')
+  ];
+  const s = C.buildSeries(rows, g, '2026-11-20', { cc: 25 });
+  assert.deepEqual(s.map(x => x.note), ['Halle - Frankfurt', 'Prague - Krakow']);
+});
+
 console.log(passed + ' passed');

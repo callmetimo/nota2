@@ -227,8 +227,8 @@ function ccUsageShiftCycle(d) {
   renderCCUsage();
 }
 
-function ccRow(cls, label, value, sub) {
-  return `<div class="ccu-row"><span class="ccu-dot ${cls}"></span>
+function ccRow(cls, label, value, sub, highlight) {
+  return `<div class="ccu-row${highlight ? ' hl' : ''}"><span class="ccu-dot ${cls}"></span>
     <span class="ccu-row-l">${label}${sub ? ` <span class="ccu-muted">${sub}</span>` : ''}</span><span class="ccu-row-v">${value}</span></div>`;
 }
 
@@ -241,60 +241,18 @@ function ccBarHTML(u) {
     ${u.overLimit ? `<div class="ccu-limit-mark" style="left:${pct(u.activeLimit)}"></div>` : ''}</div>`;
 }
 
-let ccLastSeries = [];
-
 function ccSeriesHTML(series) {
   const live = series.filter(s => !s.closed && s.xMax < s.y);
-  const closed = series.filter(s => s.closed && s.xMax < s.y);
-  if (!live.length && !closed.length) return '';
-  const key = s => escJsAttr(s.key);
-  return `<div class="chart-card"><div class="chart-card-title">Cicilan Aktif (${live.length})</div>${live.map(s => `
+  if (!live.length) return '';
+  return `<div class="chart-card"><div class="chart-card-title">Active Installments (${live.length})</div>${live.map(s => `
     <div class="ccu-series">
-      <div class="ccu-series-t">${esc(s.name)} · KE ${s.xMax}/${s.y} · ${fRp(s.amount)}/bln</div>
-      <div class="ccu-muted">Sisa ${fRp(s.remaining)} · berikutnya KE ${s.nextX} ≈ ${fRp(s.nextAmount)}</div>
-      ${s.stale ? `<span class="ccu-flag">Belum dicatat sejak ${esc(ccShortDate(s.lastDate))}</span>` : ''}
-      ${s.ambiguous ? '<span class="ccu-flag">Nama ganda</span>' : ''}
-      <div class="ccu-series-actions">
-        <button class="ccu-link" onclick="ccUsageRecordNext('${key(s)}')">Record next</button>
-        <button class="ccu-link" onclick="ccUsageMarkPaidOff('${key(s)}')">Mark paid off</button>
-      </div>
+      <div class="ccu-series-t">${esc(s.name)} · #${s.xMax}/${s.y} · ${fRp(s.amount)}/mo</div>
+      ${s.note ? `<div class="ccu-note">${esc(s.note)}</div>` : ''}
+      <div class="ccu-muted">Remaining ${fRp(s.remaining)} · next: #${s.nextX} ≈ ${fRp(s.nextAmount)}</div>
+      ${s.stale ? `<span class="ccu-flag">Not recorded since ${esc(ccShortDate(s.lastDate))}</span>` : ''}
     </div>`).join('')}
-    ${closed.length ? `<details class="ccu-closed"><summary>Lunas lebih awal (${closed.length})</summary>${closed.map(s => `
-      <div class="ccu-series"><div class="ccu-series-t">${esc(s.name)} · KE ${s.xMax}/${s.y}</div>
-        <div class="ccu-series-actions"><button class="ccu-link" onclick="ccUsageRestoreSeries('${key(s)}')">Restore</button></div></div>`).join('')}</details>` : ''}
   </div>`;
 }
-
-// Opens the add-transaction sheet for the next installment of a series (name, card and category carried over).
-function ccUsageRecordNext(key) {
-  const s = ccLastSeries.find(x => x.key === key);
-  if (!s) return;
-  const label = `CICILAN KE ${s.nextX} DARI ${s.y}`;
-  openInputOverlayPrefilled({
-    tx: s.name === 'CICILAN' ? label : `${s.name} ${label}`,
-    amount: s.nextAmount, cat: s.cat, pm: s.pm,
-    notes: s.principal ? `[pokok:${s.principal}]` : ''
-  });
-}
-
-async function ccUsageSetSeriesClosed(key, closed) {
-  const g = ccSelectedGroup();
-  if (!g) return;
-  const ok = await mutateCCGroups(groups => groups.map(x => (x.id !== g.id ? x : {
-    ...x, closedSeries: closed ? [...new Set([...x.closedSeries, key])] : x.closedSeries.filter(k => k !== key)
-  })));
-  if (!ok) return;
-  renderCCUsage();
-  showToast(closed ? 'Marked as paid off' : 'Restored', 'success');
-}
-
-function ccUsageMarkPaidOff(key) {
-  const s = ccLastSeries.find(x => x.key === key);
-  if (!s || !confirm(`Mark "${s.name}" as paid off? Its remaining ${fRp(s.remaining)} is released from your limit.`)) return;
-  ccUsageSetSeriesClosed(key, true);
-}
-
-function ccUsageRestoreSeries(key) { ccUsageSetSeriesClosed(key, false); }
 
 function renderCCUsage() {
   const box = document.getElementById('ccUsageContainer');
@@ -324,36 +282,32 @@ function renderCCUsage() {
   const pmSet = new Set(g.pms.map(ccLc));
   const rows = collectCCRows(pmSet);
   const u = CCUsageCore.computeCCUsage(g, rows, todayISO(), bdByPm);
-  ccLastSeries = u.series;
 
   const selector = CC_GROUPS.length > 1
     ? `<div class="pill-toggle">${CC_GROUPS.map(x =>
         `<div class="pill-toggle-btn expense${x.id === g.id ? ' active' : ''}" onclick="ccUsageSelect('${escJsAttr(x.id)}')">${esc(x.name)}</div>`).join('')}</div>`
     : '';
   const neg = n => '−' + fRp(n);
-  const period = u.cycles.length === 0 ? '–'
-    : (u.sameCycle ? `${esc(ccShortDate(u.cycles[0].start))} – ${esc(ccShortDate(u.cycles[0].end))}`
-      : u.cycles.map(c => `<div class="ccu-muted">${esc(c.pm)}: ${esc(ccShortDate(c.start))} – ${esc(ccShortDate(c.end))}</div>`).join(''));
+  const period = u.cycles.length === 0 ? ''
+    : (u.sameCycle ? `Billing period ${esc(ccShortDate(u.cycles[0].start))} – ${esc(ccShortDate(u.cycles[0].end))}`
+      : u.cycles.map(c => `${esc(c.pm)}: ${esc(ccShortDate(c.start))} – ${esc(ccShortDate(c.end))}`).join('<br>'));
 
   const limitCard = `<div class="chart-card">
-      <div class="chart-card-title">${esc(g.name)} · ${u.overLimit ? 'Melebihi limit' : 'Sisa Kredit Limit'}</div>
+      <div class="chart-card-title">${esc(g.name)} · ${u.overLimit ? 'Over limit' : 'Remaining Limit'}</div>
       <div class="ccu-top"><div class="ccu-remaining${u.overLimit ? ' neg' : ''}">${u.overLimit ? neg(-u.remaining) : fRp(u.remaining)}</div>
         <div class="ccu-muted">of ${fRp(u.activeLimit)}</div></div>
-      <div class="ccu-limit">Limit Gabungan${u.tempActive ? ` <span class="ccu-badge-temp">Limit sementara s/d ${esc(ccShortDate(g.tempLimitExpiry))}</span>` : ''}</div>
-      ${u.tempActive ? `<div class="ccu-muted">Limit tetap ${fRp(g.permanentLimit)}</div>` : ''}
-      ${u.tempExpired ? `<div class="ccu-muted">Limit sementara berakhir ${esc(isoDisp(g.tempLimitExpiry))} — kembali ke limit tetap</div>` : ''}
+      <div class="ccu-limit">Combined Limit${u.tempActive ? ` <span class="ccu-badge-temp">Temporary limit until ${esc(ccShortDate(g.tempLimitExpiry))}</span>` : ''}</div>
+      ${u.tempActive ? `<div class="ccu-muted">Permanent limit ${fRp(g.permanentLimit)}</div>` : ''}
+      ${u.tempExpired ? `<div class="ccu-muted">Temporary limit ended ${esc(isoDisp(g.tempLimitExpiry))}: back to the permanent limit</div>` : ''}
+      ${period ? `<div class="ccu-muted ccu-period-note">${period}</div>` : ''}
       ${ccBarHTML(u)}
-      ${ccRow('c-stmt', 'Tagihan Baru', fRp(u.statementBalance))}
-      ${ccRow('c-unb', 'Transaksi Berjalan', fRp(u.unbilled))}
-      ${ccRow('c-inst', 'Sisa Tagihan Cicilan', fRp(u.installmentRemaining))}
-      ${u.pendingAuth > 0 ? ccRow('c-pend', 'Otorisasi Menggantung', fRp(u.pendingAuth), g.pendingAuthDate ? `· updated ${esc(ccShortDate(g.pendingAuthDate))}` : '') : ''}
-      ${u.overpayment > 0 ? ccRow('c-over', 'Kelebihan Bayar', neg(u.overpayment)) : ''}
-      ${ccRow('c-rem', u.overLimit ? 'Melebihi limit' : 'Sisa Kredit Limit', u.overLimit ? neg(-u.remaining) : fRp(u.remaining))}
-      ${u.missingPms.length ? `<div class="ccu-warn">Kartu tidak ditemukan: ${esc(u.missingPms.join(', '))}</div>` : ''}
-    </div>
-    <div class="summary-row">
-      <div class="summary-card"><div class="s-label">Pemakaian periode ini</div><div class="s-value">${fRp(u.cycleSpend)}</div></div>
-      <div class="summary-card"><div class="s-label">Periode</div><div class="s-value ccu-period">${period}</div></div>
+      ${ccRow('c-stmt', 'Billed Statement', fRp(u.statementBalance))}
+      ${ccRow('c-unb', 'Current Spending', fRp(u.unbilled), '· this billing period', true)}
+      ${ccRow('c-inst', 'Remaining Installments', fRp(u.installmentRemaining))}
+      ${u.pendingAuth > 0 ? ccRow('c-pend', 'Pending Holds', fRp(u.pendingAuth), g.pendingAuthDate ? `· updated ${esc(ccShortDate(g.pendingAuthDate))}` : '') : ''}
+      ${u.overpayment > 0 ? ccRow('c-over', 'Overpayment', neg(u.overpayment)) : ''}
+      ${ccRow('c-rem', u.overLimit ? 'Over limit' : 'Remaining Limit', u.overLimit ? neg(-u.remaining) : fRp(u.remaining))}
+      ${u.missingPms.length ? `<div class="ccu-warn">Cards not found: ${esc(u.missingPms.join(', '))}</div>` : ''}
     </div>`;
 
   // Transaction list for the chosen cycle (each card's own cycle, so mixed billing days stay correct).
@@ -362,11 +316,11 @@ function renderCCUsage() {
   const items = ccListItems(listRows);
   const creditSet = ccCreditKeys(items, pmSet);
   const refIdx = u.cycles.length ? u.cycles[0].idx + off : 0;
-  const label = u.cycles.length ? `Siklus ${MO[refIdx % 12]} ${Math.floor(refIdx / 12)}` : '';
+  const label = u.cycles.length ? `Cycle ${MO[refIdx % 12]} ${Math.floor(refIdx / 12)}` : '';
   const listCard = `<div class="chart-card">
-      <div class="ccu-list-head"><div class="chart-card-title" style="margin:0">Transaksi Periode Ini (${items.length})</div>
+      <div class="ccu-list-head"><div class="chart-card-title" style="margin:0">Transactions (${items.length})</div>
         <div class="ccu-nav"><button onclick="ccUsageShiftCycle(-1)" ${off <= -36 ? 'disabled' : ''}>‹</button><span>${esc(label)}</span><button onclick="ccUsageShiftCycle(1)" ${off >= 0 ? 'disabled' : ''}>›</button></div></div>
-      ${items.length ? items.map(it => renderTxItemHTML(it, '', { creditSet })).join('') : '<div class="empty-state">Belum ada transaksi di periode ini.</div>'}
+      ${items.length ? items.map(it => renderTxItemHTML(it, '', { creditSet, hidePm: true })).join('') : '<div class="empty-state">No transactions in this period.</div>'}
     </div>`;
 
   box.innerHTML = `
@@ -412,7 +366,7 @@ function openCCGroupOverlay(id) {
   CC_GROUPS.filter(x => x.id !== ccgEditId).forEach(x => x.pms.forEach(p => { owner[p.toLowerCase()] = x.name; }));
   const rows = ccCardPMs().map(p => {
     const k = p.name.toLowerCase();
-    const sub = owner[k] ? `in "${esc(owner[k])}"` : (p.billingDate > 0 ? `cetak tgl ${p.billingDate}` : 'no billing date (calendar month)');
+    const sub = owner[k] ? `in "${esc(owner[k])}"` : (p.billingDate > 0 ? `statement day ${p.billingDate}` : 'no billing date (calendar month)');
     return `<label class="goal-source-row"><input type="checkbox" value="${esc(p.name)}" ${mine.includes(k) ? 'checked' : ''} ${owner[k] ? 'disabled' : ''} onchange="ccgPrefillLimit()">
       <span style="font-size:14px">${esc(p.name)} <span class="ccu-muted">· ${sub}</span></span></label>`;
   });

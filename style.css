@@ -698,3 +698,5 @@ html.wide .ccu-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-it
 .ccu-rem{color:#c9bdfc}
 .ccu-done{font-size:11px;padding:1px 7px;border-radius:8px;background:var(--green-dim);color:var(--green);margin-left:6px;font-weight:500}
 .ccu-recon{border-top:0.5px solid var(--border);margin-top:6px;padding-top:6px}
+.ccu-pill{flex:1;padding:9px 4px;border-radius:var(--radius-sm);border:0.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:12px;font-weight:500;cursor:pointer;text-align:center}
+.ccu-pill.active{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}

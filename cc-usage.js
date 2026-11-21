@@ -53,10 +53,13 @@ function writeCCGroupsCache() {
 
 let CC_GROUPS = readCCGroupsCache();
 
+// Bumped by every write, so a slow read that started before a save cannot overwrite the saved list.
+let ccGroupsSeq = 0;
+
 // Returns the fresh normalized groups, or null when the server could not be read.
-async function fetchCCGroupsRaw() {
+async function fetchCCGroupsRaw(timeoutMs) {
   try {
-    const res = await fetchWithTimeout(apiGet('type=ccgroups'), { method: 'GET' });
+    const res = await fetchWithTimeout(apiGet('type=ccgroups'), { method: 'GET' }, timeoutMs);
     const j = await res.json();
     if (j.status !== 'ok') { console.warn('[cc-usage] load failed', j.message); return null; }
     return normalizeCCGroups(j.groups);
@@ -64,8 +67,9 @@ async function fetchCCGroupsRaw() {
 }
 
 async function fetchCCGroups() {
+  const seq = ccGroupsSeq;
   const fresh = await fetchCCGroupsRaw();
-  if (!fresh) return false; // keep the cache
+  if (!fresh || seq !== ccGroupsSeq) return false; // keep the cache (failed read, or a save happened meanwhile)
   CC_GROUPS = fresh;
   writeCCGroupsCache();
   return true;
@@ -73,17 +77,19 @@ async function fetchCCGroups() {
 
 // The only write path: re-read the sheet, apply fn to a copy, save the whole list.
 // fn returns the new array, or null for "nothing to change" (no write, so the tab is never created needlessly).
+// It takes two to three sheet calls, so it gets a longer timeout than the default (a timeout can mean the write landed).
 async function mutateCCGroups(fn) {
-  const fresh = await fetchCCGroupsRaw();
+  ccGroupsSeq++;
+  const fresh = await fetchCCGroupsRaw(15000);
   if (!fresh) { showToast("Couldn't reach Google Sheets — try again", 'error'); return false; }
-  const changed = fn(structuredClone(fresh));
+  const changed = fn(JSON.parse(JSON.stringify(fresh)));
   if (changed === null) { CC_GROUPS = fresh; writeCCGroupsCache(); return true; }
   const next = normalizeCCGroups(changed);
   try {
     const res = await fetchWithTimeout(apiGet('type=ccgroups'), {
       method: 'POST', headers: { 'Content-Type': 'text/plain' },
       body: apiBody({ type: 'ccgroups', action: 'saveAll', groups: next })
-    });
+    }, 15000);
     const j = await res.json();
     if (j.status !== 'ok') { showToast('Could not save CC groups: ' + (j.message || 'error'), 'error'); return false; }
   } catch (e) { showToast('Could not save CC groups: ' + e.message, 'error'); return false; }
@@ -93,12 +99,17 @@ async function mutateCCGroups(fn) {
 }
 
 // Called from saveConfigItem when a payment method is renamed. Failure only toasts; nothing else depends on it.
-function ccGroupsRenamePM(oldName, newName) {
+// Earlier transactions keep the old name, so after a rename CC Usage only counts rows from the new name on.
+async function ccGroupsRenamePM(oldName, newName) {
   const o = oldName.toLowerCase();
-  return mutateCCGroups(groups => {
+  let renamed = false;
+  const ok = await mutateCCGroups(groups => {
     if (!groups.some(g => g.pms.some(p => p.toLowerCase() === o))) return null;
+    renamed = true;
     return groups.map(g => ({ ...g, pms: g.pms.map(p => (p.toLowerCase() === o ? newName : p)) }));
   });
+  if (ok && renamed) showToast(`Renamed in CC Usage. Earlier transactions still say "${oldName}" and are not counted any more.`, '', 7000);
+  return ok;
 }
 
 // ── Page: selection, render ───────────────────────────────────
@@ -153,11 +164,14 @@ function collectCCRows(pmSet) {
     if (!(amount > 0) || date > today) return;
     rows.push({ date, pm, kind, amount, tx: r.tx || '', notes: r.notes || '', cat: r.cat || r.category || '', ref: { source, idx } });
   };
-  // Count-based ghost matching (same idea as _reconcileUnsyncedWithSheet): an unsynced local row whose
-  // twin already arrived from the sheet in the same month must not be counted twice.
+  // Count-based ghost matching (same idea as _reconcileUnsyncedWithSheet): a local row whose twin is already in
+  // HIST.opex must not be counted twice. The signature includes the card, so an identical row on a cash card
+  // or another account never hides a credit-card row.
+  const sig = (y, m0, d, tx, amount, income, pm) => `${y}-${m0}|${d}|${ccLc(tx)}|${amount || 0}|${income ? 'i' : 'e'}|${ccLc(pm)}`;
   const sheetCounts = {};
   (HIST.opex || []).forEach((r, i) => {
-    const k = `${r.y}-${r.m}|${sigOfSheetRow(r)}`;
+    const income = (r.inc || 0) > 0 && !(r.exp || 0);
+    const k = sig(r.y, r.m, r.d, r.tx, income ? r.inc : r.exp, income, r.pm);
     sheetCounts[k] = (sheetCounts[k] || 0) + 1;
     if (!pmSet.has(ccLc(r.pm))) return;
     if ((r.exp || 0) > 0) push(ccRowIso(r), r.pm, 'charge', r.exp, r, 'hist-opex', i);
@@ -169,18 +183,17 @@ function collectCCRows(pmSet) {
     const date = String(h.date).slice(0, 10);
     // Synced rows are not skipped outright: a row saved for an earlier month is `synced` but that month is
     // not reloaded into HIST.opex until the next full load. Counting by signature keeps it once either way.
-    const [y, m] = date.split('-');
-    const key = `${+y}-${+m - 1}|${sigOfTxHistory(h)}`;
+    const [y, m, d] = date.split('-');
+    const isTransfer = h.type === 'transfer';
+    // A transfer is matched on its expense leg (the From card).
+    const key = sig(+y, +m - 1, +d, h.tx, h.amount, h.type === 'income', isTransfer ? h.fromPm : h.pm);
     used[key] = (used[key] || 0) + 1;
-    const covered = (sheetCounts[key] || 0) >= used[key];
-    if (h.type === 'transfer') {
-      // Signatures ignore the card, so only a synced transfer is matched against the sheet; a pending one always counts.
-      if (h.synced && covered) return;
+    if ((sheetCounts[key] || 0) >= used[key]) return;
+    if (isTransfer) {
       if (pmSet.has(ccLc(h.toPm))) push(date, h.toPm, 'credit', h.amount, h, 'local-opex', i);
       if (pmSet.has(ccLc(h.fromPm))) push(date, h.fromPm, 'charge', h.amount, h, 'local-opex', i);
       return;
     }
-    if (covered) return;
     if (!pmSet.has(ccLc(h.pm))) return;
     push(date, h.pm, h.type === 'income' ? 'credit' : 'charge', h.amount, h, 'local-opex', i);
   });
@@ -326,7 +339,7 @@ function renderCCUsage() {
 
   const selector = CC_GROUPS.length > 1
     ? `<div class="pill-toggle">${CC_GROUPS.map(x =>
-        `<div class="pill-toggle-btn expense${x.id === g.id ? ' active' : ''}" onclick="ccUsageSelect('${escJsAttr(x.id)}')">${esc(x.name)}</div>`).join('')}</div>`
+        `<div class="ccu-pill${x.id === g.id ? ' active' : ''}" onclick="ccUsageSelect('${escJsAttr(x.id)}')">${esc(x.name)}</div>`).join('')}</div>`
     : '';
   const neg = n => '−' + fRp(n);
   const range = c => `${esc(ccShortDate(c.start))} – ${esc(ccShortDate(c.end))}`;
@@ -378,6 +391,7 @@ function renderCCUsage() {
       <button class="ccu-link" onclick="openCCGroupOverlay('${escJsAttr(g.id)}')">Edit group</button>
     </div>
     ${selector}
+    ${histLoadFailed ? '<div class="ccu-warn" style="margin:0 0 10px">The full history could not be loaded, so these numbers use cached data and may be incomplete.</div>' : ''}
     <div class="ccu-grid"><div class="ccu-col">${limitCard}</div><div class="ccu-col">${listCard}</div></div>`;
 }
 

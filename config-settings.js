@@ -83,6 +83,8 @@ async function fetchConfig() {
       buildAccountBalances();
       renderAccountBalanceCards();
       renderSettingsLists();
+      // CC Usage opened before the config arrived (new device) would otherwise keep saying "No credit cards yet".
+      if (typeof renderCCUsageIfActive === 'function') renderCCUsageIfActive();
     }
   } catch (e) { /* offline or first-run race — keep hardcoded defaults as fallback */ }
 }

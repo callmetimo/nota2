@@ -634,6 +634,8 @@ Value`) and refuses to let a blank value swallow the next row's label. **Lesson*
 - Bumped `APP_VERSION` to `'v4.137'`.
 - **CC Usage top card re-layout**: the right half of the split headline is now **Total to Pay** (blue) = Unpaid Statement + Current Spending, with the sublabel "Unpaid Statement + Current Spending" (an overpayment is already netted inside Current Spending, and neither term goes below 0). **Current Spending** moved back to a highlighted (orange) row directly under Unpaid Statement, in the same order as the bar segments. Installment charges of the cycle are inside Current Spending, so they are inside Total to Pay; the not-yet-due Remaining Installments are not. No due-date line (the group has no due-day field).
 - Bumped `APP_VERSION` to `'v4.138'`.
+- **Top card polish**: removed the "Unpaid Statement + Current Spending" sublabel under Total to Pay and the orange highlight on the Current Spending row (it is now a plain row like the others).
+- Bumped `APP_VERSION` to `'v4.139'`.
 
 #### Session 69: Architecture-review campaign — 40 findings, v4.79 → v4.123 (Claude; the §4A tooling/docs/parser items by AI Studio / Gemini Flash 3.8)
 Ran *before* Session 68's CC Usage work (which starts at v4.124). The distilled, forward-looking rules are in the README's **Architecture, Refactor Rules & Do's and Don'ts** section; this entry is the record of what was done and what was learned.

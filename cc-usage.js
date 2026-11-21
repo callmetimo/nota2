@@ -215,8 +215,8 @@ function ccUsageShiftCycle(d) {
   renderCCUsage();
 }
 
-function ccRow(cls, label, value, sub, hl) {
-  return `<div class="ccu-row${hl ? ' hl' : ''}"><span class="ccu-dot ${cls}"></span>
+function ccRow(cls, label, value, sub) {
+  return `<div class="ccu-row"><span class="ccu-dot ${cls}"></span>
     <span class="ccu-row-l">${label}${sub ? ` <span class="ccu-muted">${sub}</span>` : ''}</span><span class="ccu-row-v">${value}</span></div>`;
 }
 
@@ -290,8 +290,7 @@ function ccLimitCardHTML(g, u) {
         <div class="ccu-half"><div class="ccu-muted">${u.overLimit ? 'Over limit' : 'Remaining limit'}</div>
           <div class="ccu-big ${u.overLimit ? 'neg' : 'pos'}">${u.overLimit ? neg(-u.remaining) : fRp(u.remaining)}</div><div class="ccu-ul ${u.overLimit ? 'neg' : 'pos'}"></div></div>
         <div class="ccu-half"><div class="ccu-muted">Total to Pay</div>
-          <div class="ccu-big pay">${fRp(u.statementBalance + u.unbilled)}</div><div class="ccu-ul pay"></div>
-          <div class="ccu-muted ccu-pay-sub">Unpaid Statement + Current Spending</div></div>
+          <div class="ccu-big pay">${fRp(u.statementBalance + u.unbilled)}</div><div class="ccu-ul pay"></div></div>
       </div>
       <div class="ccu-muted ccu-period-note">of ${fRp(u.activeLimit)} combined limit${periodNote}</div>
       ${periodLines}
@@ -299,7 +298,7 @@ function ccLimitCardHTML(g, u) {
       ${u.tempExpired ? `<div class="ccu-muted">Temporary limit ended ${esc(isoDisp(g.tempLimitExpiry))}: back to the permanent limit</div>` : ''}
       ${ccBarHTML(u)}
       ${ccRow('c-stmt', 'Unpaid Statement', fRp(u.statementBalance))}
-      ${ccRow('c-unb', 'Current Spending', fRp(u.unbilled), '', true)}
+      ${ccRow('c-unb', 'Current Spending', fRp(u.unbilled))}
       ${ccRow('c-inst', 'Remaining Installments', fRp(u.installmentRemaining))}
       ${u.pendingAuth > 0 ? ccRow('c-pend', 'Pending Holds', fRp(u.pendingAuth), g.pendingAuthDate ? `· updated ${esc(ccShortDate(g.pendingAuthDate))}` : '') : ''}
       ${u.overpayment > 0 ? ccRow('c-over', 'Overpayment', neg(u.overpayment)) : ''}

@@ -53,8 +53,16 @@ function writeCCGroupsCache() {
 
 let CC_GROUPS = readCCGroupsCache();
 
-// Bumped by every write, so a slow read that started before a save cannot overwrite the saved list.
-let ccGroupsSeq = 0;
+// ── Module state, all in one place (CC_GROUPS above is the groups: the server is the source, localStorage a cache)
+const CC_SEL_LS_KEY = 'notapub_ccusage_sel';
+let ccUsageSelectedId = '';   // selected group id, remembered per device
+try { ccUsageSelectedId = localStorage.getItem(CC_SEL_LS_KEY) || ''; } catch (e) {}
+let ccUsageCycleOffset = 0;   // 0 = current billing cycle, -1 = previous, ...
+let ccInstOpen = false;       // the installments strip is expanded
+let ccWaitingHist = false;    // a render is already waiting for the history load
+let ccgEditId = null;         // group open in the overlay (null = a new one)
+let ccgSaving = false;        // a group save or delete is in flight
+let ccGroupsSeq = 0;          // bumped by every write, so a slow read that started before a save cannot overwrite it
 
 // Returns the fresh normalized groups, or null when the server could not be read.
 async function fetchCCGroupsRaw(timeoutMs) {
@@ -113,12 +121,6 @@ async function ccGroupsRenamePM(oldName, newName) {
 }
 
 // ── Page: selection, render ───────────────────────────────────
-const CC_SEL_LS_KEY = 'notapub_ccusage_sel';
-let ccUsageSelectedId = '';
-try { ccUsageSelectedId = localStorage.getItem(CC_SEL_LS_KEY) || ''; } catch (e) {}
-let ccgEditId = null;
-let ccgSaving = false;
-
 const ccCardPMs = () => CONFIG_ITEMS.filter(i => i.kind === 'pm' && i.creditCard && !i.archived);
 const ccShortDate = iso => isoDisp(iso).split(' ').slice(0, 2).join(' ');
 
@@ -155,49 +157,9 @@ const ccLc = s => String(s || '').toLowerCase();
 const ccIso = (y, m0, d) => `${y}-${String(m0 + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 const ccRowIso = r => (r.date ? String(r.date).slice(0, 10) : ccIso(r.y, r.m, r.d));
 
-// Normalised rows for the core: rows from HIST.opex plus local txHistory rows the sheet data does not have yet.
-// Future-dated rows are left out. Amounts are IDR; `kind` carries the direction.
+// The group's rows for the core, read from Nota's data (see CCUsageCore.normalizeRows).
 function collectCCRows(pmSet) {
-  const today = todayISO();
-  const rows = [];
-  const push = (date, pm, kind, amount, r, source, idx) => {
-    if (!(amount > 0) || date > today) return;
-    rows.push({ date, pm, kind, amount, tx: r.tx || '', notes: r.notes || '', cat: r.cat || r.category || '', ref: { source, idx } });
-  };
-  // Count-based ghost matching (same idea as _reconcileUnsyncedWithSheet): a local row whose twin is already in
-  // HIST.opex must not be counted twice. The signature includes the card, so an identical row on a cash card
-  // or another account never hides a credit-card row.
-  const sig = (y, m0, d, tx, amount, income, pm) => `${y}-${m0}|${d}|${ccLc(tx)}|${amount || 0}|${income ? 'i' : 'e'}|${ccLc(pm)}`;
-  const sheetCounts = {};
-  (HIST.opex || []).forEach((r, i) => {
-    const income = (r.inc || 0) > 0 && !(r.exp || 0);
-    const k = sig(r.y, r.m, r.d, r.tx, income ? r.inc : r.exp, income, r.pm);
-    sheetCounts[k] = (sheetCounts[k] || 0) + 1;
-    if (!pmSet.has(ccLc(r.pm))) return;
-    if ((r.exp || 0) > 0) push(ccRowIso(r), r.pm, 'charge', r.exp, r, 'hist-opex', i);
-    else if ((r.inc || 0) > 0) push(ccRowIso(r), r.pm, 'credit', r.inc, r, 'hist-opex', i);
-  });
-  const used = {};
-  (txHistory || []).forEach((h, i) => {
-    if (!h.date) return;
-    const date = String(h.date).slice(0, 10);
-    // Synced rows are not skipped outright: a row saved for an earlier month is `synced` but that month is
-    // not reloaded into HIST.opex until the next full load. Counting by signature keeps it once either way.
-    const [y, m, d] = date.split('-');
-    const isTransfer = h.type === 'transfer';
-    // A transfer is matched on its expense leg (the From card).
-    const key = sig(+y, +m - 1, +d, h.tx, h.amount, h.type === 'income', isTransfer ? h.fromPm : h.pm);
-    used[key] = (used[key] || 0) + 1;
-    if ((sheetCounts[key] || 0) >= used[key]) return;
-    if (isTransfer) {
-      if (pmSet.has(ccLc(h.toPm))) push(date, h.toPm, 'credit', h.amount, h, 'local-opex', i);
-      if (pmSet.has(ccLc(h.fromPm))) push(date, h.fromPm, 'charge', h.amount, h, 'local-opex', i);
-      return;
-    }
-    if (!pmSet.has(ccLc(h.pm))) return;
-    push(date, h.pm, h.type === 'income' ? 'credit' : 'charge', h.amount, h, 'local-opex', i);
-  });
-  return rows;
+  return CCUsageCore.normalizeRows({ histOpex: HIST.opex || [], txHistory: txHistory || [], pmSet, today: todayISO() });
 }
 
 // Transaction list items in the same shape as Search results, so renderTxItemHTML and tap-to-edit work unchanged.
@@ -237,9 +199,6 @@ function ccCreditKeys(items, pmSet) {
 }
 
 // ── Page: render ──────────────────────────────────────────────
-let ccUsageCycleOffset = 0; // 0 = current billing cycle, -1 = previous, ...
-let ccWaitingHist = false;
-
 function openCCUsagePage() {
   ccUsageCycleOffset = 0;
   renderCCUsage();
@@ -256,8 +215,8 @@ function ccUsageShiftCycle(d) {
   renderCCUsage();
 }
 
-function ccRow(cls, label, value, sub, highlight) {
-  return `<div class="ccu-row${highlight ? ' hl' : ''}"><span class="ccu-dot ${cls}"></span>
+function ccRow(cls, label, value, sub) {
+  return `<div class="ccu-row"><span class="ccu-dot ${cls}"></span>
     <span class="ccu-row-l">${label}${sub ? ` <span class="ccu-muted">${sub}</span>` : ''}</span><span class="ccu-row-v">${value}</span></div>`;
 }
 
@@ -269,8 +228,6 @@ function ccBarHTML(u) {
   return `<div class="ccu-bar${u.overLimit ? ' over' : ''}">${segs.map(s => `<div class="ccu-seg ${s[0]}" style="width:${pct(s[1])}"></div>`).join('')}
     ${u.overLimit ? `<div class="ccu-limit-mark" style="left:${pct(u.activeLimit)}"></div>` : ''}</div>`;
 }
-
-let ccInstOpen = false;
 
 function ccToggleInst() { ccInstOpen = !ccInstOpen; renderCCUsage(); }
 
@@ -309,45 +266,25 @@ function ccInstallmentsHTML(u, off, bdByPm, anchorDate) {
   return { html: `${strip}<div class="ccu-strip-body">${rowsHtml}${recon}</div>`, paid };
 }
 
-function renderCCUsage() {
-  const box = document.getElementById('ccUsageContainer');
-  if (!box) return;
-  // Delegated, so it survives innerHTML rebuilds; bound once.
-  if (!box.dataset.tapBound) { box.dataset.tapBound = '1'; attachTxTapToEdit(box); }
-  const pms = ccCardPMs();
-  if (!pms.length && !CC_GROUPS.length) {
-    box.innerHTML = `<div class="empty-state">No credit cards yet. Mark a payment method as Credit Card in Settings.
-      <div style="margin-top:12px"><button class="ccu-link" onclick="switchTabFromMore('settings')">Open Settings</button></div></div>`;
-    return;
-  }
-  if (!CC_GROUPS.length) {
-    box.innerHTML = `<div class="empty-state">Create a CC group to track your combined limit.
-      <div style="margin-top:12px"><button class="ccu-link" onclick="openCCGroupOverlay(null)">+ New group</button></div></div>`;
-    return;
-  }
-  if (!histLoaded) {
-    box.innerHTML = '<div class="chart-loading">Loading…</div>';
-    if (!ccWaitingHist) { ccWaitingHist = true; onHistLoaded(() => { ccWaitingHist = false; renderCCUsage(); }); }
-    return;
-  }
+function ccEmptyStateHTML(message, buttonLabel, onclick) {
+  return `<div class="empty-state">${message}
+      <div style="margin-top:12px"><button class="ccu-link" onclick="${onclick}">${buttonLabel}</button></div></div>`;
+}
 
-  const g = ccSelectedGroup();
-  const bdByPm = ccBdByPm(g);
-  const pmSet = new Set(g.pms.map(ccLc));
-  const rows = collectCCRows(pmSet);
-  const u = CCUsageCore.computeCCUsage(g, rows, todayISO(), bdByPm);
+function ccSelectorHTML(g) {
+  if (CC_GROUPS.length < 2) return '';
+  return `<div class="pill-toggle">${CC_GROUPS.map(x =>
+    `<div class="ccu-pill${x.id === g.id ? ' active' : ''}" onclick="ccUsageSelect('${escJsAttr(x.id)}')">${esc(x.name)}</div>`).join('')}</div>`;
+}
 
-  const selector = CC_GROUPS.length > 1
-    ? `<div class="pill-toggle">${CC_GROUPS.map(x =>
-        `<div class="ccu-pill${x.id === g.id ? ' active' : ''}" onclick="ccUsageSelect('${escJsAttr(x.id)}')">${esc(x.name)}</div>`).join('')}</div>`
-    : '';
+// Top card: the split headline, the bar and the two bucket rows (+ pending holds / overpayment when there are any).
+function ccLimitCardHTML(g, u) {
   const neg = n => '−' + fRp(n);
   const range = c => `${esc(ccShortDate(c.start))} – ${esc(ccShortDate(c.end))}`;
   const periodNote = u.cycles.length && u.sameCycle ? ` · this billing period ${range(u.cycles[0])}` : '';
   const periodLines = u.cycles.length && !u.sameCycle
     ? u.cycles.map(c => `<div class="ccu-muted">${esc(c.pm)}: ${range(c)}</div>`).join('') : '';
-
-  const limitCard = `<div class="chart-card">
+  return `<div class="chart-card">
       <div class="chart-card-title">${esc(g.name)}</div>
       <div class="ccu-split">
         <div class="ccu-half"><div class="ccu-muted">${u.overLimit ? 'Over limit' : 'Remaining limit'}</div>
@@ -366,9 +303,11 @@ function renderCCUsage() {
       ${u.overpayment > 0 ? ccRow('c-over', 'Overpayment', neg(u.overpayment)) : ''}
       ${u.missingPms.length ? `<div class="ccu-warn">Cards not found: ${esc(u.missingPms.join(', '))}</div>` : ''}
     </div>`;
+}
 
-  // Transaction list for the chosen cycle (each card's own cycle, so mixed billing days stay correct).
-  // Installment rows are shown in the installments strip instead, so they are left out here.
+// Transactions card for the chosen cycle (each card's own cycle, so mixed billing days stay correct).
+// Installment rows are shown in the installments strip instead, so they are left out of the list.
+function ccListCardHTML(g, u, rows, bdByPm, pmSet) {
   const off = ccUsageCycleOffset;
   const instRows = new Set(u.series.flatMap(s => s.entries.map(e => e.row)));
   const listRows = u.cycles.flatMap(c => CCUsageCore.cycleRowsFor(rows.filter(r => ccLc(r.pm) === ccLc(c.pm)), bdByPm, c.idx + off))
@@ -378,21 +317,47 @@ function renderCCUsage() {
   const inst = ccInstallmentsHTML(u, off, bdByPm, g.anchorDate);
   const refIdx = u.cycles.length ? u.cycles[0].idx + off : 0;
   const label = u.cycles.length ? `Cycle ${MO[refIdx % 12]} ${Math.floor(refIdx / 12)}` : '';
-  const listCard = `<div class="chart-card">
+  return `<div class="chart-card">
       <div class="ccu-list-head"><div class="chart-card-title" style="margin:0">Transactions (${items.length})</div>
         <div class="ccu-nav"><button onclick="ccUsageShiftCycle(-1)" ${off <= -36 ? 'disabled' : ''}>‹</button><span>${esc(label)}</span><button onclick="ccUsageShiftCycle(1)" ${off >= 0 ? 'disabled' : ''}>›</button></div></div>
       ${inst.html}
       ${items.length ? items.map(it => renderTxItemHTML(it, '', { creditSet, hidePm: true })).join('') : '<div class="empty-state">No transactions in this period.</div>'}
     </div>`;
+}
+
+function renderCCUsage() {
+  const box = document.getElementById('ccUsageContainer');
+  if (!box) return;
+  // Delegated, so it survives innerHTML rebuilds; bound once.
+  if (!box.dataset.tapBound) { box.dataset.tapBound = '1'; attachTxTapToEdit(box); }
+  if (!ccCardPMs().length && !CC_GROUPS.length) {
+    box.innerHTML = ccEmptyStateHTML('No credit cards yet. Mark a payment method as Credit Card in Settings.', 'Open Settings', "switchTabFromMore('settings')");
+    return;
+  }
+  if (!CC_GROUPS.length) {
+    box.innerHTML = ccEmptyStateHTML('Create a CC group to track your combined limit.', '+ New group', 'openCCGroupOverlay(null)');
+    return;
+  }
+  if (!histLoaded) {
+    box.innerHTML = '<div class="chart-loading">Loading…</div>';
+    if (!ccWaitingHist) { ccWaitingHist = true; onHistLoaded(() => { ccWaitingHist = false; renderCCUsage(); }); }
+    return;
+  }
+
+  const g = ccSelectedGroup();
+  const bdByPm = ccBdByPm(g);
+  const pmSet = new Set(g.pms.map(ccLc));
+  const rows = collectCCRows(pmSet);
+  const u = CCUsageCore.computeCCUsage(g, rows, todayISO(), bdByPm);
 
   box.innerHTML = `
     <div class="ccu-actions">
       <button class="ccu-link" onclick="openCCGroupOverlay(null)">+ New group</button>
       <button class="ccu-link" onclick="openCCGroupOverlay('${escJsAttr(g.id)}')">Edit group</button>
     </div>
-    ${selector}
+    ${ccSelectorHTML(g)}
     ${histLoadFailed ? '<div class="ccu-warn" style="margin:0 0 10px">The full history could not be loaded, so these numbers use cached data and may be incomplete.</div>' : ''}
-    <div class="ccu-grid"><div class="ccu-col">${limitCard}</div><div class="ccu-col">${listCard}</div></div>`;
+    <div class="ccu-grid"><div class="ccu-col">${ccLimitCardHTML(g, u)}</div><div class="ccu-col">${ccListCardHTML(g, u, rows, bdByPm, pmSet)}</div></div>`;
 }
 
 // ── Group overlay ─────────────────────────────────────────────

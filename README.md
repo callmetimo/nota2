@@ -137,8 +137,8 @@ Tracks a BCA-style **combined credit limit** (several cards share one pool). Rea
 
 | File | Role |
 |---|---|
-| `cc-usage-core.js` | `CCUsageCore` — **pure** (no DOM, no clock; `today` is passed in). Billing-cycle math, installment series, `computeCCUsage`. Tests: `tests/cc-usage.test.mjs` (in `npm test`). |
-| `cc-usage.js` | Group persistence (`CC_GROUPS`, `fetchCCGroups`, `mutateCCGroups`, `normalizeCCGroups`), `collectCCRows`, page render (`renderCCUsage`), group overlay (`#ccGroupOverlay`). |
+| `cc-usage-core.js` | `CCUsageCore` — **pure** (no DOM, no clock; `today` is passed in). Billing-cycle math, `normalizeRows` (sheet + local rows, ghost dedup), installment series, `computeCCUsage`. Tests: `tests/cc-usage.test.mjs` (in `npm test`). |
+| `cc-usage.js` | Group persistence (`CC_GROUPS`, `fetchCCGroups`, `mutateCCGroups`, `normalizeCCGroups`), page render (`renderCCUsage` assembles `ccSelectorHTML` / `ccLimitCardHTML` / `ccListCardHTML` / `ccInstallmentsHTML`), group overlay (`#ccGroupOverlay`). All module state is declared in one block near the top. |
 | `data-store.js` | `handleGetCCGroups` / `handleCCGroups`, router type `ccgroups`. |
 | `app-core.js` | `fireTxTap` / `attachTxTapToEdit` (shared with Search), `renderTxItemHTML(item, query, {creditSet, hidePm})`, `updateInstallmentPreview`, the installment branch of `submitOpex`, `renderCCUsageIfActive()` hooks. |
 
@@ -159,7 +159,7 @@ One JSON cell `CCGroups!A2:B2` = `{v:1, groups:[…]}` (≤ 45,000 chars), creat
 
 ### Rows the page reads
 
-`collectCCRows(pmSet)`: synced rows from `HIST.opex` (date from the real `y/m/d`, **not** the sheet's Month column) + unsynced `txHistory` rows, with count-based ghost dedup (same idea as `_reconcileUnsyncedWithSheet`; the signature includes the **card**, so an identical row on another account never hides a credit-card row, and a transfer is matched on its From-card expense leg). Future-dated rows are ignored. All amounts are IDR; `kind` is `charge` or `credit`.
+`collectCCRows(pmSet)` (a thin wrapper over the tested `CCUsageCore.normalizeRows`): rows from `HIST.opex` (date from the real `y/m/d`, **not** the sheet's Month column) + unsynced `txHistory` rows, with count-based ghost dedup (same idea as `_reconcileUnsyncedWithSheet`; the signature includes the **card**, so an identical row on another account never hides a credit-card row, and a transfer is matched on its From-card expense leg). Future-dated rows are ignored. All amounts are IDR; `kind` is `charge` or `credit`.
 
 ### Installments are plain rows — the conventions that matter
 

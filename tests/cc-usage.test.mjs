@@ -204,4 +204,38 @@ t('guards: a group without a limit gives 0 not NaN; a tiny principal never goes 
   assert.deepEqual([s.remaining, s.nextAmount], [0, 1]);
 });
 
+const TODAY = '2026-11-20';
+const norm = (histOpex, txHistory, pms = ['cc']) => C.normalizeRows({ histOpex, txHistory, pmSet: new Set(pms), today: TODAY });
+const hrow = (y, m0, d, pm, tx, exp, inc) => ({ y, m: m0, d, pm, tx, ...(exp ? { exp } : {}), ...(inc ? { inc } : {}) });
+const local = (date, pm, tx, amount, extra = {}) => ({ id: 1, date, pm, tx, amount, type: 'expense', synced: false, ...extra });
+
+t('normalizeRows: sheet rows become charges and credits with their source reference; other cards and future rows are left out', () => {
+  const r = norm([hrow(2026, 9, 10, 'CC', 'Shop', 100), hrow(2026, 9, 11, 'CC', 'Refund', 0, 40), hrow(2026, 9, 12, 'Cash', 'Lunch', 5), hrow(2026, 11, 25, 'CC', 'Later', 9)], []);
+  assert.deepEqual(r.map(x => [x.date, x.kind, x.amount, x.ref.source, x.ref.idx]), [['2026-10-10', 'charge', 100, 'hist-opex', 0], ['2026-10-11', 'credit', 40, 'hist-opex', 1]]);
+});
+
+t('normalizeRows: a synced local row for an earlier month still counts when the sheet data lacks it (and only once when it has it)', () => {
+  const synced = local('2026-10-10', 'CC', 'Old buy', 500, { synced: true });
+  assert.equal(norm([], [synced]).length, 1);
+  assert.equal(norm([hrow(2026, 9, 10, 'CC', 'Old buy', 500)], [synced]).length, 1);
+});
+
+t('normalizeRows: the signature includes the card, so a row on another account never hides a card row', () => {
+  const cc = local('2026-10-10', 'CC', 'Lunch', 50);
+  assert.equal(norm([hrow(2026, 9, 10, 'Cash', 'Lunch', 50)], [cc]).length, 1);
+  assert.equal(norm([hrow(2026, 9, 10, 'CC', 'Lunch', 50)], [cc]).length, 1);
+  // two identical local rows, one twin in the sheet: one is a ghost, one is real
+  assert.equal(norm([hrow(2026, 9, 10, 'CC', 'Lunch', 50)], [cc, { ...cc, id: 2 }]).filter(x => x.ref.source === 'local-opex').length, 1);
+});
+
+t('normalizeRows: transfers use the From-card leg for dedup; a pending one always counts', () => {
+  const xfr = { id: 3, date: '2026-10-12', tx: 'Transfer', amount: 200, fromPm: 'Bank', toPm: 'CC', type: 'transfer', synced: true };
+  const legs = [hrow(2026, 9, 12, 'Bank', 'Transfer', 200), hrow(2026, 9, 12, 'CC', 'Transfer', 0, 200)];
+  assert.equal(norm(legs, [xfr]).filter(x => x.kind === 'credit').length, 1);
+  assert.equal(norm([], [{ ...xfr, synced: false }]).filter(x => x.kind === 'credit').length, 1);
+  // an unrelated sheet transfer of the same amount from another account must not hide it
+  const other = [hrow(2026, 9, 12, 'Cash', 'Transfer', 200), hrow(2026, 9, 12, 'eWallet', 'Transfer', 0, 200)];
+  assert.equal(norm(other, [{ ...xfr, synced: false }]).filter(x => x.kind === 'credit').length, 1);
+});
+
 console.log(passed + ' passed');

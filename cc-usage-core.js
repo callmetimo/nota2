@@ -53,6 +53,53 @@ const CCUsageCore = (() => {
   const bdOf = (bdByPm, pm) => bdEff((bdByPm || {})[lc(pm)] || 0);
   const curIdxOf = (today, bd) => { const [y, m0, d] = parts(today); return cycleIdx(y, m0, d, bd); };
 
+  // The group's cards' rows in the shape computeCCUsage wants: the sheet rows (histOpex: {y, m 0-based, d, pm, tx,
+  // exp|inc, ...}) plus local rows the sheet data does not have yet (txHistory: {date, tx, amount, type, pm,
+  // fromPm, toPm, synced, ...}). `ref` says where a row came from ('hist-opex' / 'local-opex' + index).
+  // Future-dated rows are left out. Amounts are IDR; `kind` carries the direction.
+  function normalizeRows({ histOpex, txHistory, pmSet, today }) {
+    const rows = [];
+    const rowIso = r => (r.date ? String(r.date).slice(0, 10) : iso(r.y, r.m, r.d));
+    const push = (date, pm, kind, amount, r, source, idx) => {
+      if (!(amount > 0) || date > today) return;
+      rows.push({ date, pm, kind, amount, tx: r.tx || '', notes: r.notes || '', cat: r.cat || r.category || '', ref: { source, idx } });
+    };
+    // Count-based ghost matching (same idea as _reconcileUnsyncedWithSheet): a local row whose twin is already in
+    // histOpex must not be counted twice. The signature includes the card, so an identical row on a cash card
+    // or another account never hides a credit-card row.
+    const sig = (y, m0, d, tx, amount, income, pm) => `${y}-${m0}|${d}|${lc(tx)}|${amount || 0}|${income ? 'i' : 'e'}|${lc(pm)}`;
+    const sheetCounts = {};
+    histOpex.forEach((r, i) => {
+      const income = (r.inc || 0) > 0 && !(r.exp || 0);
+      const k = sig(r.y, r.m, r.d, r.tx, income ? r.inc : r.exp, income, r.pm);
+      sheetCounts[k] = (sheetCounts[k] || 0) + 1;
+      if (!pmSet.has(lc(r.pm))) return;
+      if ((r.exp || 0) > 0) push(rowIso(r), r.pm, 'charge', r.exp, r, 'hist-opex', i);
+      else if ((r.inc || 0) > 0) push(rowIso(r), r.pm, 'credit', r.inc, r, 'hist-opex', i);
+    });
+    const used = {};
+    txHistory.forEach((h, i) => {
+      if (!h.date) return;
+      const date = String(h.date).slice(0, 10);
+      // Synced rows are not skipped outright: a row saved for an earlier month is `synced` but that month is
+      // not reloaded into histOpex until the next full load. Counting by signature keeps it once either way.
+      const [y, m, d] = date.split('-');
+      const isTransfer = h.type === 'transfer';
+      // A transfer is matched on its expense leg (the From card).
+      const key = sig(+y, +m - 1, +d, h.tx, h.amount, h.type === 'income', isTransfer ? h.fromPm : h.pm);
+      used[key] = (used[key] || 0) + 1;
+      if ((sheetCounts[key] || 0) >= used[key]) return;
+      if (isTransfer) {
+        if (pmSet.has(lc(h.toPm))) push(date, h.toPm, 'credit', h.amount, h, 'local-opex', i);
+        if (pmSet.has(lc(h.fromPm))) push(date, h.fromPm, 'charge', h.amount, h, 'local-opex', i);
+        return;
+      }
+      if (!pmSet.has(lc(h.pm))) return;
+      push(date, h.pm, h.type === 'income' ? 'credit' : 'charge', h.amount, h, 'local-opex', i);
+    });
+    return rows;
+  }
+
   // Rows must be charges on the group's PMs dated <= today. Installment rows are ALSO regular charges
   // for the statement/unbilled buckets (they are billed amounts); this only derives the locked principal.
   //
@@ -197,5 +244,5 @@ const CCUsageCore = (() => {
     });
   }
 
-  return { dim, bdEff, cycleIdx, endDay, dayAfter, cycleRange, parseInstallment, buildSeries, computeCCUsage, cycleRowsFor };
+  return { dim, bdEff, cycleIdx, endDay, dayAfter, cycleRange, parseInstallment, normalizeRows, buildSeries, computeCCUsage, cycleRowsFor };
 })();

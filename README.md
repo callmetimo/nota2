@@ -30,7 +30,7 @@ The complete rules, load-bearing files, Do's and Don'ts, and verification requir
 > [!IMPORTANT]
 > This section is the distilled rulebook from the v4.79 → v4.123 architecture-review campaign (40 findings, ~45 commits, three assistants). The blow-by-blow history is in [CHANGELOG.md](CHANGELOG.md) (Session 69). The sign-in/auth rules are separate and stricter: [docs/auth-signin.md](docs/auth-signin.md). Where this section and an older note elsewhere in this README disagree, this section is current.
 
-### File map and load order (as of v4.132)
+### File map and load order (as of v4.134)
 
 `index.html` is **markup only** (plus 3 small inline scripts); all CSS is in `style.css`, all logic in separate files. Every `.js` file is a **classic script sharing one global scope** — no modules, no bundler, no build step.
 
@@ -114,7 +114,7 @@ config → sheets-client → data-store → auth
 - Test a page the way the user reaches it (`switchTabFromMore(...)`), not by calling its render function.
 - Never let a verification step open a real Google sign-in popup — it blocks all JS and can't be driven or closed from tooling.
 
-### Known open items (as of v4.132 — documented, not fixed)
+### Known open items (as of v4.134 — documented, not fixed)
 
 - `syncOpex`/`syncInvest`/`syncTransfer` still send `clientId`, but `data-store.js` has no idempotency cache; comments still describe a "6 h TTL" that no longer exists.
 - Editing a transaction while its create is still in flight loses the edit.
@@ -124,6 +124,69 @@ config → sheets-client → data-store → auth
 - A legacy `investHistory` row with no `id` (pre-TxID) can't be opened for edit from Search.
 - `pages.yml` runs only the `email-parser` and `email-import` suites; `tests/cc-usage.test.mjs` is in `npm test` but not in CI. Add `node tests/cc-usage.test.mjs` to the "Syntax and test checks" step.
 - `HANDOVER.md` is a finished handoff note and says to delete itself — safe to remove.
+- CC Usage: rows dated on/before the opening-balance date but labelled with the *next* Month in the sheet (posted after the statement cut-off) are ignored, because `HIST.opex` rows carry no sheet Month column. BCA counts them as used. See the **CC Usage page** section.
+- CC Usage: `closedSeries` ("mark paid off") is still honoured by the core and stored in `CCGroups`, but the UI to set or clear it was removed in v4.133; `ambiguous` on a series is computed but no longer displayed.
+- `PLAN_CC_USAGE.md` (the original design plan) is untracked in the repo root; the README section below supersedes it.
+
+---
+
+## CC Usage page (Profile → CC Usage, v4.124 – v4.134)
+
+Tracks a BCA-style **combined credit limit** (several cards share one pool). Read this before touching `cc-usage-core.js`, `cc-usage.js`, the `CCGroups` tab, or how installments are entered.
+
+### Files
+
+| File | Role |
+|---|---|
+| `cc-usage-core.js` | `CCUsageCore` — **pure** (no DOM, no clock; `today` is passed in). Billing-cycle math, installment series, `computeCCUsage`. Tests: `tests/cc-usage.test.mjs` (in `npm test`). |
+| `cc-usage.js` | Group persistence (`CC_GROUPS`, `fetchCCGroups`, `mutateCCGroups`, `normalizeCCGroups`), `collectCCRows`, page render (`renderCCUsage`), group overlay (`#ccGroupOverlay`). |
+| `data-store.js` | `handleGetCCGroups` / `handleCCGroups`, router type `ccgroups`. |
+| `app-core.js` | `fireTxTap` / `attachTxTapToEdit` (shared with Search), `renderTxItemHTML(item, query, {creditSet, hidePm})`, `updateInstallmentPreview`, the installment branch of `submitOpex`, `renderCCUsageIfActive()` hooks. |
+
+### The formula
+
+`Remaining = activeLimit − UnpaidStatement − CurrentSpending − RemainingInstallments − PendingHolds + Overpayment`
+
+- **Active limit** = temporary limit while `today <= tempLimitExpiry` (inclusive), else the permanent limit.
+- **Billing cycle** (per card): a charge on a day *after* the card's billing day belongs to the next cycle; `billingDate` 0/missing = calendar month; days 29–31 are clamped (Feb, leap years, Dec→Jan are covered by tests). Never `new Date('YYYY-MM-DD')` (UTC) — split the string.
+- **Charges** in earlier cycles are *billed*, in the current cycle *unbilled*. **Credits** (every income/refund/transfer-in on a linked card) pay the billed balance first; any excess reduces unbilled; what is left is *Overpayment*.
+- **Unpaid Statement** = billed charges (+ opening balance) − credits. It is *what is still owed on closed statements after payments*, **not** the sum of any visible list. **Current Spending** = everything charged in the current cycle, installment payments included (reduced only if a payment overflows the statement).
+- **Opening balance** (group overlay): *As of* = the last statement date, *Outstanding* = that statement's **Tagihan Baru** (the installment ledger is *not* part of it). Rows dated on/before *As of* are ignored for the balance; installment *series* still read every row.
+- **Pending holds**: manual number (authorised, not yet posted).
+
+### Data model: the `CCGroups` tab (not Config)
+
+One JSON cell `CCGroups!A2:B2` = `{v:1, groups:[…]}` (≤ 45,000 chars), created lazily on first save; a bad JSON cell is an **error, never "empty"**. It is **not** in Config because old cached clients rewrite `Config!A2:N` wholesale and would drop or misalign extra columns. Group: `id, name, pms[], permanentLimit, tempLimit, tempLimitExpiry, anchorDate, anchorOutstanding, pendingAuth, pendingAuthDate, closedSeries[], sortOrder, updatedAt`. A card belongs to at most one group (enforced in the UI **and** in `normalizeCCGroups`). `mutateCCGroups(fn)` is the only write path: it re-reads the sheet first, applies `fn` to a copy and saves; `fn` returning `null` means "no change" (no write, so the tab is never created needlessly). Renaming a payment method updates the groups via `ccGroupsRenamePM`.
+
+### Rows the page reads
+
+`collectCCRows(pmSet)`: synced rows from `HIST.opex` (date from the real `y/m/d`, **not** the sheet's Month column) + unsynced `txHistory` rows, with count-based ghost dedup (same idea as `_reconcileUnsyncedWithSheet`). Future-dated rows are ignored. All amounts are IDR; `kind` is `charge` or `credit`.
+
+### Installments are plain rows — the conventions that matter
+
+- Entering an installment on a card saves **one** row: `<name> CICILAN KE 1 DARI N` for `round(P/N)`, with `[pokok:P]` appended to the notes (the user's note is cut to fit 200 chars, never the tag). **No recurring rule is created.** The user never records `REVERSAL CICILAN`.
+- The later months are recorded by hand (or are old rows): `CICILAN KE X DARI Y`, the legacy `Name (X/Y)`, and the legacy `Name (Installment)` the old recurring system wrote after the numbered ones.
+- `buildSeries` places rows **chronologically into series instances**: a numbered row joins the instance of the same name whose last number is X−1 (same monthly amount wins a tie), else starts a new instance (`NAME|Y`, `NAME|Y#2`, …) — so two unrelated "Train (1/3)" purchases stay two series. An unnumbered `(Installment)` row is the next instalment of the open series of that name.
+- **Remaining** of a series = `P − round(P/Y)·xMax` when `[pokok:P]` is known (the final instalment absorbs the rounding), else `amount × (Y − xMax)`. The highest number recorded counts as billed; missing earlier rows don't matter. Each series also returns its `note` (latest transaction note, tag stripped) and `entries` (every row with its number).
+- **Old recurring installment rules** (`installmentTotal > 0`) are **hidden and no longer generate anything** (`isLegacyInstallmentRule`), but are never deleted or migrated; they expire on their own. Reverting v4.129 brings them back.
+
+### What the page shows
+
+Top card: *Remaining limit | Current spending* split headline (red *Over limit* when negative), note `of Rp… combined limit · this billing period 26 Oct – 25 Nov`, the stacked bar, then *Unpaid Statement*, *Remaining Installments*, *Pending Holds* and *Overpayment* (the last two only when > 0). Below: **Transactions** for the chosen cycle (‹ › navigation; every card uses its own cycle). Installment rows are **left out of that list** and shown in one expandable strip at its top, `Installments: Rp… paid · Rp… remaining`; expanded, each installment shows its note, *Paid* in the shown cycle and (current cycle only) *Remaining · next #n*, plus a reconciliation line (standalone + installments = Current Spending). Earlier cycles show *paid* only. The page re-renders (only while open) through `renderCCUsageIfActive()`.
+
+### Decisions that were made on purpose (don't re-litigate without the user)
+
+- The **Search monitor stays**. It is a monthly browser for *every* account (cash/bank too); only its per-card credit-limit bar and installment math moved to CC Usage. Tapping a CC-group card on Insights opens CC Usage (`tapAccountCard` → `ccGroupForPM`, from the cached groups); any other account opens the monitor.
+- The per-card *Credit limit* input in the payment-method editor is **hidden, not removed**: the value (Config column N) still round-trips and prefills a new group's limit.
+- Labels are English ("Unpaid Statement", "Remaining Installments"); the user thinks in BCA's statement terms, so keep them literal.
+- A row the user labels with the *next* month on purpose (posted after the cut-off) is intentional — see the open item above.
+
+### Pitfalls (each cost real time)
+
+- **Never put anything tappable in the same `.form-group` as a hidden date input**: `.date-input-hidden` is `position:absolute; inset:0` inside a `position:relative` group and covers its siblings (the Outstanding field opened the calendar).
+- Test against **real data**: a hand-checked formula passed all worked examples while the real ledger was off by Rp7.000.000 (finished installments never closing). Compare against a real statement's *Sisa Kredit Limit* when changing series logic.
+- Browser testing: scripts load as `x.js?v=__BUILD__`, so refresh those **exact** URLs; the e2e seed's own failed history load overwrites a hand-seeded `HIST.opex`, so seed rows after `histLoaded` is true and test quickly.
+- `cc-usage.js` (the UI) has **no automated tests** — only the pure core does. Verify page changes in the browser.
 
 ---
 

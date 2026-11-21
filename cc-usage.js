@@ -241,17 +241,43 @@ function ccBarHTML(u) {
     ${u.overLimit ? `<div class="ccu-limit-mark" style="left:${pct(u.activeLimit)}"></div>` : ''}</div>`;
 }
 
-function ccSeriesHTML(series) {
-  const live = series.filter(s => !s.closed && s.xMax < s.y);
-  if (!live.length) return '';
-  return `<div class="chart-card"><div class="chart-card-title">Active Installments (${live.length})</div>${live.map(s => `
-    <div class="ccu-series">
-      <div class="ccu-series-t">${esc(s.name)} · #${s.xMax}/${s.y} · ${fRp(s.amount)}/mo</div>
+let ccInstOpen = false;
+
+function ccToggleInst() { ccInstOpen = !ccInstOpen; renderCCUsage(); }
+
+const ccRowCycle = (r, bdByPm) => CCUsageCore.cycleIdx(+r.date.slice(0, 4), +r.date.slice(5, 7) - 1, +r.date.slice(8, 10),
+  CCUsageCore.bdEff(bdByPm[ccLc(r.pm)] || 0));
+
+// The installments strip: what was paid in the shown cycle per installment, and (current cycle only) what remains.
+// Every installment row is taken out of the transaction list and shown here instead.
+function ccInstallmentsHTML(u, off, bdByPm, anchorDate) {
+  const idxByPm = {};
+  u.cycles.forEach(c => { idxByPm[ccLc(c.pm)] = c.idx + off; });
+  const views = u.series.map(s => {
+    const inCycle = s.entries.filter(e => ccRowCycle(e.row, bdByPm) === idxByPm[ccLc(e.row.pm)]
+      && !(off === 0 && anchorDate && e.row.date <= anchorDate));
+    return { s, paid: inCycle.reduce((n, e) => n + e.row.amount, 0), last: inCycle.length ? inCycle[inCycle.length - 1] : null };
+  }).filter(v => v.paid > 0 || (off === 0 && !v.s.closed && v.s.remaining > 0));
+  if (!views.length) return { html: '', paid: 0 };
+  views.sort((a, b) => (off === 0 ? b.s.remaining - a.s.remaining : 0) || b.paid - a.paid);
+  const paid = views.reduce((n, v) => n + v.paid, 0);
+  const strip = `<div class="ccu-strip${ccInstOpen ? ' open' : ''}" onclick="ccToggleInst()"><span>Installments: ${fRp(paid)} paid${off === 0 ? ` · ${fRp(u.installmentRemaining)} remaining` : ''}</span><span>${ccInstOpen ? '▾' : '▸'}</span></div>`;
+  if (!ccInstOpen) return { html: strip, paid };
+  const rowsHtml = views.map(v => {
+    const s = v.s, x = v.last ? v.last.x : s.xMax, amt = v.last ? v.last.row.amount : s.amount;
+    const finished = off === 0 && s.xMax >= s.y;
+    const remaining = off === 0 ? `<span class="ccu-rem">Remaining ${fRp(s.remaining)}${s.xMax < s.y ? ` · next #${s.nextX}` : ''}</span>` : '';
+    return `<div class="ccu-irow">
+      <div class="ccu-irow-t">${esc(s.name)} · #${x}/${s.y} · ${fRp(amt)}/mo${finished ? '<span class="ccu-done">done</span>' : ''}</div>
       ${s.note ? `<div class="ccu-note">${esc(s.note)}</div>` : ''}
-      <div class="ccu-muted">Remaining ${fRp(s.remaining)} · next: #${s.nextX} ≈ ${fRp(s.nextAmount)}</div>
-      ${s.stale ? `<span class="ccu-flag">Not recorded since ${esc(ccShortDate(s.lastDate))}</span>` : ''}
-    </div>`).join('')}
-  </div>`;
+      <div class="ccu-two"><span class="ccu-paid">${v.paid ? `Paid ${fRp(v.paid)}` : 'Paid –'}</span>${remaining}</div>
+      ${off === 0 && s.stale ? `<span class="ccu-flag">Not recorded since ${esc(ccShortDate(s.lastDate))}</span>` : ''}
+    </div>`;
+  }).join('');
+  // Only when nothing netted off the spending (an overpayment would make the two figures differ).
+  const recon = off === 0 && u.unbilled === u.cycleSpend
+    ? `<div class="ccu-muted ccu-recon">Standalone ${fRp(u.cycleSpend - paid)} + installments ${fRp(paid)} = Current Spending ${fRp(u.unbilled)}</div>` : '';
+  return { html: `${strip}<div class="ccu-strip-body">${rowsHtml}${recon}</div>`, paid };
 }
 
 function renderCCUsage() {
@@ -288,38 +314,46 @@ function renderCCUsage() {
         `<div class="pill-toggle-btn expense${x.id === g.id ? ' active' : ''}" onclick="ccUsageSelect('${escJsAttr(x.id)}')">${esc(x.name)}</div>`).join('')}</div>`
     : '';
   const neg = n => '−' + fRp(n);
-  const period = u.cycles.length === 0 ? ''
-    : (u.sameCycle ? `Billing period ${esc(ccShortDate(u.cycles[0].start))} – ${esc(ccShortDate(u.cycles[0].end))}`
-      : u.cycles.map(c => `${esc(c.pm)}: ${esc(ccShortDate(c.start))} – ${esc(ccShortDate(c.end))}`).join('<br>'));
+  const range = c => `${esc(ccShortDate(c.start))} – ${esc(ccShortDate(c.end))}`;
+  const periodNote = u.cycles.length && u.sameCycle ? ` · this billing period ${range(u.cycles[0])}` : '';
+  const periodLines = u.cycles.length && !u.sameCycle
+    ? u.cycles.map(c => `<div class="ccu-muted">${esc(c.pm)}: ${range(c)}</div>`).join('') : '';
 
   const limitCard = `<div class="chart-card">
-      <div class="chart-card-title">${esc(g.name)} · ${u.overLimit ? 'Over limit' : 'Remaining Limit'}</div>
-      <div class="ccu-top"><div class="ccu-remaining${u.overLimit ? ' neg' : ''}">${u.overLimit ? neg(-u.remaining) : fRp(u.remaining)}</div>
-        <div class="ccu-muted">of ${fRp(u.activeLimit)}</div></div>
-      <div class="ccu-limit">Combined Limit${u.tempActive ? ` <span class="ccu-badge-temp">Temporary limit until ${esc(ccShortDate(g.tempLimitExpiry))}</span>` : ''}</div>
-      ${u.tempActive ? `<div class="ccu-muted">Permanent limit ${fRp(g.permanentLimit)}</div>` : ''}
+      <div class="chart-card-title">${esc(g.name)}</div>
+      <div class="ccu-split">
+        <div class="ccu-half"><div class="ccu-muted">${u.overLimit ? 'Over limit' : 'Remaining limit'}</div>
+          <div class="ccu-big ${u.overLimit ? 'neg' : 'pos'}">${u.overLimit ? neg(-u.remaining) : fRp(u.remaining)}</div><div class="ccu-ul ${u.overLimit ? 'neg' : 'pos'}"></div></div>
+        <div class="ccu-half"><div class="ccu-muted">Current spending</div>
+          <div class="ccu-big warn">${fRp(u.unbilled)}</div><div class="ccu-ul warn"></div></div>
+      </div>
+      <div class="ccu-muted ccu-period-note">of ${fRp(u.activeLimit)} combined limit${periodNote}</div>
+      ${periodLines}
+      ${u.tempActive ? `<div class="ccu-limit"><span class="ccu-badge-temp">Temporary limit until ${esc(ccShortDate(g.tempLimitExpiry))}</span><span class="ccu-muted">Permanent limit ${fRp(g.permanentLimit)}</span></div>` : ''}
       ${u.tempExpired ? `<div class="ccu-muted">Temporary limit ended ${esc(isoDisp(g.tempLimitExpiry))}: back to the permanent limit</div>` : ''}
-      ${period ? `<div class="ccu-muted ccu-period-note">${period}</div>` : ''}
       ${ccBarHTML(u)}
-      ${ccRow('c-stmt', 'Billed Statement', fRp(u.statementBalance))}
-      ${ccRow('c-unb', 'Current Spending', fRp(u.unbilled), '· this billing period', true)}
+      ${ccRow('c-stmt', 'Unpaid Statement', fRp(u.statementBalance))}
       ${ccRow('c-inst', 'Remaining Installments', fRp(u.installmentRemaining))}
       ${u.pendingAuth > 0 ? ccRow('c-pend', 'Pending Holds', fRp(u.pendingAuth), g.pendingAuthDate ? `· updated ${esc(ccShortDate(g.pendingAuthDate))}` : '') : ''}
       ${u.overpayment > 0 ? ccRow('c-over', 'Overpayment', neg(u.overpayment)) : ''}
-      ${ccRow('c-rem', u.overLimit ? 'Over limit' : 'Remaining Limit', u.overLimit ? neg(-u.remaining) : fRp(u.remaining))}
       ${u.missingPms.length ? `<div class="ccu-warn">Cards not found: ${esc(u.missingPms.join(', '))}</div>` : ''}
     </div>`;
 
   // Transaction list for the chosen cycle (each card's own cycle, so mixed billing days stay correct).
+  // Installment rows are shown in the installments strip instead, so they are left out here.
   const off = ccUsageCycleOffset;
-  const listRows = u.cycles.flatMap(c => CCUsageCore.cycleRowsFor(rows.filter(r => ccLc(r.pm) === ccLc(c.pm)), bdByPm, c.idx + off));
+  const instRows = new Set(u.series.flatMap(s => s.entries.map(e => e.row)));
+  const listRows = u.cycles.flatMap(c => CCUsageCore.cycleRowsFor(rows.filter(r => ccLc(r.pm) === ccLc(c.pm)), bdByPm, c.idx + off))
+    .filter(r => !instRows.has(r));
   const items = ccListItems(listRows);
   const creditSet = ccCreditKeys(items, pmSet);
+  const inst = ccInstallmentsHTML(u, off, bdByPm, g.anchorDate);
   const refIdx = u.cycles.length ? u.cycles[0].idx + off : 0;
   const label = u.cycles.length ? `Cycle ${MO[refIdx % 12]} ${Math.floor(refIdx / 12)}` : '';
   const listCard = `<div class="chart-card">
       <div class="ccu-list-head"><div class="chart-card-title" style="margin:0">Transactions (${items.length})</div>
         <div class="ccu-nav"><button onclick="ccUsageShiftCycle(-1)" ${off <= -36 ? 'disabled' : ''}>‹</button><span>${esc(label)}</span><button onclick="ccUsageShiftCycle(1)" ${off >= 0 ? 'disabled' : ''}>›</button></div></div>
+      ${inst.html}
       ${items.length ? items.map(it => renderTxItemHTML(it, '', { creditSet, hidePm: true })).join('') : '<div class="empty-state">No transactions in this period.</div>'}
     </div>`;
 
@@ -329,7 +363,7 @@ function renderCCUsage() {
       <button class="ccu-link" onclick="openCCGroupOverlay('${escJsAttr(g.id)}')">Edit group</button>
     </div>
     ${selector}
-    <div class="ccu-grid"><div class="ccu-col">${limitCard}${ccSeriesHTML(u.series)}</div><div class="ccu-col">${listCard}</div></div>`;
+    <div class="ccu-grid"><div class="ccu-col">${limitCard}</div><div class="ccu-col">${listCard}</div></div>`;
 }
 
 // ── Group overlay ─────────────────────────────────────────────

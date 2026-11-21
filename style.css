@@ -664,9 +664,6 @@ html.wide .modal-handle{display:none}
 .ccu-card-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .ccu-chip{font-size:12px;padding:4px 10px;border-radius:12px;background:var(--bg3);border:0.5px solid var(--border);color:var(--text2)}
 .ccu-warn{font-size:12px;color:var(--red);margin-top:10px}
-.ccu-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-.ccu-remaining{font-size:32px;font-weight:700;letter-spacing:-0.5px;color:var(--green)}
-.ccu-remaining.neg{color:var(--red)}
 .ccu-bar{position:relative;display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--bg3);margin:12px 0}
 .ccu-bar.over{outline:1px solid var(--red)}
 .ccu-seg{height:100%}
@@ -676,9 +673,6 @@ html.wide .modal-handle{display:none}
 .ccu-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .ccu-row-l{flex:1}
 .ccu-row-v{font-weight:600}
-.ccu-series{padding:8px 0;border-bottom:0.5px solid var(--border)}
-.ccu-series:last-child{border-bottom:none}
-.ccu-series-t{font-size:13px;font-weight:600}
 .ccu-flag{display:inline-block;margin:6px 6px 0 0;font-size:11px;padding:2px 8px;border-radius:10px;background:var(--red-dim);color:var(--red)}
 .ccu-list-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
 .ccu-nav{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
@@ -686,5 +680,21 @@ html.wide .modal-handle{display:none}
 .ccu-nav button:disabled{opacity:0.35;cursor:default}
 html.wide .ccu-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
 .ccu-period-note{margin-top:2px}
-.ccu-row.hl{background:var(--orange-dim, rgba(255,165,0,0.12));border-radius:6px;padding:7px 8px;margin:2px -8px;font-weight:600}
 .ccu-note{font-size:12px;color:var(--text2);font-style:italic;margin:2px 0}
+.ccu-split{display:grid;grid-template-columns:1fr 1fr;margin:6px 0 8px}
+.ccu-half{padding:0 12px;min-width:0}
+.ccu-half:first-child{padding-left:0;border-right:0.5px solid var(--border)}
+.ccu-big{font-size:clamp(17px,5vw,24px);font-weight:700;letter-spacing:-0.4px;white-space:nowrap}
+.ccu-big.pos{color:var(--green)}.ccu-big.neg{color:var(--red)}.ccu-big.warn{color:var(--orange)}
+.ccu-ul{height:3px;border-radius:2px;margin-top:6px}
+.ccu-ul.pos{background:var(--green)}.ccu-ul.neg{background:var(--red)}.ccu-ul.warn{background:var(--orange)}
+.ccu-strip{display:flex;align-items:center;justify-content:space-between;gap:8px;background:rgba(167,139,250,0.12);border:0.5px solid rgba(167,139,250,0.4);border-radius:10px;padding:8px 10px;color:#c9bdfc;font-size:13px;cursor:pointer;margin-bottom:8px}
+.ccu-strip.open{border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0}
+.ccu-strip-body{background:var(--bg3);border-radius:0 0 10px 10px;padding:2px 10px 8px;margin-bottom:8px}
+.ccu-irow{padding:8px 0;border-bottom:0.5px solid var(--border)}
+.ccu-irow-t{font-size:13px;font-weight:600}
+.ccu-two{display:flex;justify-content:space-between;gap:8px;margin-top:3px;font-size:12px}
+.ccu-paid{color:var(--orange)}
+.ccu-rem{color:#c9bdfc}
+.ccu-done{font-size:11px;padding:1px 7px;border-radius:8px;background:var(--green-dim);color:var(--green);margin-left:6px;font-weight:500}
+.ccu-recon{border-top:0.5px solid var(--border);margin-top:6px;padding-top:6px}

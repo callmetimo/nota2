@@ -65,7 +65,7 @@ const CCUsageCore = (() => {
     const charges = rows.map((r, i) => ({ r, i })).filter(e => e.r.kind === 'charge')
       .sort((a, b) => a.r.date.localeCompare(b.r.date) || a.i - b.i).map(e => e.r);
     const inst = [];
-    const place = (s, r, x) => { s.rows.push(r); if (x >= s.xMax) { s.xMax = x; s.last = r; } };
+    const place = (s, r, x) => { s.rows.push(r); s.xs.push(x); if (x >= s.xMax) { s.xMax = x; s.last = r; } };
     // Same amount as the series' last instalment wins; otherwise the most recently active one.
     const pick = (pool, r) => {
       if (!pool.length) return null;
@@ -81,7 +81,7 @@ const CCUsageCore = (() => {
         const behind = p.x > 1 ? same.filter(s => s.xMax > 0 && s.xMax < p.x - 1) : [];
         const target = pick(next.length ? next : behind, r);
         if (target) { place(target, r, p.x); return; }
-        const fresh = { name: p.normName, y: p.y, rows: [], xMax: 0, last: null };
+        const fresh = { name: p.normName, y: p.y, rows: [], xs: [], xMax: 0, last: null };
         inst.push(fresh);
         place(fresh, r, p.x);
       } else if (CONT_RE.test(r.tx)) {
@@ -114,7 +114,9 @@ const CCUsageCore = (() => {
       return {
         key, name: s.name, y: s.y, xMax: s.xMax, amount: a, principal: P, remaining: Math.round(remaining), note,
         nextX, nextAmount: Math.round(nextAmount), lastDate: lastRow.date, pm: lastRow.pm, cat: lastRow.cat || '',
-        ambiguous: seen[s.base] > 1, stale: s.xMax < s.y && lastRow.date < prevStart, closed: isClosed
+        ambiguous: seen[s.base] > 1, stale: s.xMax < s.y && lastRow.date < prevStart, closed: isClosed,
+        // Every row of the series with its instalment number (the page uses them to show payments per cycle).
+        entries: s.rows.map((r, i) => ({ row: r, x: s.xs[i] }))
       };
     });
   }

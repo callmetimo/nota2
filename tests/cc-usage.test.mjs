@@ -161,4 +161,15 @@ t('series carries the latest transaction note (without the principal tag) so sam
   assert.deepEqual(s.map(x => x.note), ['Halle - Frankfurt', 'Prague - Krakow']);
 });
 
+t('series entries list every row of the series with its instalment number', () => {
+  const g = { pms: ['CC'], permanentLimit: 1 };
+  const rows = [
+    row('2026-09-27', 'CC', 'charge', 'GYM (1/3)', 3000),
+    row('2026-10-27', 'CC', 'charge', 'GYM (Installment)', 3000)
+  ];
+  const s = C.buildSeries(rows, g, '2026-11-20', { cc: 25 })[0];
+  assert.deepEqual(s.entries.map(e => [e.x, e.row.date]), [[1, '2026-09-27'], [2, '2026-10-27']]);
+  assert.equal(s.entries[1].row, rows[1]);
+});
+
 console.log(passed + ' passed');

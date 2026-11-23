@@ -244,5 +244,19 @@ const CCUsageCore = (() => {
     });
   }
 
-  return { dim, bdEff, cycleIdx, endDay, dayAfter, cycleRange, parseInstallment, normalizeRows, buildSeries, computeCCUsage, cycleRowsFor };
+  // Spending by category for the donut: charges only, largest first. Rows that isInst() accepts form one
+  // "installments" slice of their own, whatever their category; rows without a category become "Uncategorized".
+  const INST_KEY = '__installments__';
+  function categoryTotals(rows, isInst) {
+    const sums = {};
+    rows.forEach(r => {
+      if (r.kind !== 'charge' || !(r.amount > 0)) return;
+      const key = isInst && isInst(r) ? INST_KEY : (r.cat || 'Uncategorized');
+      sums[key] = (sums[key] || 0) + r.amount;
+    });
+    return Object.keys(sums).map(key => ({ key, amount: Math.round(sums[key]) }))
+      .sort((a, b) => b.amount - a.amount || a.key.localeCompare(b.key));
+  }
+
+  return { dim, bdEff, cycleIdx, endDay, dayAfter, cycleRange, parseInstallment, normalizeRows, buildSeries, computeCCUsage, cycleRowsFor, categoryTotals, INST_KEY };
 })();

@@ -238,4 +238,18 @@ t('normalizeRows: transfers use the From-card leg for dedup; a pending one alway
   assert.equal(norm(other, [{ ...xfr, synced: false }]).filter(x => x.kind === 'credit').length, 1);
 });
 
+t('categoryTotals: charges only, installments get their own slice, no category = Uncategorized, largest first', () => {
+  const rows = [
+    { ...row('2026-11-01', 'CC', 'charge', 'A', 100), cat: 'Food' },
+    { ...row('2026-11-02', 'CC', 'charge', 'B', 300), cat: 'Travel' },
+    { ...row('2026-11-03', 'CC', 'charge', 'C', 50), cat: 'Food' },
+    row('2026-11-04', 'CC', 'charge', 'D', 70),
+    { ...row('2026-11-05', 'CC', 'charge', 'Laptop CICILAN KE 2 DARI 12', 200), cat: 'Shopping' },
+    { ...row('2026-11-06', 'CC', 'credit', 'Payment', 900), cat: 'Food' }
+  ];
+  const out = C.categoryTotals(rows, r => r.tx.includes('CICILAN'));
+  assert.deepEqual(out.map(x => [x.key, x.amount]), [['Travel', 300], [C.INST_KEY, 200], ['Food', 150], ['Uncategorized', 70]]);
+  assert.deepEqual(C.categoryTotals([]), []);
+});
+
 console.log(passed + ' passed');

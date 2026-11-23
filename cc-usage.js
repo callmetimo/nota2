@@ -58,7 +58,7 @@ const CC_SEL_LS_KEY = 'notapub_ccusage_sel';
 let ccUsageSelectedId = '';   // selected group id, remembered per device
 try { ccUsageSelectedId = localStorage.getItem(CC_SEL_LS_KEY) || ''; } catch (e) {}
 let ccUsageCycleOffset = 0;   // 0 = current billing cycle, -1 = previous, ...
-let ccInstOpen = false;       // the installments strip is expanded
+let ccSelCat = '';            // category picked on the donut ('' = all transactions, CCUsageCore.INST_KEY = installments)
 let ccWaitingHist = false;    // a render is already waiting for the history load
 let ccgEditId = null;         // group open in the overlay (null = a new one)
 let ccgSaving = false;        // a group save or delete is in flight
@@ -148,6 +148,7 @@ function ccSelectedGroup() {
 function ccUsageSelect(id) {
   ccUsageSelectedId = id;
   ccUsageCycleOffset = 0;
+  ccSelCat = '';
   try { localStorage.setItem(CC_SEL_LS_KEY, id); } catch (e) {}
   renderCCUsage();
 }
@@ -201,6 +202,7 @@ function ccCreditKeys(items, pmSet) {
 // ── Page: render ──────────────────────────────────────────────
 function openCCUsagePage() {
   ccUsageCycleOffset = 0;
+  ccSelCat = '';
   renderCCUsage();
   fetchCCGroups().then(renderCCUsage);
 }
@@ -212,6 +214,7 @@ function renderCCUsageIfActive() {
 
 function ccUsageShiftCycle(d) {
   ccUsageCycleOffset = Math.min(0, Math.max(-36, ccUsageCycleOffset + d));
+  ccSelCat = '';
   renderCCUsage();
 }
 
@@ -229,13 +232,14 @@ function ccBarHTML(u) {
     ${u.overLimit ? `<div class="ccu-limit-mark" style="left:${pct(u.activeLimit)}"></div>` : ''}</div>`;
 }
 
-function ccToggleInst() { ccInstOpen = !ccInstOpen; renderCCUsage(); }
+// Tapping the picked slice again goes back to all transactions.
+function ccSelectCat(key) { ccSelCat = ccSelCat === key ? '' : key; renderCCUsage(); }
 
 const ccRowCycle = (r, bdByPm) => CCUsageCore.cycleIdx(+r.date.slice(0, 4), +r.date.slice(5, 7) - 1, +r.date.slice(8, 10),
   CCUsageCore.bdEff(bdByPm[ccLc(r.pm)] || 0));
 
-// The installments strip: what was paid in the shown cycle per installment, and (current cycle only) what remains.
-// Every installment row is taken out of the transaction list and shown here instead.
+// Detail view of the Installments slice: what was paid in the shown cycle per installment, and (current cycle only)
+// what remains. Shown instead of the transaction list while that slice is picked.
 function ccInstallmentsHTML(u, off, bdByPm, anchorDate) {
   const idxByPm = {};
   u.cycles.forEach(c => { idxByPm[ccLc(c.pm)] = c.idx + off; });
@@ -244,11 +248,9 @@ function ccInstallmentsHTML(u, off, bdByPm, anchorDate) {
       && !(off === 0 && anchorDate && e.row.date <= anchorDate));
     return { s, paid: inCycle.reduce((n, e) => n + e.row.amount, 0), last: inCycle.length ? inCycle[inCycle.length - 1] : null };
   }).filter(v => v.paid > 0 || (off === 0 && !v.s.closed && v.s.remaining > 0));
-  if (!views.length) return { html: '', paid: 0 };
+  if (!views.length) return { html: '', paid: 0, count: 0 };
   views.sort((a, b) => (off === 0 ? b.s.remaining - a.s.remaining : 0) || b.paid - a.paid);
   const paid = views.reduce((n, v) => n + v.paid, 0);
-  const strip = `<div class="ccu-strip${ccInstOpen ? ' open' : ''}" onclick="ccToggleInst()"><span>Installments: ${fRp(paid)} paid${off === 0 ? ` · ${fRp(u.installmentRemaining)} remaining` : ''}</span><span>${ccInstOpen ? '▾' : '▸'}</span></div>`;
-  if (!ccInstOpen) return { html: strip, paid };
   const rowsHtml = views.map(v => {
     const s = v.s, x = v.last ? v.last.x : s.xMax, amt = v.last ? v.last.row.amount : s.amount;
     const finished = off === 0 && s.xMax >= s.y;
@@ -263,7 +265,7 @@ function ccInstallmentsHTML(u, off, bdByPm, anchorDate) {
   // Only when nothing netted off the spending (an overpayment would make the two figures differ).
   const recon = off === 0 && u.unbilled === u.cycleSpend
     ? `<div class="ccu-muted ccu-recon">Standalone ${fRp(u.cycleSpend - paid)} + installments ${fRp(paid)} = Current Spending ${fRp(u.unbilled)}</div>` : '';
-  return { html: `${strip}<div class="ccu-strip-body">${rowsHtml}${recon}</div>`, paid };
+  return { html: `<div class="ccu-strip-body ccu-inst-detail">${rowsHtml}${recon}</div>`, paid, count: views.length };
 }
 
 function ccEmptyStateHTML(message, buttonLabel, onclick) {
@@ -306,23 +308,75 @@ function ccLimitCardHTML(g, u) {
     </div>`;
 }
 
+const ccCatLabel = key => (key === CCUsageCore.INST_KEY ? 'Installments' : key);
+const ccCatColor = key => (key === CCUsageCore.INST_KEY ? '#a78bfa' : (CAT_COLORS[key] || CAT_COLORS.Other || '#888780'));
+
+// Donut: one circle per slice (tap to pick), the others dim while one is picked, the centre shows the total or the pick.
+function ccDonutHTML(slices, sel) {
+  const total = slices.reduce((n, s) => n + s.amount, 0), r = 46, circ = 2 * Math.PI * r;
+  let off = 0;
+  const arcs = slices.map(s => {
+    const d = s.amount / total * circ;
+    const c = `<circle cx="56" cy="56" r="${r}" fill="none" stroke="${ccCatColor(s.key)}" stroke-width="16" stroke-dasharray="${d} ${circ - d}" stroke-dashoffset="${-off}" opacity="${sel && sel !== s.key ? 0.3 : 1}" style="cursor:pointer" onclick="ccSelectCat('${escJsAttr(s.key)}')"/>`;
+    off += d;
+    return c;
+  }).join('');
+  const picked = sel ? slices.find(s => s.key === sel) : null;
+  const name = picked ? ccCatLabel(picked.key) : 'Spending';
+  const amt = fRpS(picked ? picked.amount : total);
+  const fs = Math.min(11, +(70 / (amt.length * 0.58)).toFixed(1));
+  return `<svg viewBox="0 0 112 112" class="ccu-donut" role="img" aria-label="Spending by category">
+    <circle cx="56" cy="56" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="16"/>
+    <g transform="rotate(-90 56 56)">${arcs}</g>
+    <text x="56" y="52" text-anchor="middle" font-size="8" fill="var(--text2)">${esc(name.length > 14 ? name.slice(0, 13) + '…' : name)}</text>
+    <text x="56" y="65" text-anchor="middle" font-size="${fs}" font-weight="700" fill="var(--text)">${amt}</text>
+  </svg>`;
+}
+
+function ccLegendHTML(slices, sel) {
+  const total = slices.reduce((n, s) => n + s.amount, 0);
+  return slices.map(s => {
+    const p = s.amount / total * 100;
+    return `<div class="legend-row${sel === s.key ? ' active' : ''}" onclick="ccSelectCat('${escJsAttr(s.key)}')">
+      <div class="legend-dot" style="background:${ccCatColor(s.key)}"></div>
+      <div class="legend-name">${esc(ccCatLabel(s.key))}</div>
+      <div class="legend-pct">${p < 1 ? '<1' : Math.round(p)}%</div></div>`;
+  }).join('');
+}
+
 // Transactions card for the chosen cycle (each card's own cycle, so mixed billing days stay correct).
-// Installment rows are shown in the installments strip instead, so they are left out of the list.
+// A donut by category on top picks what the list shows: nothing picked = every transaction of the cycle,
+// a category = that category's charges, Installments = the per-installment detail instead of the list.
 function ccListCardHTML(g, u, rows, bdByPm, pmSet) {
   const off = ccUsageCycleOffset;
   const instRows = new Set(u.series.flatMap(s => s.entries.map(e => e.row)));
-  const listRows = u.cycles.flatMap(c => CCUsageCore.cycleRowsFor(rows.filter(r => ccLc(r.pm) === ccLc(c.pm)), bdByPm, c.idx + off))
-    .filter(r => !instRows.has(r));
-  const items = ccListItems(listRows);
+  const instKeys = new Set([...instRows].map(r => `${r.ref.source}:${r.ref.idx}`));
+  const cycleRows = u.cycles.flatMap(c => CCUsageCore.cycleRowsFor(rows.filter(r => ccLc(r.pm) === ccLc(c.pm)), bdByPm, c.idx + off));
+  const slices = CCUsageCore.categoryTotals(cycleRows, r => instRows.has(r));
+  if (ccSelCat && !slices.some(s => s.key === ccSelCat)) ccSelCat = '';
+  const items = ccListItems(cycleRows);
   const creditSet = ccCreditKeys(items, pmSet);
-  const inst = ccInstallmentsHTML(u, off, bdByPm, g.anchorDate);
+  const keyOf = it => `${it.source}:${it.idx}`;
+  const catOf = it => (it.row.cat || it.row.category || '') || 'Uncategorized';
+  const showInst = ccSelCat === CCUsageCore.INST_KEY;
+  const inst = showInst ? ccInstallmentsHTML(u, off, bdByPm, g.anchorDate) : null;
+  const shown = !ccSelCat ? items
+    : showInst ? []
+    : items.filter(it => !creditSet.has(keyOf(it)) && !instKeys.has(keyOf(it)) && catOf(it) === ccSelCat);
+  const count = showInst ? inst.count : shown.length;
+  const title = ccSelCat ? ccCatLabel(ccSelCat) : 'Transactions';
+  const chip = ccSelCat ? `<span class="ccu-fchip" onclick="ccSelectCat('${escJsAttr(ccSelCat)}')">${esc(ccCatLabel(ccSelCat))} ✕</span>` : '';
   const refIdx = u.cycles.length ? u.cycles[0].idx + off : 0;
   const label = u.cycles.length ? `Cycle ${MO[refIdx % 12]} ${Math.floor(refIdx / 12)}` : '';
+  const body = showInst ? (inst.html || '<div class="empty-state">No installments in this period.</div>')
+    : shown.length ? shown.map(it => renderTxItemHTML(it, '', { creditSet, hidePm: true })).join('')
+    : '<div class="empty-state">No transactions in this period.</div>';
   return `<div class="chart-card">
-      <div class="ccu-list-head"><div class="chart-card-title" style="margin:0">Transactions (${items.length})</div>
+      <div class="ccu-list-head"><div class="chart-card-title" style="margin:0">${slices.length ? 'By category' : 'Transactions'}</div>
         <div class="ccu-nav"><button onclick="ccUsageShiftCycle(-1)" ${off <= -36 ? 'disabled' : ''}>‹</button><span>${esc(label)}</span><button onclick="ccUsageShiftCycle(1)" ${off >= 0 ? 'disabled' : ''}>›</button></div></div>
-      ${inst.html}
-      ${items.length ? items.map(it => renderTxItemHTML(it, '', { creditSet, hidePm: true })).join('') : '<div class="empty-state">No transactions in this period.</div>'}
+      ${slices.length ? `<div class="ccu-donut-wrap">${ccDonutHTML(slices, ccSelCat)}<div class="ccu-legend">${ccLegendHTML(slices, ccSelCat)}</div></div>` : ''}
+      ${slices.length ? `<div class="ccu-list-head ccu-sub"><div class="ccu-sub-title">${esc(title)} (${count})</div>${chip}</div>` : ''}
+      ${body}
     </div>`;
 }
 

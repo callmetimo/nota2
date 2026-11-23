@@ -686,8 +686,6 @@ html.wide .ccu-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-it
 .ccu-big.pos{color:var(--green)}.ccu-big.neg{color:var(--red)}.ccu-big.warn{color:var(--orange)}.ccu-big.pay{color:var(--blue)}
 .ccu-ul{height:3px;border-radius:2px;margin-top:6px}
 .ccu-ul.pos{background:var(--green)}.ccu-ul.neg{background:var(--red)}.ccu-ul.warn{background:var(--orange)}.ccu-ul.pay{background:var(--blue)}
-.ccu-strip{display:flex;align-items:center;justify-content:space-between;gap:8px;background:rgba(167,139,250,0.12);border:0.5px solid rgba(167,139,250,0.4);border-radius:10px;padding:8px 10px;color:#c9bdfc;font-size:13px;cursor:pointer;margin-bottom:8px}
-.ccu-strip.open{border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0}
 .ccu-strip-body{background:var(--bg3);border-radius:0 0 10px 10px;padding:2px 10px 8px;margin-bottom:8px}
 .ccu-irow{padding:8px 0;border-bottom:0.5px solid var(--border)}
 .ccu-irow-t{font-size:13px;font-weight:600}
@@ -698,3 +696,11 @@ html.wide .ccu-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-it
 .ccu-recon{border-top:0.5px solid var(--border);margin-top:6px;padding-top:6px}
 .ccu-pill{flex:1;padding:9px 4px;border-radius:var(--radius-sm);border:0.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:12px;font-weight:500;cursor:pointer;text-align:center}
 .ccu-pill.active{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.ccu-inst-detail{border-radius:10px}
+.ccu-donut-wrap{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:center;margin-bottom:6px}
+.ccu-donut{width:100%;height:auto;display:block}
+.ccu-legend .legend-row{padding:5px 6px}
+.ccu-legend .legend-name{font-size:13px}.ccu-legend .legend-pct{font-size:13px}
+.ccu-sub{margin:12px 0 8px;padding-top:12px;border-top:0.5px solid var(--border)}
+.ccu-sub-title{font-size:14px;font-weight:600}
+.ccu-fchip{font-size:12px;padding:3px 10px;border-radius:12px;background:var(--blue-dim);color:var(--blue);cursor:pointer}

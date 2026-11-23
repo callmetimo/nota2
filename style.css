@@ -701,6 +701,10 @@ html.wide .ccu-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-it
 .ccu-donut{width:100%;height:auto;display:block}
 .ccu-legend .legend-row{padding:5px 6px}
 .ccu-legend .legend-name{font-size:13px}.ccu-legend .legend-pct{font-size:13px}
-.ccu-sub{margin:12px 0 8px;padding-top:12px;border-top:0.5px solid var(--border)}
+.ccu-sub{margin:0 0 8px}
+/* Phone: the donut card and the list card read as one card */
+html:not(.wide) .ccu-cat-card{margin-bottom:0;border-bottom:0;border-bottom-left-radius:0;border-bottom-right-radius:0;padding-bottom:6px}
+html:not(.wide) .ccu-list-card{border-top-left-radius:0;border-top-right-radius:0;padding-top:12px;position:relative}
+html:not(.wide) .ccu-list-card::before{content:'';position:absolute;top:0;left:14px;right:14px;border-top:0.5px solid var(--border)}
 .ccu-sub-title{font-size:14px;font-weight:600}
 .ccu-fchip{font-size:12px;padding:3px 10px;border-radius:12px;background:var(--blue-dim);color:var(--blue);cursor:pointer}

@@ -344,10 +344,11 @@ function ccLegendHTML(slices, sel) {
   }).join('');
 }
 
-// Transactions card for the chosen cycle (each card's own cycle, so mixed billing days stay correct).
-// A donut by category on top picks what the list shows: nothing picked = every transaction of the cycle,
-// a category = that category's charges, Installments = the per-installment detail instead of the list.
-function ccListCardHTML(g, u, rows, bdByPm, pmSet) {
+// Two cards for the chosen cycle (each card's own cycle, so mixed billing days stay correct):
+// `cat` = the donut by category with the cycle navigation, `list` = the transactions it picks. Nothing picked =
+// every transaction of the cycle, a category = that category's charges, Installments = the per-installment detail.
+// On a phone the two sit under each other as one card (CSS); on the wide layout they go in different columns.
+function ccCycleCardsHTML(g, u, rows, bdByPm, pmSet) {
   const off = ccUsageCycleOffset;
   const instRows = new Set(u.series.flatMap(s => s.entries.map(e => e.row)));
   const instKeys = new Set([...instRows].map(r => `${r.ref.source}:${r.ref.idx}`));
@@ -371,13 +372,16 @@ function ccListCardHTML(g, u, rows, bdByPm, pmSet) {
   const body = showInst ? (inst.html || '<div class="empty-state">No installments in this period.</div>')
     : shown.length ? shown.map(it => renderTxItemHTML(it, '', { creditSet, hidePm: true })).join('')
     : '<div class="empty-state">No transactions in this period.</div>';
-  return `<div class="chart-card">
-      <div class="ccu-list-head"><div class="chart-card-title" style="margin:0">${slices.length ? 'By category' : 'Transactions'}</div>
+  const cat = `<div class="chart-card ccu-cat-card">
+      <div class="ccu-list-head" style="margin-bottom:${slices.length ? 12 : 0}px"><div class="chart-card-title" style="margin:0">By category</div>
         <div class="ccu-nav"><button onclick="ccUsageShiftCycle(-1)" ${off <= -36 ? 'disabled' : ''}>‹</button><span>${esc(label)}</span><button onclick="ccUsageShiftCycle(1)" ${off >= 0 ? 'disabled' : ''}>›</button></div></div>
-      ${slices.length ? `<div class="ccu-donut-wrap">${ccDonutHTML(slices, ccSelCat)}<div class="ccu-legend">${ccLegendHTML(slices, ccSelCat)}</div></div>` : ''}
-      ${slices.length ? `<div class="ccu-list-head ccu-sub"><div class="ccu-sub-title">${esc(title)} (${count})</div>${chip}</div>` : ''}
+      ${slices.length ? `<div class="ccu-donut-wrap">${ccDonutHTML(slices, ccSelCat)}<div class="ccu-legend">${ccLegendHTML(slices, ccSelCat)}</div></div>` : '<div class="ccu-muted" style="margin-top:8px">No spending in this period.</div>'}
+    </div>`;
+  const list = `<div class="chart-card ccu-list-card">
+      <div class="ccu-list-head ccu-sub"><div class="ccu-sub-title">${esc(title)} (${count})</div>${chip}</div>
       ${body}
     </div>`;
+  return { cat, list };
 }
 
 function renderCCUsage() {
@@ -404,6 +408,7 @@ function renderCCUsage() {
   const pmSet = new Set(g.pms.map(ccLc));
   const rows = collectCCRows(pmSet);
   const u = CCUsageCore.computeCCUsage(g, rows, todayISO(), bdByPm);
+  const cards = ccCycleCardsHTML(g, u, rows, bdByPm, pmSet);
 
   box.innerHTML = `
     <div class="ccu-actions">
@@ -412,7 +417,7 @@ function renderCCUsage() {
     </div>
     ${ccSelectorHTML(g)}
     ${histLoadFailed ? '<div class="ccu-warn" style="margin:0 0 10px">The full history could not be loaded, so these numbers use cached data and may be incomplete.</div>' : ''}
-    <div class="ccu-grid"><div class="ccu-col">${ccLimitCardHTML(g, u)}</div><div class="ccu-col">${ccListCardHTML(g, u, rows, bdByPm, pmSet)}</div></div>`;
+    <div class="ccu-grid"><div class="ccu-col">${ccLimitCardHTML(g, u)}${cards.cat}</div><div class="ccu-col">${cards.list}</div></div>`;
 }
 
 // ── Group overlay ─────────────────────────────────────────────

@@ -552,6 +552,23 @@ async function saveConfigItem() {
   }
 }
 
+// Adds a Category / Payment Method typed into the input sheet. Returns true when CONFIG_ITEMS
+// changed (caller then runs saveConfigToServer). A same-named archived item is restored.
+function addConfigItemQuiet(kind, name) {
+  const low = name.toLowerCase();
+  const same = CONFIG_ITEMS.filter(i => i.kind === kind && (i.name || '').toLowerCase() === low);
+  if (same.some(i => !i.archived)) return false;
+  if (same.length) { same[0].archived = false; }
+  else {
+    const maxOrder = Math.max(-1, ...CONFIG_ITEMS.filter(i => i.kind === kind).map(i => i.sortOrder));
+    CONFIG_ITEMS.push({ kind, name, color: kind === 'category' ? '#c8f060' : '', ccy: '', assetType: '', linkedPM: '', balance: null, balanceDate: '', showOnInsights: true, creditCard: false, billingDate: 0, creditLimit: 0, archived: false, sortOrder: maxOrder + 1 });
+  }
+  applyConfigToGlobals();
+  try { localStorage.setItem(LS_CONFIG_KEY, JSON.stringify(CONFIG_ITEMS)); } catch(e) {}
+  renderSettingsLists();
+  return true;
+}
+
 async function toggleArchiveCurrentConfigItem() {
   const kind = document.getElementById('configItemKind').value;
   const origName = document.getElementById('configItemOrigName').value;

@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.141';
+const APP_VERSION = 'v4.142';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -706,20 +706,71 @@ function setInvestAction(action, el) {
 }
 
 // ── AUTOCOMPLETE ──────────────────────────────────────────────
+// Pick-only fields (Category / Payment Method / Account / Transfer From+To): read-only so the
+// keyboard never opens; the list's last row ("Add new …") unlocks the field for typing, and the
+// typed name is added to Settings on save (commitNewPickerItems). `kind` null = no "Add new" row.
+const AC_PICKERS = {
+  inputCat:     { kind: 'category', label: 'category',       ph: 'Category...' },
+  inputPm:      { kind: 'pm',       label: 'payment method', ph: 'Method...' },
+  xfrFrom:      { kind: 'pm',       label: 'payment method', ph: 'Source account…' },
+  xfrTo:        { kind: 'pm',       label: 'payment method', ph: 'Destination account…' },
+  inputAccount: { kind: null,       label: 'account',        ph: null }
+};
 function showAC(fid, list) {
   const inp=document.getElementById(fid),dd=document.getElementById('ac-'+fid);
   if(!dd)return;
-  const v=inp.value.toLowerCase();
+  const pk=AC_PICKERS[fid];
+  if(pk&&!inp.readOnly){dd.style.display='none';return} // typing a new name: no list
+  // Pickers show the whole list (the field is read-only, so its value is a selection, not a filter).
+  const v=pk?'':inp.value.toLowerCase();
   const f=v?list.filter(i=>i.toLowerCase().includes(v)):list;
-  if(!f.length){dd.style.display='none';return}
-  dd.innerHTML=f.map(i=>{
+  if(!f.length&&!(pk&&pk.kind)){dd.style.display='none';return}
+  let html=f.map(i=>{
     const safe=esc(i);
     return `<div class="autocomplete-item" data-val="${safe}" data-fid="${fid}" onmousedown="selectAC(this.dataset.fid,this.dataset.val)"><span>${esc(i)}</span></div>`;
   }).join('');
+  if(pk&&pk.kind) html+=`<div class="autocomplete-item autocomplete-add" onclick="startAddNew('${fid}')"><span>＋ Add new ${pk.label}</span></div>`;
+  dd.innerHTML=html;
   dd.style.display='block';
 }
+function startAddNew(fid){
+  const pk=AC_PICKERS[fid],el=document.getElementById(fid),dd=document.getElementById('ac-'+fid);
+  if(!pk||!el)return;
+  if(dd)dd.style.display='none';
+  el.readOnly=false;el.inputMode='text';
+  el.value='';el.placeholder='New '+pk.label+'…';
+  el.focus();
+}
+// Leaving a typed-in field re-locks it. A name that isn't in the lists is remembered in
+// dataset.newItem so the save path can add it to Settings (and only names typed this way — an
+// old transaction's since-archived value is never auto-created).
+document.addEventListener('focusout',e=>{
+  const el=e.target,pk=el&&AC_PICKERS[el.id];
+  if(!pk||el.readOnly)return;
+  el.readOnly=true;el.inputMode='none';
+  el.placeholder=pk.ph||el.placeholder;
+  const v=el.value.trim();
+  const known=[...allCategories,...allPMs,...allAccounts].find(n=>n.toLowerCase()===v.toLowerCase());
+  if(known){el.value=known;el.dataset.newItem='';}
+  else el.dataset.newItem=v;
+  if(el.id==='inputPm'){checkCcInstallmentVisibility();onOpexPmSelect();}
+  if(el.id==='xfrFrom'||el.id==='xfrTo')onXfrAcctSelect();
+});
+// Called by the save paths once validation passed: adds typed-in names to Settings and syncs.
+function commitNewPickerItems(fids){
+  let added=false;
+  fids.forEach(fid=>{
+    const el=document.getElementById(fid),pk=AC_PICKERS[fid];
+    if(!el||!pk||!pk.kind)return;
+    const v=el.value.trim();
+    if(!v||el.dataset.newItem!==v)return;
+    el.dataset.newItem='';
+    if(addConfigItemQuiet(pk.kind,v))added=true;
+  });
+  if(added)saveConfigToServer().catch(err=>showToast('New item saved locally, but not to Settings: '+err.message,'error'));
+}
 function selectAC(fid,val){
-  const el=document.getElementById(fid);if(el)el.value=val;
+  const el=document.getElementById(fid);if(el){el.value=val;el.dataset.newItem='';}
   const dd=document.getElementById('ac-'+fid);if(dd)dd.style.display='none';
   if(fid==='inputTx'){onTxSelect(val);}
   if(fid==='inputStock'){onStockSelect(val);}
@@ -800,7 +851,9 @@ function getSmartCats() {
   const txCat = HIST.txCat || {};
   const key = Object.keys(txCat).find(k => k.toLowerCase() === txLow) ||
               (txLow && Object.keys(txCat).find(k => txLow.includes(k.toLowerCase()) || k.toLowerCase().includes(txLow)));
-  return key ? txCat[key] : allCategories;
+  // This payee's usual categories first, then the rest — picker only offers active Settings items.
+  const first = key ? txCat[key].filter(c => allCategories.includes(c)) : [];
+  return Array.from(new Set([...first, ...allCategories]));
 }
 function getSmartPms() {
   if (inputMode === 'income') {
@@ -813,7 +866,10 @@ function getSmartPms() {
   // Accounts (e.g. a USD account) are included alongside PMs, same as income mode
   // already does — so a foreign-currency account is reachable as a payment source
   // for a travel Expense, not just for crediting Income.
-  return key ? txPm[key] : Array.from(new Set([...allPMs, ...allAccounts]));
+  // This payee's usual PMs first, then everything else (picker has no typing to narrow it).
+  const all = Array.from(new Set([...allPMs, ...allAccounts]));
+  const first = key ? txPm[key].filter(p => all.includes(p)) : [];
+  return Array.from(new Set([...first, ...all]));
 }
 function getSmartTransferPms() {
   return Array.from(new Set([...allAccounts, ...allPMs]));
@@ -1456,6 +1512,7 @@ async function submitOpex() {
   const pm=sanitizeInput(document.getElementById('inputPm').value,50);
   const notes=sanitizeInput(document.getElementById('inputNotes').value,200);
   if(!date||!tx||!amount||!cat||!pm){isSyncing=false;showToast('All fields required','error');return}
+  commitNewPickerItems(['inputCat','inputPm']);
 
   let nativeAmount, ccy;
   ({ amount, nativeAmount, ccy } = toNativeIdr(pm, amount));
@@ -1570,6 +1627,7 @@ function submitTransfer() {
   if (fromPm === toPm) { isSyncing = false; showToast('From and To must be different', 'error'); return; }
   const { ccy: xfrCcy, mismatch: xfrMismatch } = resolveXfrFx();
   if (xfrMismatch) { isSyncing = false; showToast('From and To are different currencies — use Invest to convert', 'error'); return; }
+  commitNewPickerItems(['xfrFrom', 'xfrTo']);
   let nativeAmount = 0, ccy = '';
   if (xfrCcy !== 'IDR') {
     nativeAmount = amount;
@@ -1717,6 +1775,7 @@ async function updateTransferTransaction() {
   if (fromPm === toPm) { showToast('From and To must be different', 'error'); return; }
   const { ccy: xfrCcy, mismatch: xfrMismatch } = resolveXfrFx();
   if (xfrMismatch) { showToast('From and To are different currencies — use Invest to convert', 'error'); return; }
+  commitNewPickerItems(['xfrFrom', 'xfrTo']);
   let nativeAmount = 0, ccy = '';
   if (xfrCcy !== 'IDR') {
     nativeAmount = amount;
@@ -2116,6 +2175,7 @@ async function updateTransaction() {
   // edit actually went through, instead of creating the rule unconditionally the moment
   // this function is called.
   if (!date || !tx || !amount || !cat || !pm) { _suppressVisRefresh = false; showToast('All fields required', 'error'); return false; }
+  commitNewPickerItems(['inputCat', 'inputPm']);
   const isFuture = date > todayISO();
 
   let nativeAmount, ccy;

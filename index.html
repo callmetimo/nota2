@@ -141,8 +141,8 @@
         </div>
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">Category</label>
-          <input type="text" class="form-input" id="inputCat" placeholder="Category..." autocomplete="off" maxlength="50"
-            oninput="showAC('inputCat', getSmartCats())" onfocus="showAC('inputCat', getSmartCats())">
+          <input type="text" class="form-input" id="inputCat" placeholder="Category..." autocomplete="off" maxlength="50" readonly inputmode="none"
+            oninput="showAC('inputCat', getSmartCats())" onfocus="showAC('inputCat', getSmartCats())" onclick="showAC('inputCat', getSmartCats())">
           <div class="autocomplete-list" id="ac-inputCat" style="display:none"></div>
         </div>
       </div>
@@ -156,8 +156,8 @@
         </div>
         <div class="form-group autocomplete-wrapper">
           <label class="form-label" id="inputPmLabel">Payment Method</label>
-          <input type="text" class="form-input" id="inputPm" placeholder="Method..." autocomplete="off" maxlength="50"
-            oninput="showAC('inputPm', getSmartPms()); checkCcInstallmentVisibility()" onfocus="showAC('inputPm', getSmartPms())" onblur="onOpexPmSelect()">
+          <input type="text" class="form-input" id="inputPm" placeholder="Method..." autocomplete="off" maxlength="50" readonly inputmode="none"
+            oninput="showAC('inputPm', getSmartPms()); checkCcInstallmentVisibility()" onfocus="showAC('inputPm', getSmartPms())" onclick="showAC('inputPm', getSmartPms())" onblur="onOpexPmSelect()">
           <div class="autocomplete-list" id="ac-inputPm" style="display:none"></div>
         </div>
       </div>
@@ -245,8 +245,8 @@
         </div>
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">Account</label>
-          <input type="text" class="form-input" id="inputAccount" placeholder="Pay from…" autocomplete="off" maxlength="30"
-            oninput="showAC('inputAccount', getSmartAccounts())" onfocus="showAC('inputAccount', getSmartAccounts())" onblur="onAccountSelect()">
+          <input type="text" class="form-input" id="inputAccount" placeholder="Pay from…" autocomplete="off" maxlength="30" readonly inputmode="none"
+            oninput="showAC('inputAccount', getSmartAccounts())" onfocus="showAC('inputAccount', getSmartAccounts())" onclick="showAC('inputAccount', getSmartAccounts())" onblur="onAccountSelect()">
           <div class="autocomplete-list" id="ac-inputAccount" style="display:none"></div>
         </div>
       </div>
@@ -305,14 +305,14 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">From</label>
-          <input type="text" class="form-input" id="xfrFrom" placeholder="Source account…" autocomplete="off" maxlength="50"
-            oninput="showAC('xfrFrom', getSmartTransferPms())" onfocus="showAC('xfrFrom', getSmartTransferPms())" onblur="onXfrAcctSelect()">
+          <input type="text" class="form-input" id="xfrFrom" placeholder="Source account…" autocomplete="off" maxlength="50" readonly inputmode="none"
+            oninput="showAC('xfrFrom', getSmartTransferPms())" onfocus="showAC('xfrFrom', getSmartTransferPms())" onclick="showAC('xfrFrom', getSmartTransferPms())" onblur="onXfrAcctSelect()">
           <div class="autocomplete-list" id="ac-xfrFrom" style="display:none"></div>
         </div>
         <div class="form-group autocomplete-wrapper">
           <label class="form-label">To</label>
-          <input type="text" class="form-input" id="xfrTo" placeholder="Destination account…" autocomplete="off" maxlength="50"
-            oninput="showAC('xfrTo', getSmartTransferPms())" onfocus="showAC('xfrTo', getSmartTransferPms())" onblur="onXfrAcctSelect()">
+          <input type="text" class="form-input" id="xfrTo" placeholder="Destination account…" autocomplete="off" maxlength="50" readonly inputmode="none"
+            oninput="showAC('xfrTo', getSmartTransferPms())" onfocus="showAC('xfrTo', getSmartTransferPms())" onclick="showAC('xfrTo', getSmartTransferPms())" onblur="onXfrAcctSelect()">
           <div class="autocomplete-list" id="ac-xfrTo" style="display:none"></div>
         </div>
       </div>

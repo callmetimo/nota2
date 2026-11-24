@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.142';
+const APP_VERSION = 'v4.143';
 const APP_BUILD = '2026-11-17a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -729,7 +729,7 @@ function showAC(fid, list) {
     const safe=esc(i);
     return `<div class="autocomplete-item" data-val="${safe}" data-fid="${fid}" onmousedown="selectAC(this.dataset.fid,this.dataset.val)"><span>${esc(i)}</span></div>`;
   }).join('');
-  if(pk&&pk.kind) html+=`<div class="autocomplete-item autocomplete-add" onclick="startAddNew('${fid}')"><span>＋ Add new ${pk.label}</span></div>`;
+  if(pk&&pk.kind) html+=`<div class="autocomplete-item autocomplete-add" onclick="startAddNew('${fid}')"><span>＋ Add new</span></div>`;
   dd.innerHTML=html;
   dd.style.display='block';
 }

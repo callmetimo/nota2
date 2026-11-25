@@ -413,6 +413,73 @@ function toggleRecurringRow() {
   }
 }
 
+// ── COMBINED "READY TO ADD" POPUP ─────────────────────────────────────────────
+// One modal (#pendingPrompt) shared by the recurring-due list and the email-import
+// suggestions, so the two never stack. Each source renders its own section and reports
+// {rows, checked} via set(); this owns open/close and the single Add button.
+const PendingPrompt = (() => {
+  const SECTION = { recurring: 'recurringSection', email: 'emailSection' };
+  const counts = { recurring: { n: 0, checked: 0 }, email: { n: 0, checked: 0 } };
+  const $ = id => document.getElementById(id);
+  function open() { const m = $('pendingPrompt'); if (m) m.classList.add('open'); }
+  function close() { const m = $('pendingPrompt'); if (m) m.classList.remove('open'); }
+  function refresh() {
+    let total = 0, checked = 0;
+    for (const k in counts) {
+      const sec = $(SECTION[k]);
+      if (sec) sec.style.display = counts[k].n ? '' : 'none';
+      total += counts[k].n; checked += counts[k].checked;
+    }
+    const btn = $('pendingAddBtn');
+    if (btn) {
+      btn.textContent = checked ? `Add ${checked} Transaction${checked !== 1 ? 's' : ''}` : 'Done';
+      btn.style.opacity = '1';
+    }
+    if (!total) close();
+  }
+  function set(name, n, checked) {
+    counts[name] = { n, checked };
+    refresh();
+    if (n) open();
+  }
+  // "Decide later": nothing is stamped as handled. Email rows return on the next check; recurring
+  // occurrences are un-flagged as "already prompted" so they are offered again on the next open.
+  function later() {
+    close();
+    if (typeof _recurringPromptLater === 'function') _recurringPromptLater();
+  }
+  function addAll() {
+    if (isSyncing) return;
+    isSyncing = true;
+    const btn = $('pendingAddBtn');
+    if (btn) btn.disabled = true;
+    const release = () => { isSyncing = false; if (btn) btn.disabled = false; };
+    let promises = [];
+    try {
+      if (counts.recurring.n) promises = promises.concat(_addCheckedRecurring());
+      if (counts.email.n) promises = promises.concat(EmailImport.addChecked());
+    } catch (e) {
+      console.error('[pending-prompt] add failed', e && e.message);
+    }
+    saveLocal(); updateStatus();
+    const n = promises.length;
+    if (n) showToast(`${n} transaction${n !== 1 ? 's' : ''} added ✓`, 'success');
+    // Refresh the calendar once every sync has settled so the server already has the rows
+    // when fetchCurrentMonth(true) asks for them (no duplicate between HIST.opex and txHistory).
+    // allSettled, not all: one rejected sync must not leave isSyncing stuck true.
+    Promise.allSettled(promises).then(() => {
+      release();
+      calInited = false;
+      if (document.getElementById('page-home').classList.contains('active')) initCalendar();
+      fetchCurrentMonth(true).then(() => {
+        calInited = false;
+        if (document.getElementById('page-home').classList.contains('active')) initCalendar();
+      });
+    }).catch(e => { console.error('[pending-prompt] post-sync failed', e && e.message); release(); });
+  }
+  return { set, open, close, later, addAll };
+})();
+
 let _pendingRecurring = [];
 
 function checkRecurringOnLoad() {
@@ -448,14 +515,24 @@ function checkRecurringOnLoad() {
     .forEach(k => localStorage.removeItem(k));
 
   _renderRecurringPrompt();
-  document.getElementById('recurringPrompt').classList.add('open');
+}
+
+// "Decide later" in the combined popup: forget that these occurrences were prompted this month
+// so the next app open offers them again (lastFired was never stamped, so they are still due).
+function _recurringPromptLater() {
+  if (!_pendingRecurring.length) return;
+  const promptedKey = 'notapub_rprompt_ids_' + curMonthKey();
+  try {
+    const drop = new Set(_pendingRecurring.map(r => `${r.id}|${r._date}`));
+    const ids = JSON.parse(localStorage.getItem(promptedKey) || '[]').filter(k => !drop.has(String(k)));
+    localStorage.setItem(promptedKey, JSON.stringify(ids));
+  } catch (e) {}
 }
 
 function _renderRecurringPrompt() {
   const n = _pendingRecurring.length;
   document.getElementById('recurringPromptSubtitle').textContent =
-    `${n} transaction${n > 1 ? 's' : ''} ready to add`;
-  document.getElementById('recurringAddBtn').textContent = `Add ${n} Transaction${n > 1 ? 's' : ''}`;
+    `${n} transaction${n > 1 ? 's' : ''} due`;
   const list = document.getElementById('recurringPromptList');
   list.innerHTML = _pendingRecurring.map((r, i) => `
     <label class="recurring-prompt-item">
@@ -466,11 +543,12 @@ function _renderRecurringPrompt() {
       </div>
       <div class="recurring-prompt-amt ${r.type === 'income' ? 'income' : ''}" style="color:${r.type==='income'?'var(--green)':'var(--text)'}">${r.type === 'income' ? '+' : '-'}${fRp(r.amount)}</div>
     </label>`).join('');
+  PendingPrompt.set('recurring', n, n);
 }
 
 function _updateRecurringPromptBtn() {
   const n = document.querySelectorAll('#recurringPromptList input:checked').length;
-  document.getElementById('recurringAddBtn').textContent = `Add ${n} Transaction${n !== 1 ? 's' : ''}`;
+  PendingPrompt.set('recurring', _pendingRecurring.length, n);
 }
 
 // Shared by addSelectedRecurring() (bulk, from the due-popup) and handleProjectedAddSync()
@@ -578,57 +656,26 @@ function handleProjectedSkip() {
   }
 }
 
-function addSelectedRecurring() {
-  // Re-entrancy guard (mirrors submitOpex's isSyncing check): without this, a double-fired
-  // tap/click on #recurringAddBtn (no touchstart/touchend debounce here, unlike .cal-tx-item)
-  // creates two independent txHistory/queue entries with different ids for the same logical
-  // transaction — if only one of the two syncs lands, the other renders as a permanent
-  // duplicate that the calGetMonthData signature dedup correctly declines to hide (it can't
-  // tell an accidental double-add from a genuinely different 3rd transaction).
-  if (isSyncing) return;
-  isSyncing = true;
-  const addBtn = document.getElementById('recurringAddBtn');
-  if (addBtn) addBtn.disabled = true;
-  const checked = [...document.querySelectorAll('#recurringPromptList input[type=checkbox]:checked')];
-  if (!checked.length) {
-    isSyncing = false;
-    if (addBtn) addBtn.disabled = false;
-    dismissRecurringPrompt();
-    return;
-  }
+// Queues the checked occurrences (called by PendingPrompt.addAll, which owns the isSyncing guard,
+// the toast and the calendar refresh). Unchecked ones are dropped: dismissRecurringPrompt() stamps
+// every pending occurrence as handled so the prompt does not re-appear on the next open.
+function _addCheckedRecurring() {
+  const checkedIdx = new Set([...document.querySelectorAll('#recurringPromptList input[type=checkbox]:checked')]
+    .map(cb => +cb.dataset.ridx));
   const rules = loadRecurring();
-  const syncPromises = [];
-  checked.forEach(cb => {
-    const r = _pendingRecurring[+cb.dataset.ridx];
-    if (!r) return;
-    // Mark rule fired
+  const promises = [];
+  _pendingRecurring.forEach((r, i) => {
+    if (!checkedIdx.has(i)) return;
     const idx = rules.findIndex(x => x.id === r.id);
     if (idx !== -1) _stampFiredThrough(rules[idx], r._date);
-    syncPromises.push(_addAndSyncRecurringRule(r));
+    promises.push(_addAndSyncRecurringRule(r));
   });
-  saveLocal(); updateStatus(); saveRecurring(rules);
+  saveRecurring(rules);
   dismissRecurringPrompt();
-  const n = checked.length;
-  showToast(`${n} recurring transaction${n !== 1 ? 's' : ''} added ✓`, 'success');
-  // Refresh calendar after all syncs complete so the server already has the rows
-  // when fetchCurrentMonth(true) requests them — HIST.opex and txHistory (synced=true)
-  // are then consistent and no duplicate appears.
-  Promise.all(syncPromises).then(() => {
-    isSyncing = false;
-    if (addBtn) addBtn.disabled = false;
-    calInited = false;
-    if (document.getElementById('page-home').classList.contains('active')) initCalendar();
-    fetchCurrentMonth(true).then(() => {
-      calInited = false;
-      if (document.getElementById('page-home').classList.contains('active')) initCalendar();
-    });
-  });
+  return promises;
 }
 
 function dismissRecurringPrompt() {
-  document.getElementById('recurringPrompt').classList.remove('open');
-  // Mark every pending occurrence as handled so the prompt does not re-appear on the next
-  // app open (whether the user added or skipped).
   const rules = loadRecurring();
   let changed = false;
   (_pendingRecurring || []).forEach(r => {
@@ -639,6 +686,8 @@ function dismissRecurringPrompt() {
     if (rules[idx].lastFired !== before) changed = true;
   });
   if (changed) saveRecurring(rules);
+  _pendingRecurring = [];
+  PendingPrompt.set('recurring', 0, 0);
 }
 
 // ── RECURRING LIST PAGE ───────────────────────────────────────────────────────

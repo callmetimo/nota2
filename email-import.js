@@ -2,7 +2,7 @@
 // Reads bank notification emails from the signed-in user's own Gmail (read-only, in the
 // browser — nothing is sent to any server other than the user's own Sheet), turns them into
 // suggested transactions and lets the user confirm them in a popup, the same way the
-// "Recurring Today" popup works. Parsing lives in email-parser.js; this file owns Gmail
+// combined "Ready to add" popup (shared with recurring transactions) works. Parsing lives in email-parser.js; this file owns Gmail
 // access, rules/settings storage, the review popup and the Settings page.
 //
 // Depends on globals from index.html / ui-settings.js: Auth, EmailParser, apiGet, apiBody,
@@ -105,7 +105,6 @@ const EmailImport = (() => {
   let editKind = 'expense';      // type chosen in the edit sheet
   let editRuleIdx = -1;          // rules[] index being edited (-1 = new)
   let editAcctIdx = -1;
-  let popupWaitTimer = null;
 
   // ── enabled flag (per device — it also decides which scopes Auth requests) ──
   function isEnabled() { try { return localStorage.getItem(LS_FLAG) === '1'; } catch (e) { return false; } }
@@ -520,17 +519,10 @@ const EmailImport = (() => {
     maybeShowPopup();
   }
 
-  // Never stack on top of the recurring popup; wait for it to close.
-  function maybeShowPopup(attempt = 0) {
-    clearTimeout(popupWaitTimer);
-    if (!pending.length) return;
-    const rp = document.getElementById('recurringPrompt');
-    if (rp && rp.classList.contains('open') && attempt < 40) {
-      popupWaitTimer = setTimeout(() => maybeShowPopup(attempt + 1), 1500);
-      return;
-    }
-    renderPopup();
-    document.getElementById('emailImportPrompt').classList.add('open');
+  // The review list lives in the combined popup (PendingPrompt, recurring.js) beside any due
+  // recurring transactions, so there is nothing to wait for here.
+  function maybeShowPopup() {
+    if (pending.length) renderPopup();
   }
 
   // ── review popup ──────────────────────────────────────────
@@ -573,35 +565,24 @@ const EmailImport = (() => {
     updateAddBtn();
   }
 
+  // Reports this section's row / checked counts to the combined popup, which owns the Add button.
   function updateAddBtn() {
     const n = pending.filter(it => it.checked && isComplete(it)).length;
-    const btn = document.getElementById('emailImportAddBtn');
-    btn.textContent = n ? `Add ${n} Transaction${n !== 1 ? 's' : ''}` : 'Nothing selected';
-    btn.disabled = !n;
-    btn.style.opacity = n ? '1' : '0.4';
+    PendingPrompt.set('email', pending.length, n);
   }
 
   function onCheck(i, v) { if (pending[i]) pending[i].checked = !!v; updateAddBtn(); }
 
-  function closePopup() {   // "Later": nothing is marked handled, items come back next check
-    document.getElementById('emailImportPrompt').classList.remove('open');
+  function closePopup() {   // hides this section only (e.g. email import turned off)
+    PendingPrompt.set('email', 0, 0);
   }
 
-  function skipAll() {
-    markSeen(...pending.flatMap(seenKeys));
-    pending = [];
-    closePopup();
-    renderPage();
-    showToast('Skipped', 'success');
-  }
-
-  function addSelected() {
-    if (isSyncing) return;
+  // Called by PendingPrompt.addAll(), which owns the isSyncing guard, toast and calendar refresh.
+  // Checked rows are queued; unchecked complete rows are dropped (marked seen so they do not
+  // come back). Incomplete (orange) rows can't be checked, so they stay for the user to fill in.
+  function addChecked() {
     const chosen = pending.filter(it => it.checked && isComplete(it));
-    if (!chosen.length) return;
-    isSyncing = true;
-    const btn = document.getElementById('emailImportAddBtn');
-    btn.disabled = true;
+    const dropped = pending.filter(it => !it.checked && isComplete(it));
     const promises = chosen.map(it => isTransfer(it)
       ? addAndSyncTransfer(it)
       : it.kind === 'invest'
@@ -610,36 +591,12 @@ const EmailImport = (() => {
           _date: it.date, tx: it.tx, amount: it.amount, cat: it.cat, pm: it.pm, notes: it.notes,
           type: it.kind === 'income' ? 'income' : 'expense',
         }));
-    markSeen(...chosen.flatMap(seenKeys));
-    const done = new Set(chosen);
-    pending = pending.filter(it => !done.has(it));
-    saveLocal(); updateStatus();
-    const n = chosen.length;
-    showToast(`${n} transaction${n !== 1 ? 's' : ''} added ✓`, 'success');
-    if (pending.length) { renderPopup(); } else { closePopup(); }
+    markSeen(...chosen.concat(dropped).flatMap(seenKeys));
+    const gone = new Set([...chosen, ...dropped]);
+    pending = pending.filter(it => !gone.has(it));
+    renderPopup();
     renderPage();
-    // Promise.all rejects (and skips its .then entirely) the moment any ONE promise
-    // rejects — including one whose underlying sync actually succeeded but whose
-    // post-sync cache write then threw (e.g. a corrupted localStorage value, which
-    // these addAndSync* functions don't guard). That left isSyncing stuck true and
-    // the Add button disabled for the rest of the session, with nothing short of a
-    // reload able to clear it. allSettled waits for every outcome without rejecting
-    // on any of them, so the reset below always runs; the trailing catch is a second
-    // line of defense in case the reset logic itself throws.
-    Promise.allSettled(promises).then(() => {
-      isSyncing = false;
-      btn.disabled = false;
-      calInited = false;
-      if (document.getElementById('page-home').classList.contains('active')) initCalendar();
-      fetchCurrentMonth(true).then(() => {
-        calInited = false;
-        if (document.getElementById('page-home').classList.contains('active')) initCalendar();
-      });
-    }).catch(e => {
-      console.error('[email-import] addSelected sync failed', e && e.message);
-      isSyncing = false;
-      btn.disabled = false;
-    });
+    return promises;
   }
 
   // Same local-first path as submitTransfer() (index.html): optimistic row + queue, then
@@ -1407,7 +1364,7 @@ const EmailImport = (() => {
 
   return {
     init, check, onToggle, connect, checkNow, reopenPopup, onPageOpen, renderPage,
-    copyUnreadable, copyReport, onCheck, closePopup, skipAll, addSelected, openEdit, closeEdit, saveEdit, onRememberToggle,
+    copyUnreadable, copyReport, onCheck, closePopup, addChecked, openEdit, closeEdit, saveEdit, onRememberToggle,
     setEditKind, onRuleTypeChange, openSource, closeSource, saveSource, deleteSource, previewSource,
     setSourceAction, onSourceReaderChange, openPick, closePick, onEditTxInput, pickEmail, openScan, toggleScan, showMoreScan, addScanned, pickAmountLabel, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
     _internals,

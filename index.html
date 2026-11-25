@@ -760,19 +760,25 @@
   </div>
 </nav>
 
-<!-- Email Import: review popup (mirrors the Recurring Prompt below) -->
-<div class="modal-overlay" id="emailImportPrompt" onclick="if(event.target===this)EmailImport.closePopup()">
+<!-- Combined "ready to add" popup: recurring transactions due + email-import suggestions (see PendingPrompt in recurring.js) -->
+<div class="modal-overlay" id="pendingPrompt" onclick="if(event.target===this)PendingPrompt.later()">
   <div class="modal">
     <div class="modal-handle"></div>
-    <div class="modal-title">✉️ New from bank emails</div>
-    <p id="emailImportSubtitle" style="color:var(--text2);font-size:13px;margin:2px 0 14px"></p>
-    <div id="emailImportList"></div>
-    <p style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.4">Orange rows need a category or payment method first — <span data-tap="0">tap</span> them to fill in.</p>
-    <div style="display:flex;gap:10px;margin-top:16px">
-      <button class="submit-btn" style="flex:1;background:var(--bg3);color:var(--text);margin-top:0" onclick="EmailImport.skipAll()">Skip all</button>
-      <button class="submit-btn expense" style="flex:2;margin-top:0" id="emailImportAddBtn" onclick="EmailImport.addSelected()">Add</button>
+    <div class="modal-title">Ready to add</div>
+    <div id="recurringSection" style="display:none">
+      <div class="pending-sec-head">🔁 Recurring</div>
+      <p id="recurringPromptSubtitle" style="color:var(--text2);font-size:13px;margin:2px 0 8px"></p>
+      <div id="recurringPromptList"></div>
     </div>
-    <button class="config-add-btn" style="width:100%;text-align:center;margin-top:10px;color:var(--text2)" onclick="EmailImport.closePopup()">Decide later</button>
+    <div id="emailSection" style="display:none">
+      <div class="pending-sec-head">✉️ From bank emails</div>
+      <p id="emailImportSubtitle" style="color:var(--text2);font-size:13px;margin:2px 0 8px"></p>
+      <div id="emailImportList"></div>
+      <p style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.4">Orange rows need a category or payment method first — <span data-tap="0">tap</span> them to fill in.</p>
+    </div>
+    <p style="font-size:11px;color:var(--text3);margin-top:12px;line-height:1.4">Uncheck anything you don't want — unchecked rows are dropped when you tap Add.</p>
+    <button class="submit-btn expense" style="margin-top:12px" id="pendingAddBtn" onclick="PendingPrompt.addAll()">Add</button>
+    <button class="config-add-btn" style="width:100%;text-align:center;margin-top:10px;color:var(--text2)" onclick="PendingPrompt.later()">Decide later</button>
   </div>
 </div>
 
@@ -973,20 +979,6 @@
       <button class="btn-delete" id="emailAcctDeleteBtn" onclick="EmailImport.deleteAcct()">Delete</button>
       <button class="btn-delete" style="background:var(--bg3);border-color:var(--border);color:var(--text)" onclick="EmailImport.closeAcct()">Cancel</button>
       <button class="btn-save" onclick="EmailImport.saveAcct()">Save</button>
-    </div>
-  </div>
-</div>
-
-<!-- Recurring Prompt Modal -->
-<div class="modal-overlay" id="recurringPrompt">
-  <div class="modal">
-    <div class="modal-handle"></div>
-    <div class="modal-title">🔁 Recurring Today</div>
-    <p id="recurringPromptSubtitle" style="color:var(--text2);font-size:13px;margin:2px 0 14px"></p>
-    <div id="recurringPromptList"></div>
-    <div style="display:flex;gap:10px;margin-top:16px">
-      <button class="submit-btn" style="flex:1;background:var(--bg3);color:var(--text);margin-top:0" onclick="dismissRecurringPrompt()">Skip</button>
-      <button class="submit-btn expense" style="flex:2;margin-top:0" id="recurringAddBtn" onclick="addSelectedRecurring()">Add</button>
     </div>
   </div>
 </div>

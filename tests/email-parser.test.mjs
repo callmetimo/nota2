@@ -172,6 +172,43 @@ Sejumlah	:	USD 20.00`);
   assert.equal(r.nativeAmount, 20);
 });
 
+const debitBody = amt => `Kepada Bapak/Ibu Nasabah yang terhormat,
+
+Berikut kami informasikan detail transaksi Kartu Debit CIMB Niaga Bapak/Ibu:
+
+No. Kartu Debit	:	557692XXXXXXXX64
+Nominal Transaksi	:	${amt}
+Tanggal/Waktu Transaksi	:	2026-03-15
+Lokasi Transaksi	:	MT COOK ALPINE SALMOLAKE PUKAKI NZL`;
+
+t('CIMB debit card purchase in a foreign currency (suffix code) leaves the account amount blank', () => {
+  const r = EmailParser.parse(debitBody('92.37 NZD'), '2026-03-16');
+  assert.equal(r.typeId, 'debit');
+  assert.equal(r.direction, 'expense');
+  assert.equal(r.ccy, 'NZD');
+  assert.equal(r.nativeAmount, 92.37);
+  assert.equal(r.amount, null);
+  assert.equal(r.date, '2026-03-15');
+  assert.equal(r.sourceKey, '557692********64');
+  assert.equal(r.merchant, 'MT COOK ALPINE SALMOLAKE PUKAKI');
+});
+
+t('CIMB debit card purchase works for any currency code, and for plain rupiah', () => {
+  assert.equal(EmailParser.parse(debitBody('1,250.50 JPY'), '').ccy, 'JPY');
+  assert.equal(EmailParser.parse(debitBody('1,250.50 JPY'), '').nativeAmount, 1250.5);
+  assert.equal(EmailParser.parse(debitBody('12.30 USD'), '').nativeAmount, 12.3);
+  const r = EmailParser.parse(debitBody('Rp 45.000,00'), '');
+  assert.equal(r.ccy, 'IDR');
+  assert.equal(r.amount, 45000);
+  assert.equal(EmailParser.parse(debitBody('IDR 45,000.00'), '').amount, 45000);
+});
+
+t('parseAmount reads a code in front or behind, any currency', () => {
+  assert.deepEqual(EmailParser.parseAmount('NZD 92.37'), { ccy: 'NZD', value: 92.37 });
+  assert.deepEqual(EmailParser.parseAmount('92.37 NZD'), { ccy: 'NZD', value: 92.37 });
+  assert.deepEqual(EmailParser.parseAmount('Rp501.755,00'), { ccy: 'IDR', value: 501755 });
+});
+
 t('Incoming BI-FAST is income', () => {
   const r = EmailParser.parse(`Dengan hormat, kami informasikan bahwa telah terjadi penerimaan dana melalui layanan BIFAST dengan detail sebagai berikut:
 

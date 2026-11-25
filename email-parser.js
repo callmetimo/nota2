@@ -22,6 +22,7 @@ const EmailParser = (() => {
     { id: 'flazz',    label: 'Flazz top up',            defaultAction: 'ask' },
     { id: 'transfer', label: 'Transfer to account',     defaultAction: 'ask' },
     { id: 'cc',       label: 'Credit card purchase',    defaultAction: 'ask' },
+    { id: 'debit',    label: 'Debit card purchase',     defaultAction: 'ask' },
     { id: 'ccrefund', label: 'Credit card refund / reversal', defaultAction: 'ask' },
     { id: 'bifast',   label: 'Incoming transfer (BI-FAST)', defaultAction: 'ask' },
     { id: 'ccbill',   label: 'Credit card bill payment (transfer)', defaultAction: 'ask' },
@@ -107,6 +108,13 @@ const EmailParser = (() => {
     if (ccyM) {
       const c = ccyM[1].toUpperCase();
       ccy = (c.startsWith('RP') || c === 'IDR') ? 'IDR' : (c === '$' ? 'USD' : c);
+    } else {
+      // Any other ISO code, in front ("NZD 92.37") or behind ("92.37 NZD", the CIMB debit-card
+      // layout) the number. Upper-case only, so ordinary words are never read as a currency.
+      const pre = s.match(/^([A-Z]{3})(?![A-Za-z])/);
+      const suf = s.match(/\d\s*([A-Z]{3})$/);
+      if (pre) ccy = pre[1];
+      else if (suf) { ccy = suf[1]; s = s.slice(0, s.length - suf[1].length).trim(); }
     }
     s = s.replace(/^(IDR|Rp\.?|[A-Za-z]{3}|\$)\s*/i, '');
     if (/^[-−]/.test(s)) {
@@ -251,6 +259,27 @@ const EmailParser = (() => {
     return out;
   }
 
+  // "Konfirmasi Transaksi Kartu Debit CIMB Niaga": a debit-card purchase. The amount is in the
+  // merchant's currency ("92.37 NZD", any code, or plain Rp), so a foreign one comes back with
+  // amount null + nativeAmount: what the account was really debited (e.g. in USD) is not in the email.
+  function parseCimbDebit(text) {
+    if (!/Kartu Debit/i.test(text) || !/Nominal Transaksi/i.test(text)) return null;
+    const raw = field(text, ['Nominal Transaksi'], true);
+    if (!raw) return null;
+    const out = base('debit', text);
+    const place = cleanMerchant(field(text, ['Lokasi Transaksi'], true));
+    // "MT COOK ALPINE SALMOLAKE PUKAKI NZL": drop the trailing 3-letter country code.
+    const merchant = place.replace(/\s+[A-Z]{3}$/, '') || place;
+    Object.assign(out, {
+      merchant, ref: '', rawType: 'Debit card',
+      date: parseDate(field(text, ['Tanggal/Waktu Transaksi', 'Tanggal Transaksi'], true)),
+      sourceKey: sourceKey(field(text, ['No. Kartu Debit', 'No Kartu Debit', 'Nomor Kartu Debit'], true)),
+      defaultTx: titleCase(merchant) || 'Debit card purchase',
+    });
+    applyAmount(out, raw);
+    return out;
+  }
+
   function parseBifast(text) {
     if (!/penerimaan dana/i.test(text) && !/BI-?FAST/i.test(text)) return null;
     const sender = cleanMerchant(field(text, ['Nama Pengirim'], true));
@@ -300,7 +329,7 @@ const EmailParser = (() => {
     // Type" line that parseBcaJournal would otherwise claim as an expense.
     const out = /Mandiri Cash Management/i.test(text)
       ? parseMandiriCm(text)
-      : (parseBcaJournal(text) || parseCreditCardNotice(text) || parseBifast(text));
+      : (parseBcaJournal(text) || parseCreditCardNotice(text) || parseCimbDebit(text) || parseBifast(text));
     if (!out) return null;
     // "Credit Card Reversal/Void Transaction Notification": same fields as a purchase, but the money
     // comes back — a purchase read as an expense would double the cost instead of cancelling it.
@@ -492,7 +521,7 @@ const EmailParser = (() => {
 
   // Bump whenever parsing improves: the importer re-reads emails it could not read under an older
   // version instead of treating them as "not a transaction" forever.
-  const VERSION = 6;
+  const VERSION = 7;
 
   return { parse, parseGeneric, receiptScore, subjectPattern, pdfItemsToText, guessKeyword, senderName, parseAmount, parseDate, sourceKey, htmlToText, field, TYPES, VERSION };
 })();

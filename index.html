@@ -808,7 +808,7 @@
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group">
         <label class="form-label" id="emailEditPmLabel">Payment Method</label>
-        <select class="form-input" id="emailEditPm"></select>
+        <select class="form-input" id="emailEditPm" onchange="EmailImport.refreshAmountCcy()"></select>
       </div>
       <div class="form-group">
         <label class="form-label">Amount (Rp)</label>

@@ -7,7 +7,7 @@
 //
 // Depends on globals from index.html / ui-settings.js: Auth, EmailParser, apiGet, apiBody,
 // fetchWithTimeout, esc, fRp, isoDisp, showToast, allCategories, allPMs, isSyncing,
-// _addAndSyncRecurringRule, saveLocal, calInited, initCalendar, fetchCurrentMonth.
+// _addAndSyncRecurringRule, toNativeIdr, getOpexPmCcy, saveLocal, calInited, initCalendar, fetchCurrentMonth.
 
 const EmailImport = (() => {
   // Gmail REST access, MIME decoding and PDF text extraction now live in gmail-client.js.
@@ -267,6 +267,23 @@ const EmailImport = (() => {
   function isTransfer(it) { return it.kind === 'transfer'; }
   const KINDS = ['expense', 'income', 'invest', 'transfer'];
 
+  // Currency the row's amount is in. An expense/income paid from a foreign-currency account (e.g.
+  // USD CIMB) is typed in that account's currency, exactly like the Expense form; it converts to
+  // Rp when added. Everything else (transfer, invest, Rp accounts) stays in Rp.
+  function itemCcy(it) {
+    if (it.kind !== 'expense' && it.kind !== 'income') return 'IDR';
+    return typeof getOpexPmCcy === 'function' ? getOpexPmCcy(it.pm) : 'IDR';
+  }
+  function fAmt(it) {
+    const c = itemCcy(it);
+    return c === 'IDR' ? fRp(it.amount) : `${c} ${Number(it.amount).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  }
+  // "54,30" / "54.30" / "1,234.50" in a foreign currency -> number (the Rp parser would drop the decimals).
+  function parseNativeInput(v, ccy) {
+    const r = EmailParser.parseAmount(`${ccy} ${String(v || '').trim()}`).value;
+    return r > 0 ? r : 0;
+  }
+
   function isComplete(it) {
     if (isTransfer(it)) return !!(it.pm && it.toPm && it.pm !== it.toPm && it.amount > 0 && it.date);
     if (it.kind === 'invest') return !!(it.tx && it.pm && it.amount > 0 && it.lot > 0 && it.date);
@@ -301,6 +318,8 @@ const EmailImport = (() => {
       checked: false,
     };
     if (!it.toPm && rule && rule.toPm && pmValid(rule.toPm)) it.toPm = rule.toPm;
+    // Charged in the same currency as the account (a USD purchase on a USD account): nothing to look up.
+    if (!(it.amount > 0) && parsed.ccy !== 'IDR' && parsed.nativeAmount > 0 && itemCcy(it) === parsed.ccy) it.amount = parsed.nativeAmount;
     it.checked = isComplete(it);
     return it;
   }
@@ -547,12 +566,12 @@ const EmailImport = (() => {
         const to = it.toPm ? esc(it.toPm) : orange('Pick card');
         meta = `${from} → ${to} · ${esc(isoDisp(it.date))}`;
       } else {
-        const missing = !it.cat ? 'Pick category' : (!it.pm ? 'Pick payment method' : (!(it.amount > 0) ? 'Enter amount' : ''));
+        const missing = !it.cat ? 'Pick category' : (!it.pm ? 'Pick payment method' : (!(it.amount > 0) ? (itemCcy(it) === 'IDR' ? 'Enter amount' : `Enter ${itemCcy(it)} amount`) : ''));
         meta = `${missing ? orange(missing) : esc(it.cat)} · ${esc(it.pm || '—')} · ${esc(isoDisp(it.date))}`;
       }
       if (it.ambiguous) meta += ' · ' + orange('Check amount');
       if (it.amount > 0 && dupCount[`${it.date}|${it.amount}`] > 1) meta += ' · ' + orange('Possible duplicate');
-      const amt = it.amount > 0 ? ((xfer || inv) ? '' : (income ? '+' : '-')) + fRp(it.amount) : (it.foreign ? esc(it.foreign) : '—');
+      const amt = it.amount > 0 ? ((xfer || inv) ? '' : (income ? '+' : '-')) + fAmt(it) : (it.foreign ? esc(it.foreign) : '—');
       return `<div class="recurring-prompt-item" ${ok ? '' : 'style="border-left:2px solid #ff9500;padding-left:8px"'}>
         <input class="recurring-prompt-check" type="checkbox" data-eidx="${i}" ${it.checked && ok ? 'checked' : ''} ${ok ? '' : 'disabled'} onchange="EmailImport.onCheck(${i}, this.checked)">
         <div class="recurring-prompt-info" onclick="EmailImport.openEdit(${i})" style="cursor:pointer">
@@ -590,6 +609,9 @@ const EmailImport = (() => {
         : _addAndSyncRecurringRule({
           _date: it.date, tx: it.tx, amount: it.amount, cat: it.cat, pm: it.pm, notes: it.notes,
           type: it.kind === 'income' ? 'income' : 'expense',
+          // Foreign-currency account: amount is in that currency; convert to Rp at its average cost
+          // and keep the native figure (same as the Expense form).
+          ...(itemCcy(it) !== 'IDR' ? toNativeIdr(it.pm, it.amount) : {}),
         }));
     markSeen(...chosen.concat(dropped).flatMap(seenKeys));
     const gone = new Set([...chosen, ...dropped]);
@@ -691,7 +713,7 @@ const EmailImport = (() => {
     document.getElementById('emailEditCat').innerHTML = optionsHtml(allCategories, it.cat, 'Pick a category');
     document.getElementById('emailEditPm').innerHTML = optionsHtml(allPMs, it.pm, 'Pick a payment method');
     document.getElementById('emailEditAmount').value = it.amount > 0 ? String(it.amount) : '';
-    document.getElementById('emailEditAmount').placeholder = it.foreign ? `${it.foreign} → enter Rp` : '0';
+    // (placeholder + currency label are set in refreshAmountCcy, called from applyEditKind below)
     document.getElementById('emailEditDate').value = it.date || '';
     document.getElementById('emailEditAction').value = it.action;
     document.getElementById('emailEditLot').value = it.lot > 0 ? String(it.lot) : '1';
@@ -723,11 +745,26 @@ const EmailImport = (() => {
     document.getElementById('emailEditInvestWrap').style.display = inv ? 'grid' : 'none';
     document.getElementById('emailEditPmLabel').textContent = xfer ? 'From' : (inv ? 'Account' : 'Payment Method');
     document.querySelector('#emailEditModal .modal-title').textContent = xfer ? 'Edit transfer' : 'Edit before adding';
-    document.getElementById('emailEditAmount').previousElementSibling.textContent = inv ? 'Total (Rp)' : 'Amount (Rp)';
+    refreshAmountCcy();
     document.getElementById('emailEditRememberHint').textContent = xfer
       ? (it.targetKey ? `Links ${it.sourceKey || 'the paying account'} → From and ${it.targetKey} → To.` : 'Also remembers the type and the To account for this merchant.')
       : (k === 'invest' ? '' : 'Remembers the name, category and payment method for this merchant.') + (it.sourceKey ? ` Also links ${it.sourceKey} to the payment method.` : '');
     onRememberToggle();
+  }
+
+  // The amount box follows the payment method: a foreign-currency account is typed in its own currency.
+  function editCcy() {
+    const pm = document.getElementById('emailEditPm').value;
+    return (editKind === 'expense' || editKind === 'income') && typeof getOpexPmCcy === 'function' ? getOpexPmCcy(pm) : 'IDR';
+  }
+  function refreshAmountCcy() {
+    const it = pending[editIdx];
+    if (!it) return;
+    const c = editCcy(), unit = c === 'IDR' ? 'Rp' : c;
+    const el = document.getElementById('emailEditAmount');
+    el.previousElementSibling.textContent = `${editKind === 'invest' ? 'Total' : 'Amount'} (${unit})`;
+    el.inputMode = c === 'IDR' ? 'numeric' : 'decimal';
+    el.placeholder = it.foreign ? `${it.foreign} → enter ${unit}` : '0';
   }
 
   function onRememberToggle() {
@@ -759,7 +796,9 @@ const EmailImport = (() => {
     // Only carry the name into the rule if the user actually changed it — otherwise a broad
     // match text like "WARUNG" would rename every merchant containing it.
     const ruleBase = tx => ({ mode: 'contains', pattern, tx: tx === it.defaultTx ? '' : tx, type: kind === it.direction ? '' : kind, pm });
-    const amount = parseAmountInput(document.getElementById('emailEditAmount').value);
+    const ccy = editCcy();
+    const rawAmount = document.getElementById('emailEditAmount').value;
+    const amount = ccy === 'IDR' ? parseAmountInput(rawAmount) : parseNativeInput(rawAmount, ccy);
     const date = document.getElementById('emailEditDate').value;
     const pm = document.getElementById('emailEditPm').value;
     if (kind === 'transfer') {
@@ -1365,7 +1404,7 @@ const EmailImport = (() => {
   return {
     init, check, onToggle, connect, checkNow, reopenPopup, onPageOpen, renderPage,
     copyUnreadable, copyReport, onCheck, closePopup, addChecked, openEdit, closeEdit, saveEdit, onRememberToggle,
-    setEditKind, onRuleTypeChange, openSource, closeSource, saveSource, deleteSource, previewSource,
+    setEditKind, refreshAmountCcy, onRuleTypeChange, openSource, closeSource, saveSource, deleteSource, previewSource,
     setSourceAction, onSourceReaderChange, openPick, closePick, onEditTxInput, pickEmail, openScan, toggleScan, showMoreScan, addScanned, pickAmountLabel, openRule, closeRule, saveRule, deleteRule, openAcct, closeAcct, saveAcct, deleteAcct,
     _internals,
   };

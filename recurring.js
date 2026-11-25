@@ -557,7 +557,9 @@ function _updateRecurringPromptBtn() {
 function _addAndSyncRecurringRule(r) {
   const today = r._date || todayISO();  // the occurrence's own date (a backlog item may be older)
   const rec = { id: Date.now() + Math.random(), date: today, tx: r.tx, amount: r.amount,
-    category: r.cat, pm: r.pm, notes: r.notes || '', type: r.type, synced: false };
+    category: r.cat, pm: r.pm, notes: r.notes || '', type: r.type, synced: false,
+    // Foreign-currency account (email import): amount above is the Rp figure, these keep the native one.
+    ...(r.ccy ? { nativeAmount: r.nativeAmount, ccy: r.ccy } : {}) };
   txHistory.unshift(rec);
   queue.push({...rec, action: r.type});
   // Mirror submitOpex: mark synced + write cache AFTER server confirms, not before.
@@ -576,7 +578,8 @@ function _addAndSyncRecurringRule(r) {
     const dateParts = rec.date.split('-');
     const optimisticRow = { d: parseInt(dateParts[2]), cat: rec.category, tx: rec.tx, pm: rec.pm,
       ...(rec.notes ? {notes: rec.notes} : {}),
-      ...(rec.type === 'income' ? {inc: rec.amount} : {exp: rec.amount}) };
+      ...(rec.type === 'income' ? {inc: rec.amount} : {exp: rec.amount}),
+      ...(rec.ccy ? { nativeAmount: rec.nativeAmount, ccy: rec.ccy } : {}) };
     const cachedRows = JSON.parse(localStorage.getItem(cacheKey) || '[]');
     cachedRows.push(optimisticRow);
     localStorage.setItem(cacheKey, JSON.stringify(cachedRows));

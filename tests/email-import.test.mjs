@@ -9,6 +9,8 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const parserSrc = fs.readFileSync(path.join(dir, '..', 'email-parser.js'), 'utf8');
 const importSrc = fs.readFileSync(path.join(dir, '..', 'email-import.js'), 'utf8');
 
+const EP = new Function(parserSrc + '\nreturn EmailParser;')();
+
 let passed = 0;
 function t(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
@@ -38,7 +40,8 @@ function createImportContext() {
       hasValidToken: () => false,
     },
     allCategories: ['Food & Drink', 'Transportation', 'Shopping', 'Utilities'],
-    allPMs: ['BCA', 'Cash', 'CC BCA', 'GoPay', 'CIMB Niaga'],
+    allPMs: ['BCA', 'Cash', 'CC BCA', 'GoPay', 'CIMB Niaga', 'USD CIMB'],
+    getOpexPmCcy: pm => (pm === 'USD CIMB' ? 'USD' : 'IDR'),
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
@@ -46,6 +49,20 @@ function createImportContext() {
   vm.runInContext(importSrc + '\nthis.EmailImport = EmailImport;', sandbox);
   return sandbox.EmailImport._internals;
 }
+
+// ── foreign-currency debit card on a USD account ─────────────
+t('debit card in NZD on a USD account: amount left for the user; in USD it is filled in', () => {
+  const i = createImportContext();
+  i.config.accounts.push({ key: '557692********64', pm: 'USD CIMB' });
+  const body = amt => `No. Kartu Debit\t:\t557692XXXXXXXX64\nNominal Transaksi\t:\t${amt}\nTanggal/Waktu Transaksi\t:\t2026-03-15\nLokasi Transaksi\t:\tMT COOK NZL\nKartu Debit CIMB Niaga`;
+  const nzd = i.buildItem(EP.parse(body('92.37 NZD'), ''), 'g1', null);
+  assert.equal(nzd.pm, 'USD CIMB');
+  assert.equal(nzd.amount, 0);
+  assert.equal(nzd.foreign, 'NZD 92.37');
+  assert.equal(i.isComplete(nzd), false);
+  const usd = i.buildItem(EP.parse(body('12.30 USD'), ''), 'g2', null);
+  assert.equal(usd.amount, 12.3);
+});
 
 // ── buildQuery ───────────────────────────────────────────────
 t('buildQuery: constructs Gmail search query from sources', () => {

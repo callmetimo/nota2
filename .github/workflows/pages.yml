@@ -11,11 +11,11 @@ permissions:
   id-token: write
 
 jobs:
-  deploy:
+  # Build and deploy are separate jobs: deploy-pages looks the artifact up right after
+  # upload-pages-artifact, and doing both in one job intermittently failed with
+  # "No artifacts named github-pages were found" (artifact listing not yet consistent).
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,6 +78,13 @@ jobs:
         with:
           path: '.'
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

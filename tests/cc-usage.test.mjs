@@ -252,4 +252,61 @@ t('categoryTotals: charges only, installments get their own slice, no category =
   assert.deepEqual(C.categoryTotals([]), []);
 });
 
+// ── Estimated interest, checked against the real BCA statements of Oct and Nov 2026 (card statement day 25, due day 10).
+// [transaction date, amount, 'c' = reversal credit]; the four rows dated 24/25 Oct belong to the October statement date
+// in Nota, so they are not in the list (rows on/before the opening-balance date are ignored by design).
+const NOV = [
+  ['10-26',501755],['10-27',707543],['10-28',21000],['10-29',3500000],['10-30',235848],['10-30',707543,'c'],['10-31',45000],
+  ['10-31',22000],['10-31',96000],['11-01',30000],['11-01',30000],['11-01',89200],['11-02',79224],['10-31',15000],['11-02',1420971],
+  ['11-04',37000],['11-04',48000],['11-05',259740],['11-05',473657],['11-05',1420971,'c'],['11-05',34500],['11-05',49049],
+  ['11-05',78924],['11-06',529760],['11-05',25000],['11-07',23200],['11-08',32780],['11-08',85250],['11-08',118000],['11-08',300000],
+  ['11-08',142100],['11-07',37000],['11-10',965430],['11-10',1078542],['11-10',60200],['11-12',15000],['11-14',88310],['11-14',118000],
+  ['11-14',272000],['11-14',839015],['11-15',28380],['11-15',103100],['11-15',85000],['11-14',42000],['11-15',120000],['11-16',94500],
+  ['11-17',274018],['11-17',279672],['11-17',1478687],['11-17',839015,'c'],['11-19',220000],['11-20',1486165],['11-21',118000],
+  ['11-21',22000],['11-21',49000],['11-22',18000],['11-22',39000],['11-22',246100],['11-23',129785]
+];
+const novRows = () => [
+  ...NOV.map(([d, a, k]) => row('2026-' + d, 'CC', k ? 'credit' : 'charge', 'x', a)),
+  row('2026-10-26', 'CC', 'credit', 'Payment', 1000000), row('2026-11-07', 'CC', 'credit', 'Payment', 11000000),
+  row('2026-11-25', 'CC', 'credit', 'Payment', 11000000)
+];
+const bcaGroup = { pms: ['CC'], permanentLimit: 30000000, anchorDate: '2026-10-25', anchorOutstanding: 17908449, dueDay: 10, interestRate: 1.75 };
+
+t('interest: the November 2026 BCA statement (350,950 charged) is estimated within 2%', () => {
+  const u = C.computeCCUsage(bcaGroup, novRows(), '2026-11-25', { cc: 25 });
+  assert.equal(u.interest.state, 'lost');
+  assert.equal(u.interest.due, '2026-11-10');
+  // Without the 302,600 of 24/25 Oct rows (ignored by design) it is about 1.7% low; with them dated 26 Oct it is within 0.3%.
+  assert.ok(Math.abs(u.interest.amount - 350950) < 7000, 'estimate ' + u.interest.amount);
+  const full = [...novRows(), row('2026-10-26', 'CC', 'charge', 'x', 23500), row('2026-10-26', 'CC', 'charge', 'x', 68100),
+    row('2026-10-26', 'CC', 'charge', 'x', 95500), row('2026-10-26', 'CC', 'charge', 'x', 115500)];
+  const uf = C.computeCCUsage(bcaGroup, full, '2026-11-25', { cc: 25 });
+  assert.ok(Math.abs(uf.interest.amount - 350950) < 1000, 'full estimate ' + uf.interest.amount);
+  // it is part of what is used
+  const plain = C.computeCCUsage({ ...bcaGroup, interestRate: 0 }, novRows(), '2026-11-25', { cc: 25 });
+  assert.equal(plain.interest.state, 'off');
+  assert.equal(plain.usedTotal + u.interest.amount, u.usedTotal);
+});
+
+t('interest: paying the whole previous statement by the due date means none; before the due date it is only pending', () => {
+  const paid = [row('2026-11-09', 'CC', 'credit', 'Payment', 17908449), row('2026-11-12', 'CC', 'charge', 'Lunch', 50000)];
+  assert.equal(C.computeCCUsage(bcaGroup, paid, '2026-11-20', { cc: 25 }).interest.state, 'ok');
+  assert.equal(C.computeCCUsage(bcaGroup, paid, '2026-11-20', { cc: 25 }).interest.amount, 0);
+  const early = C.computeCCUsage(bcaGroup, [row('2026-11-02', 'CC', 'credit', 'Payment', 1000000)], '2026-11-08', { cc: 25 });
+  assert.equal(early.interest.state, 'pending');
+  assert.equal(early.interest.amount, 0);
+});
+
+t('interest: the bank\'s own interest row switches the estimate off and is not part of the base; setup is optional', () => {
+  const recorded = [...novRows(), row('2026-11-25', 'CC', 'charge', 'BIAYA BUNGA', 350950)];
+  const u = C.computeCCUsage(bcaGroup, recorded, '2026-11-25', { cc: 25 });
+  assert.equal(u.interest.state, 'recorded');
+  assert.equal(u.interest.amount, 0);
+  assert.equal(C.computeCCUsage({ pms: ['CC'], permanentLimit: 1 }, novRows(), '2026-11-25', { cc: 25 }).interest.state, 'off');
+  // October: previous bill paid in full on 9 Oct, before the 10 Oct due date
+  const oct = { pms: ['CC'], permanentLimit: 30000000, anchorDate: '2026-09-25', anchorOutstanding: 14382668, dueDay: 10, interestRate: 1.75 };
+  const octRows = [row('2026-10-09', 'CC', 'credit', 'Payment', 14382668), row('2026-10-14', 'CC', 'charge', 'Buy', 4436060)];
+  assert.equal(C.computeCCUsage(oct, octRows, '2026-10-25', { cc: 25 }).interest.state, 'ok');
+});
+
 console.log(passed + ' passed');

@@ -24,6 +24,8 @@ function normalizeCCGroups(arr) {
         anchorOutstanding: anchorOk ? num(g.anchorOutstanding) : null,
         pendingAuth: Math.max(0, num(g.pendingAuth)),
         pendingAuthDate: date(g.pendingAuthDate),
+        dueDay: Number.isInteger(+g.dueDay) && +g.dueDay >= 1 && +g.dueDay <= 31 ? +g.dueDay : 0,
+        interestRate: num(g.interestRate) > 0 && num(g.interestRate) <= 20 ? num(g.interestRate) : 0,
         closedSeries: Array.isArray(g.closedSeries) ? g.closedSeries.map(String) : [],
         sortOrder: num(g.sortOrder),
         updatedAt: String(g.updatedAt || '')
@@ -224,7 +226,7 @@ function ccRow(cls, label, value, sub) {
 }
 
 function ccBarHTML(u) {
-  const segs = [['c-stmt', u.statementBalance], ['c-unb', u.unbilled], ['c-inst', u.installmentRemaining],
+  const segs = [['c-stmt', u.statementBalance], ['c-unb', u.unbilled], ['c-int', u.interest.amount], ['c-inst', u.installmentRemaining],
     ['c-pend', u.pendingAuth], ['c-rem', Math.max(0, u.remaining)]].filter(s => s[1] > 0);
   const denom = Math.max(u.activeLimit, segs.reduce((n, s) => n + s[1], 0)) || 1;
   const pct = v => (v / denom * 100).toFixed(2) + '%';
@@ -292,7 +294,7 @@ function ccLimitCardHTML(g, u) {
         <div class="ccu-half"><div class="ccu-muted">${u.overLimit ? 'Over limit' : 'Remaining limit'}</div>
           <div class="ccu-big ${u.overLimit ? 'neg' : 'pos'}">${u.overLimit ? neg(-u.remaining) : fRp(u.remaining)}</div><div class="ccu-ul ${u.overLimit ? 'neg' : 'pos'}"></div></div>
         <div class="ccu-half"><div class="ccu-muted">Total to Pay</div>
-          <div class="ccu-big pay">${fRp(u.statementBalance + u.unbilled)}</div><div class="ccu-ul pay"></div></div>
+          <div class="ccu-big pay">${fRp(u.statementBalance + u.unbilled + u.interest.amount)}</div><div class="ccu-ul pay"></div></div>
       </div>
       <div class="ccu-muted ccu-period-note">of ${fRp(u.activeLimit)} combined limit${periodNote}</div>
       ${periodLines}
@@ -300,7 +302,9 @@ function ccLimitCardHTML(g, u) {
       ${u.tempExpired ? `<div class="ccu-muted">Temporary limit ended ${esc(isoDisp(g.tempLimitExpiry))}: back to the permanent limit</div>` : ''}
       ${ccBarHTML(u)}
       ${ccRow('c-stmt', 'Unpaid Statement', fRp(u.statementBalance))}
+      ${u.interest.state === 'pending' && u.statementBalance > 0 ? `<div class="ccu-hint">Pay this in full by ${esc(ccShortDate(u.interest.due))} to avoid interest</div>` : ''}
       ${ccRow('c-unb', 'Current Spending', fRp(u.unbilled))}
+      ${u.interest.state === 'lost' ? ccRow('c-int', 'Estimated Interest', fRp(u.interest.amount), `· to ${esc(ccShortDate(todayISO()))}`) + `<div class="ccu-hint muted">Statement not paid in full by ${esc(ccShortDate(u.interest.due))}. An estimate, the bank's figure will differ a little. Record the bank's interest row to replace it.</div>` : ''}
       ${ccRow('c-inst', 'Remaining Installments', fRp(u.installmentRemaining))}
       ${u.pendingAuth > 0 ? ccRow('c-pend', 'Pending Holds', fRp(u.pendingAuth), g.pendingAuthDate ? `· updated ${esc(ccShortDate(g.pendingAuthDate))}` : '') : ''}
       ${u.overpayment > 0 ? ccRow('c-over', 'Overpayment', neg(u.overpayment)) : ''}
@@ -448,6 +452,9 @@ function openCCGroupOverlay(id) {
   ccgSetDate('ccgAnchorDate', g ? g.anchorDate : '');
   document.getElementById('ccgAnchorAmt').value = g && g.anchorOutstanding !== null ? formatGroupedAmt(g.anchorOutstanding) : '';
   document.getElementById('ccgPending').value = g && g.pendingAuth ? formatGroupedAmt(g.pendingAuth) : '';
+  // BCA's usual terms are the default; clearing both turns the interest estimate off.
+  document.getElementById('ccgDueDay').value = g && g.dueDay ? g.dueDay : (g && g.interestRate ? '' : 10);
+  document.getElementById('ccgRate').value = g && g.interestRate ? g.interestRate : (g && g.dueDay ? '' : 1.75);
 
   const mine = g ? g.pms.map(p => p.toLowerCase()) : [];
   const owner = {};
@@ -492,6 +499,8 @@ async function saveCCGroup() {
   const anchorDate = document.getElementById('ccgAnchorDateRaw').value;
   const anchorRaw = document.getElementById('ccgAnchorAmt').value.trim();
   const pendingAuth = parseAmt('ccgPending');
+  const dueRaw = document.getElementById('ccgDueDay').value.trim(), rateRaw = document.getElementById('ccgRate').value.trim().replace(',', '.');
+  const dueDay = dueRaw ? Number(dueRaw) : 0, interestRate = rateRaw ? Number(rateRaw) : 0;
   if (!name) return bad('Group name is required');
   if (name.length > 40) return bad('Group name is too long (max 40)');
   if (!pms.length) return bad('Pick at least 1 card');
@@ -500,6 +509,9 @@ async function saveCCGroup() {
   if (!!anchorRaw !== !!anchorDate) return bad('Opening balance needs both a date and an amount');
   if (anchorDate && anchorDate > today) return bad('Opening balance date cannot be in the future');
   if (pendingAuth < 0) return bad('Pending holds cannot be negative');
+  if (!!dueRaw !== !!rateRaw) return bad('Payment due day and interest rate go together (clear both to turn the estimate off)');
+  if (dueRaw && !(Number.isInteger(dueDay) && dueDay >= 1 && dueDay <= 31)) return bad('Payment due day must be 1 to 31');
+  if (rateRaw && !(interestRate > 0 && interestRate <= 20)) return bad('Interest rate must be above 0 and at most 20 % per month');
   const anchorAmount = anchorDate ? parseAmt('ccgAnchorAmt') : null;
 
   ccgSaving = true;
@@ -521,7 +533,7 @@ async function saveCCGroup() {
         name, pms, permanentLimit,
         tempLimit: tempRaw || null, tempLimitExpiry: tempRaw ? tempExpiry : null,
         anchorDate: anchorDate || null, anchorOutstanding: anchorAmount,
-        pendingAuth,
+        pendingAuth, dueDay, interestRate,
         pendingAuthDate: !pendingAuth ? null : (pendingChanged ? today : old.pendingAuthDate),
         closedSeries: old ? old.closedSeries : [],
         sortOrder: old ? old.sortOrder : Math.max(-1, ...groups.map(x => x.sortOrder)) + 1,

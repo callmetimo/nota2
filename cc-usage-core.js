@@ -180,6 +180,58 @@ const CCUsageCore = (() => {
     });
   }
 
+  // ── Estimated interest (BCA rule, derived from real statements)
+  // Paying the whole previous statement by its due date = no interest and a grace period for new spending. Otherwise
+  // BCA charges interest on the whole outstanding balance (previous statement + new spending, minus payments) from
+  // the statement date on. Daily rate = monthly rate / 30; charges and payments both count from the next day.
+  // Fitted on the Oct/Nov 2026 BCA statements: 350,645 estimated vs 350,950 charged (0.09% off).
+  const INTEREST_RE = /bunga|interest/i; // the bank's own interest row ("BIAYA BUNGA"): never part of the base
+  const addDays = (s, n) => {
+    const t = new Date(dayNum(s) * 86400000 + n * 86400000);
+    return iso(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
+  };
+  // First date after `s` that falls on `day` of a month (clamped to the month's length).
+  function nextDueDate(s, day) {
+    const [y, m0] = parts(s);
+    const c = iso(y, m0, Math.min(day, dim(y, m0)));
+    if (c > s) return c;
+    const y2 = m0 === 11 ? y + 1 : y, m2 = m0 === 11 ? 0 : m0 + 1;
+    return iso(y2, m2, Math.min(day, dim(y2, m2)));
+  }
+
+  // state: off (not set up / mixed billing days) | none (no statement balance) | pending (before the due date) |
+  //        ok (paid in full in time) | lost (not paid in full: interest accrues) | recorded (the bank's row is in)
+  function estimateInterest(group, rows, cycles, today, bdByPm) {
+    const off = { state: 'off', amount: 0, due: null, statementDate: null };
+    const rate = +group.interestRate || 0, dueDay = Math.floor(+group.dueDay || 0);
+    if (!(rate > 0) || !(dueDay >= 1 && dueDay <= 31) || !cycles.length) return off;
+    if (!cycles.every(c => c.start === cycles[0].start)) return off;
+    const bd = cycles[0].bd;
+    const stmt = cycleRange(cycles[0].idx - 1, bd).end;           // the previous statement date
+    const due = nextDueDate(stmt, dueDay);
+    const res = (state, amount) => ({ state, amount: amount || 0, due, statementDate: stmt });
+    const hasAnchor = !!group.anchorDate && group.anchorOutstanding != null;
+    if (hasAnchor && group.anchorDate > stmt) return res('none');  // the opening balance sits inside this cycle
+    const live = rows.filter(r => !(hasAnchor && r.date <= group.anchorDate));
+    if (live.some(r => r.kind === 'charge' && r.date > stmt && INTEREST_RE.test(r.tx))) return res('recorded');
+    let b = hasAnchor ? group.anchorOutstanding : 0;
+    live.forEach(r => { if (r.date <= stmt) b += r.kind === 'credit' ? -r.amount : r.amount; });
+    if (!(b > 0)) return res('none');
+    if (today <= due) return res('pending');
+    const paidInTime = live.filter(r => r.kind === 'credit' && r.date > stmt && r.date <= due).reduce((n, r) => n + r.amount, 0);
+    if (paidInTime >= b) return res('ok');
+    // Daily balance from the statement date through today, charges/payments effective from the next day.
+    const ev = live.filter(r => r.date > stmt && !(r.kind === 'charge' && INTEREST_RE.test(r.tx)))
+      .map(r => ({ d: addDays(r.date, 1), a: r.kind === 'credit' ? -r.amount : r.amount }))
+      .sort((x, y) => x.d.localeCompare(y.d));
+    const end = addDays(today, 1);
+    let bal = b, last = stmt, total = 0;
+    const tick = to => { const n = dayNum(to) - dayNum(last); if (n > 0) { total += Math.max(bal, 0) * rate / 100 / 30 * n; last = to; } };
+    for (const e of ev) { if (e.d > end) break; tick(e.d); bal += e.a; }
+    tick(end);
+    return res('lost', Math.round(total));
+  }
+
   function computeCCUsage(group, allRows, today, bdByPm) {
     const tempOk = group.tempLimit > 0 && !!group.tempLimitExpiry;
     const tempActive = tempOk && today <= group.tempLimitExpiry;
@@ -222,7 +274,8 @@ const CCUsageCore = (() => {
     const series = buildSeries(rows, group, today, bdByPm);
     const installmentRemaining = series.reduce((n, s) => n + s.remaining, 0);
     const pendingAuth = group.pendingAuth || 0;
-    const usedTotal = statementBalance + unbilled + installmentRemaining + pendingAuth - overpayment;
+    const interest = estimateInterest(group, rows, cycles, today, bdByPm);
+    const usedTotal = statementBalance + unbilled + installmentRemaining + pendingAuth - overpayment + interest.amount;
     const remaining = activeLimit - usedTotal;
     const sameCycle = cycles.every(c => c.start === cycles[0].start && c.end === cycles[0].end);
 
@@ -232,7 +285,7 @@ const CCUsageCore = (() => {
       cycleSpend: Math.round(cycleSpend), installmentRemaining: Math.round(installmentRemaining),
       pendingAuth, overpayment: Math.round(overpayment), usedTotal: Math.round(usedTotal),
       remaining: Math.round(remaining), overLimit: remaining < 0,
-      cycles, sameCycle, series, missingPms
+      cycles, sameCycle, series, missingPms, interest
     };
   }
 

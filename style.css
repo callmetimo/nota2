@@ -669,7 +669,7 @@ html.wide .modal-handle{display:none}
 .ccu-bar.over{outline:1px solid var(--red)}
 .ccu-seg{height:100%}
 .ccu-limit-mark{position:absolute;top:0;bottom:0;width:2px;background:var(--text)}
-.c-stmt{background:var(--blue)}.c-unb{background:var(--orange)}.c-inst{background:var(--purple)}.c-pend{background:var(--text3)}.c-rem{background:var(--green)}.c-over{background:var(--green-dim)}
+.c-stmt{background:var(--blue)}.c-unb{background:var(--orange)}.c-inst{background:var(--purple)}.c-pend{background:var(--text3)}.c-rem{background:var(--green)}.c-over{background:var(--green-dim)}.c-int{background:var(--red)}
 .ccu-row{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px}
 .ccu-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .ccu-row-l{flex:1}
@@ -711,3 +711,5 @@ html:not(.wide) .ccu-list-card{border-top-left-radius:0;border-top-right-radius:
 html:not(.wide) .ccu-list-card::before{content:'';position:absolute;top:0;left:14px;right:14px;border-top:0.5px solid var(--border)}
 .ccu-sub-title{font-size:14px;font-weight:600}
 .ccu-fchip{font-size:12px;padding:3px 10px;border-radius:12px;background:var(--blue-dim);color:var(--blue);cursor:pointer}
+.ccu-hint{font-size:11px;color:var(--orange);padding:0 0 4px 16px}
+.ccu-hint.muted{color:var(--text2)}

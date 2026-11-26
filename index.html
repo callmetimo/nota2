@@ -1204,6 +1204,16 @@
           <input type="text" class="form-input amount-input" id="ccgPending" placeholder="0" inputmode="decimal" oninput="formatAmountInput(this, event)">
         </div>
       </div>
+      <div class="form-group">
+        <label class="form-label">Interest estimate</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><input type="text" class="form-input" id="ccgDueDay" inputmode="numeric" maxlength="2" placeholder="10">
+            <div class="ccu-muted" style="margin-top:4px">Payment due day (of the month after the statement)</div></div>
+          <div><input type="text" class="form-input" id="ccgRate" inputmode="decimal" maxlength="5" placeholder="1.75">
+            <div class="ccu-muted" style="margin-top:4px">Interest rate, % per month</div></div>
+        </div>
+        <div class="ccu-muted" style="margin-top:6px">Clear both to turn the estimate off.</div>
+      </div>
       <button class="submit-btn expense" onclick="saveCCGroup()" style="margin-top:14px">Save</button>
       <button class="delete-btn" id="ccgDeleteBtn" onclick="deleteCCGroup()" style="display:none">Delete group</button>
     </div>

@@ -23,7 +23,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
   location.replace('https:' + location.href.slice(5));
 }
 
-const APP_VERSION = 'v4.146';
+const APP_VERSION = 'v4.147';
 const APP_BUILD = '2026-11-25a'; // surfaced in the Account page (see #acctInfoBuild) for support diagnostics
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[SW]', e.message));
@@ -790,14 +790,27 @@ function checkCcInstallmentVisibility() {
   const pmVal = document.getElementById('inputPm').value.trim();
   const isCC = isCreditCardPM(pmVal);
   const isExpense = inputMode === 'expense';
-  const isNew = !overlayEditMode;
+  // Editing a saved CC expense can convert it to an installment, unless it already is one.
+  const canConvert = overlayEditMode
+    ? (overlayEditType === 'opex' && !CCUsageCore.parseInstallment(document.getElementById('inputTx').value))
+    : true;
   const row = document.getElementById('installmentRow');
   if (row) {
-    row.style.display = (isCC && isExpense && isNew) ? '' : 'none';
+    row.style.display = (isCC && isExpense && canConvert) ? '' : 'none';
   }
-  if (!isCC || !isExpense || !isNew) {
+  if (!isCC || !isExpense || !canConvert) {
     setInstallmentMode('full');
   }
+  updateInstallmentWarning();
+}
+
+// Edit mode: converting makes today the first installment date (the bank counts from the day of conversion);
+// switching back to Full Payment restores the transaction's own date.
+let instEditPrevDate = null;
+
+function isInstallmentSelected() {
+  const b = document.getElementById('ccInstallmentBtn');
+  return !!b && b.classList.contains('active');
 }
 
 function setInstallmentMode(mode) {
@@ -805,6 +818,18 @@ function setInstallmentMode(mode) {
   const instBtn = document.getElementById('ccInstallmentBtn');
   const container = document.getElementById('installmentPeriodContainer');
   if (!fullBtn || !instBtn || !container) return;
+
+  const wasInst = instBtn.classList.contains('active');
+  const rawEl = document.getElementById('inputDateRaw');
+  const setDate = v => {
+    if (!rawEl) return;
+    rawEl.value = v;
+    document.getElementById('inputDateText').textContent = isoDisp(v);
+  };
+  if (overlayEditMode) {
+    if (mode === 'installment' && !wasInst) { instEditPrevDate = rawEl ? rawEl.value : null; setDate(todayISO()); }
+    else if (mode !== 'installment' && wasInst && instEditPrevDate) { setDate(instEditPrevDate); instEditPrevDate = null; }
+  }
 
   if (mode === 'installment') {
     instBtn.classList.add('active', 'expense');
@@ -819,6 +844,23 @@ function setInstallmentMode(mode) {
   const amtLabel = document.getElementById('inputAmountLabel');
   if (amtLabel) amtLabel.textContent = mode === 'installment' ? 'Total purchase (principal)' : 'Amount';
   updateInstallmentPreview();
+  updateInstallmentWarning();
+}
+
+// Edit mode only: banks convert a charge only before the due date of the statement it is on. Soft warning, never blocks.
+function updateInstallmentWarning() {
+  const el = document.getElementById('installmentWarn');
+  if (!el) return;
+  el.textContent = '';
+  if (!overlayEditMode || !isInstallmentSelected() || !instEditPrevDate) return;
+  const pm = document.getElementById('inputPm').value.trim();
+  const g = typeof ccGroupForPM === 'function' ? ccGroupForPM(pm) : null;
+  const item = CONFIG_ITEMS.find(i => i.kind === 'pm' && i.name.toLowerCase() === pm.toLowerCase());
+  if (!g || !(g.dueDay >= 1) || !item) return;
+  const due = CCUsageCore.statementDueDate(instEditPrevDate, Number(item.billingDate) || 0, g.dueDay);
+  if (todayISO() > due) {
+    el.textContent = `⚠ This charge's statement was due ${isoDisp(due)}. Your bank probably won't convert it any more.`;
+  }
 }
 
 // "3× Rp333.333 · last Rp333.334": the rounding difference lands on the final installment so the parts add up to the principal.
@@ -1316,6 +1358,11 @@ function closeInputOverlay() {
   overlayEditId = null;
   overlayEditMode = false;
   overlayEditType = 'opex';
+  // Installment state must not leak into the next form (cleared first so no date restore happens).
+  instEditPrevDate = null;
+  setInstallmentMode('full');
+  const instMonthsEl = document.getElementById('inputInstallmentMonths');
+  if (instMonthsEl) instMonthsEl.value = '';
   const submitBtn = document.getElementById('submitOpexBtn');
   if (submitBtn) submitBtn.textContent = 'Save Transaction';
   const delBtn = document.getElementById('deleteOpexBtn');
@@ -1469,8 +1516,10 @@ async function submitOpex() {
     // recurring rule below created, before the edit's own network request had resolved —
     // the "guard" did nothing for the part of the edit that actually takes time, and a
     // failed edit still got a recurring rule created as if it had succeeded.
+    // Read before updateTransaction() closes the overlay: an installment never gets a recurring rule.
+    const convertedToInstallment = isInstallmentSelected();
     const updateOk = await updateTransaction();
-    if (updateOk && document.getElementById('inputRecurring').checked) {
+    if (updateOk && !convertedToInstallment && document.getElementById('inputRecurring').checked) {
       const _txDate = document.getElementById('inputDateRaw').value;
       const _sched = _readRecurringSchedule('inputRecurringFreq', 'inputRecurringInterval', 'inputRecurringStart', _txDate);
       if (_sched) {
@@ -1534,14 +1583,9 @@ async function submitOpex() {
   let finalTx = tx;
   let finalNotes = notes;
   if (isInstallment) {
-    finalAmount = Math.round(amount / installmentMonths);
-    if (finalNativeAmount) finalNativeAmount = Math.round((finalNativeAmount / installmentMonths) * 100) / 100;
     // Installments are tracked in CC Usage from the "CICILAN KE X DARI Y" rows, not from a recurring rule.
-    finalTx = `${tx} CICILAN KE 1 DARI ${installmentMonths}`;
-    // The principal tag lets CC Usage compute the exact final installment. Notes are capped at 200,
-    // so cut the user's part, never the tag.
-    const tag = `[pokok:${Math.round(amount)}]`;
-    finalNotes = `${notes.slice(0, 200 - tag.length - 1)} ${tag}`.trim();
+    ({ tx: finalTx, amount: finalAmount, nativeAmount: finalNativeAmount, notes: finalNotes } =
+      CCUsageCore.applyInstallment({ tx, notes, amount, nativeAmount, months: installmentMonths }));
   }
 
   const isFuture = date > todayISO();
@@ -2088,6 +2132,11 @@ function openEditOverlayFromRow(row, dateStr) {
   const sheetId  = tx.sheetId || tx.id || null;
   overlayEditRowIndex = rowIndex;
   overlayEditId       = sheetId;
+  // Start every edit in Full Payment mode (clear the saved date first so nothing is restored).
+  instEditPrevDate = null;
+  setInstallmentMode('full');
+  const instMonthsEl = document.getElementById('inputInstallmentMonths');
+  if (instMonthsEl) instMonthsEl.value = '';
   overlayEditMode = true;
   overlayEditType = 'opex';
 
@@ -2161,12 +2210,14 @@ async function updateTransaction() {
   const rowIndex = overlayEditRowIndex;
   const id = overlayEditId;
   const date   = document.getElementById('inputDateRaw').value;
-  const tx     = document.getElementById('inputTx').value.trim();
+  let tx       = document.getElementById('inputTx').value.trim();
   let amount   = parseGroupedAmt('inputAmount');
   const cat    = document.getElementById('inputCat').value.trim();
   const pm     = document.getElementById('inputPm').value.trim();
-  const notes  = document.getElementById('inputNotes').value.trim();
+  let notes    = document.getElementById('inputNotes').value.trim();
   const isInc  = inputMode === 'income';
+  const toInstallment = isInstallmentSelected() && !isInc && isCreditCardPM(pm);
+  const instMonths = parseInt(document.getElementById('inputInstallmentMonths').value) || 0;
   // Every other exit from this function resets the flag (the queued-item return below,
   // and the try/catch/finally around the network call) — this validation failure was the
   // one path that didn't, so visibility-driven refresh (fetchCurrentMonth on tab-focus)
@@ -2175,11 +2226,20 @@ async function updateTransaction() {
   // edit actually went through, instead of creating the rule unconditionally the moment
   // this function is called.
   if (!date || !tx || !amount || !cat || !pm) { _suppressVisRefresh = false; showToast('All fields required', 'error'); return false; }
+  if (toInstallment && (instMonths < 2 || instMonths > 60)) {
+    _suppressVisRefresh = false;
+    showToast('Installment period must be between 2 and 60 months', 'error');
+    return false;
+  }
   commitNewPickerItems(['inputCat', 'inputPm']);
   const isFuture = date > todayISO();
 
   let nativeAmount, ccy;
   ({ amount, nativeAmount, ccy } = toNativeIdr(pm, amount));
+  // Converting a saved charge: the row becomes installment 1 (dated today, see setInstallmentMode).
+  if (toInstallment) {
+    ({ tx, amount, nativeAmount, notes } = CCUsageCore.applyInstallment({ tx, notes, amount, nativeAmount, months: instMonths }));
+  }
 
   // Snapshot orig values before closeInputOverlay clears them
   const origDate = overlayEditOrigDate;

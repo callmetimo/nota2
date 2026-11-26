@@ -199,6 +199,26 @@ const CCUsageCore = (() => {
     return iso(y2, m2, Math.min(day, dim(y2, m2)));
   }
 
+  // Due date of the statement a charge lands on (statement date of its cycle, then the next dueDay).
+  // Banks only convert a charge to an installment before this date.
+  function statementDueDate(chargeDate, bd, dueDay) {
+    const b = bdEff(bd || 0), [y, m0, d] = parts(chargeDate);
+    return nextDueDate(cycleRange(cycleIdx(y, m0, d, b), b).end, dueDay);
+  }
+
+  // Turns a full-payment charge into installment 1 of `months`. `amount` is the whole purchase (principal).
+  // The monthly share is rounded; the rounding difference is absorbed by the last instalment elsewhere via the
+  // [pokok:P] tag. Notes are capped at 200 chars, so the user's part is cut, never the tag.
+  function applyInstallment({ tx, notes, amount, nativeAmount, months }) {
+    const tag = `[pokok:${Math.round(amount)}]`;
+    return {
+      tx: `${tx} CICILAN KE 1 DARI ${months}`,
+      amount: Math.round(amount / months),
+      nativeAmount: nativeAmount ? Math.round((nativeAmount / months) * 100) / 100 : nativeAmount,
+      notes: `${String(notes || '').slice(0, 200 - tag.length - 1)} ${tag}`.trim()
+    };
+  }
+
   // state: off (not set up / mixed billing days) | none (no statement balance) | pending (before the due date) |
   //        ok (paid in full in time) | lost (not paid in full: interest accrues) | recorded (the bank's row is in)
   function estimateInterest(group, rows, cycles, today, bdByPm) {
@@ -311,5 +331,5 @@ const CCUsageCore = (() => {
       .sort((a, b) => b.amount - a.amount || a.key.localeCompare(b.key));
   }
 
-  return { dim, bdEff, cycleIdx, endDay, dayAfter, cycleRange, parseInstallment, normalizeRows, buildSeries, computeCCUsage, cycleRowsFor, categoryTotals, INST_KEY };
+  return { dim, bdEff, cycleIdx, endDay, dayAfter, cycleRange, parseInstallment, statementDueDate, applyInstallment, normalizeRows, buildSeries, computeCCUsage, cycleRowsFor, categoryTotals, INST_KEY };
 })();

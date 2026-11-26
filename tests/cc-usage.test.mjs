@@ -309,4 +309,22 @@ t('interest: the bank\'s own interest row switches the estimate off and is not p
   assert.equal(C.computeCCUsage(oct, octRows, '2026-10-25', { cc: 25 }).interest.state, 'ok');
 });
 
+t('applyInstallment: monthly share, name suffix, [pokok] tag, notes cap, native amount', () => {
+  const r = C.applyInstallment({ tx: 'Laptop', notes: 'Halle', amount: 1000000, nativeAmount: 0, months: 3 });
+  assert.equal(r.tx, 'Laptop CICILAN KE 1 DARI 3');
+  assert.equal(r.amount, 333333);
+  assert.equal(r.notes, 'Halle [pokok:1000000]');
+  assert.equal(C.parseInstallment(r.tx).y, 3);
+  const long = C.applyInstallment({ tx: 'X', notes: 'n'.repeat(200), amount: 7, months: 2 });
+  assert.equal(long.notes.length, 200);
+  assert.ok(long.notes.endsWith('[pokok:7]'));
+  assert.equal(C.applyInstallment({ tx: 'X', notes: '', amount: 100, nativeAmount: 100, months: 3 }).nativeAmount, 33.33);
+});
+
+t('statementDueDate: due date of the statement a charge is on (bd 25, due 10)', () => {
+  assert.equal(C.statementDueDate('2026-12-01', 25, 10), '2027-01-10'); // Dec 1 -> Dec 25 statement -> Jan 10
+  assert.equal(C.statementDueDate('2026-11-25', 25, 10), '2026-12-10'); // on the cutoff day: Nov 25 statement
+  assert.equal(C.statementDueDate('2026-11-26', 25, 10), '2027-01-10'); // after the cutoff: Dec 25 statement
+});
+
 console.log(passed + ' passed');
